@@ -66,3 +66,76 @@ def test_dispatch_routes_request(client):
     # 'plate' triggers briefing → aide + chronos + ledger
     assert "aide" in body["responses"]
     assert "chronos" in body["responses"]
+    assert "request_id" in body
+
+
+def test_list_agents(client):
+    r = client.get("/api/agents")
+    assert r.status_code == 200
+    names = {a["name"] for a in r.json()["agents"]}
+    assert {"aide", "chronos", "sherlock", "forge", "ledger", "echo", "hearth"} <= names
+
+
+def test_agent_dispatch_explicit_action(client):
+    r = client.post("/api/agents/aide/dispatch", json={"action": "triage"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["agent"] == "aide"
+    assert body["action"] == "triaged"
+
+
+def test_agent_dispatch_text_falls_back_to_default(client):
+    r = client.post("/api/agents/chronos/dispatch", json={"text": "anything"})
+    assert r.status_code == 200
+    assert r.json()["agent"] == "chronos"
+
+
+def test_agent_dispatch_unknown_agent(client):
+    r = client.post("/api/agents/ghost/dispatch", json={"text": "hi"})
+    assert r.status_code == 404
+
+
+def test_agent_dispatch_unknown_action(client):
+    r = client.post("/api/agents/aide/dispatch", json={"action": "nope"})
+    assert r.status_code == 400
+
+
+def test_agent_history_after_dispatch(client):
+    client.post("/api/agents/aide/dispatch", json={"action": "triage"})
+    r = client.get("/api/agents/aide/history?limit=10")
+    assert r.status_code == 200
+    entries = r.json()["entries"]
+    assert any(e["agent"] == "aide" and e["action"] == "triaged" for e in entries)
+
+
+def test_confirmations_lifecycle(client):
+    # Trigger a needs_confirm action via per-agent dispatch
+    r = client.post("/api/agents/ledger/dispatch",
+                    json={"action": "trigger_strategy",
+                          "args": {"strategy_id": "alpha-1", "mode": "paper"}})
+    assert r.status_code == 200
+    assert r.json()["needs_confirm"] is True
+
+    pending = client.get("/api/confirmations?status=pending").json()["confirmations"]
+    assert len(pending) >= 1
+    cid = pending[-1]["id"]
+
+    approved = client.post(f"/api/confirmations/{cid}/approve").json()
+    assert approved["status"] == "approved"
+
+    pending_after = client.get("/api/confirmations?status=pending").json()["confirmations"]
+    assert all(c["id"] != cid for c in pending_after)
+
+
+def test_reject_confirmation(client):
+    client.post("/api/agents/ledger/dispatch",
+                json={"action": "trigger_strategy",
+                      "args": {"strategy_id": "alpha-2", "mode": "paper"}})
+    cid = client.get("/api/confirmations?status=pending").json()["confirmations"][-1]["id"]
+    rejected = client.post(f"/api/confirmations/{cid}/reject").json()
+    assert rejected["status"] == "rejected"
+
+
+def test_reject_unknown_confirmation(client):
+    r = client.post("/api/confirmations/missing/reject")
+    assert r.status_code == 404

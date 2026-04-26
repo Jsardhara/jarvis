@@ -68,3 +68,100 @@ export async function patchTask(id: string, fields: Partial<Task>): Promise<Task
   });
   return ok<Task>(r);
 }
+
+// ─── Mission control: agents + history + confirmations ───
+
+export type AgentResponseEnvelope = {
+  agent: string;
+  intent: string;
+  action: string;
+  result: Record<string, unknown>;
+  follow_ups: string[];
+  confidence: number;
+  needs_confirm: boolean;
+  request_id: string;
+  ts: string;
+};
+
+export type AgentDescriptor = {
+  name: string;
+  description: string;
+  actions: string[];
+};
+
+export type AgentLogEntry = {
+  ts: string;
+  request_id: string;
+  agent: string;
+  action: string;
+  status: "ok" | "error" | "proposed";
+  duration_ms: number;
+  confidence: number;
+  needs_confirm: boolean;
+  summary: string;
+  error: string | null;
+};
+
+export type Confirmation = {
+  id: string;
+  ts: string;
+  agent: string;
+  intent: string;
+  args: Record<string, unknown>;
+  summary: string;
+  status: "pending" | "approved" | "rejected";
+  resolved_ts: string | null;
+  resolved_result: Record<string, unknown> | null;
+};
+
+export type TraceEvent = {
+  type:
+    | "router.classified"
+    | "agent.start"
+    | "agent.done"
+    | "agent.error"
+    | "confirmation.created"
+    | "confirmation.resolved"
+    | "dispatch";
+  request_id: string;
+  ts: string;
+  agent: string | null;
+  payload: Record<string, unknown>;
+};
+
+export async function listAgents(): Promise<AgentDescriptor[]> {
+  const r = await fetch("/api/agents");
+  return (await ok<{ agents: AgentDescriptor[] }>(r)).agents;
+}
+
+export async function dispatchAgent(
+  name: string,
+  body: { action?: string; args?: Record<string, unknown>; text?: string }
+): Promise<AgentResponseEnvelope> {
+  const r = await fetch(`/api/agents/${name}/dispatch`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return ok<AgentResponseEnvelope>(r);
+}
+
+export async function agentHistory(name: string, limit = 20): Promise<AgentLogEntry[]> {
+  const r = await fetch(`/api/agents/${name}/history?limit=${limit}`);
+  return (await ok<{ entries: AgentLogEntry[] }>(r)).entries;
+}
+
+export async function listConfirmations(status: "pending" | "approved" | "rejected" = "pending"): Promise<Confirmation[]> {
+  const r = await fetch(`/api/confirmations?status=${status}`);
+  return (await ok<{ confirmations: Confirmation[] }>(r)).confirmations;
+}
+
+export async function approveConfirmation(id: string): Promise<Confirmation> {
+  const r = await fetch(`/api/confirmations/${id}/approve`, { method: "POST" });
+  return ok<Confirmation>(r);
+}
+
+export async function rejectConfirmation(id: string): Promise<Confirmation> {
+  const r = await fetch(`/api/confirmations/${id}/reject`, { method: "POST" });
+  return ok<Confirmation>(r);
+}
