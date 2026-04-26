@@ -38,6 +38,17 @@
   },
 
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/session_start_inbox.py"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "_comment": "Phase 1: lint Python edits"
