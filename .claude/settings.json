@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Jarvis project settings. Phase 0 scaffold — MCP enable list, hook stubs. Daemon hooks land in Phase 3.",
+
+  "enabledMcpjsonServers": [
+    "github",
+    "exa",
+    "context7",
+    "memory",
+    "sequential-thinking",
+    "playwright",
+    "claude-mem"
+  ],
+
+  "_pending_mcp_oauth": [
+    "Gmail",
+    "Google Calendar",
+    "Google Drive"
+  ],
+
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(python -m jarvis.*)",
+      "Bash(git status)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(gh *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force *)"
+    ]
+  },
+
+  "hooks": {
+    "PostToolUse": [
+      {
+        "_comment": "Phase 1: lint Python edits"
+      }
+    ],
+    "Stop": [
+      {
+        "_comment": "Phase 1: append session digest to state/inbox.jsonl"
+      }
+    ]
+  },
+
+  "env": {
+    "JARVIS_PROJECT_ROOT": "C:\\Users\\jyot2\\jarvis",
+    "JARVIS_STATE_DIR": "C:\\Users\\jyot2\\jarvis\\state",
+    "JARVIS_ATLAS_API": "http://localhost:8000"
+  }
+}

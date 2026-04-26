@@ -1,0 +1,39 @@
+# State + secrets
+state/
+.env
+.env.local
+*.secret
+*.key
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+htmlcov/
+.coverage
+.coverage.*
+
+# Node / web
+node_modules/
+.next/
+dist/
+build/
+
+# Voice runtime
+voice/models/
+voice/recordings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Daemon runtime
+*.pid
+*.log
