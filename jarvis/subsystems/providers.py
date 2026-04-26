@@ -29,7 +29,9 @@ class CalendarProvider(Protocol):
 
 class MockGmail:
     def __init__(self, seed: list[dict] | None = None):
-        self._messages: dict[str, dict] = {m["id"]: m for m in (seed or _seed_emails())}
+        # Empty list must NOT trigger fallback — only None does
+        msgs = _seed_emails() if seed is None else seed
+        self._messages: dict[str, dict] = {m["id"]: m for m in msgs}
         self._sent: list[dict] = []
 
     def list_unread(self, max_results: int = 25) -> list[dict]:
@@ -90,7 +92,8 @@ def _seed_emails() -> list[dict]:
 
 class MockCalendar:
     def __init__(self, seed: list[dict] | None = None):
-        self._events: dict[str, dict] = {e["id"]: e for e in (seed or _seed_events())}
+        evts = _seed_events() if seed is None else seed
+        self._events: dict[str, dict] = {e["id"]: e for e in evts}
 
     def list_events(self, start_iso: str, end_iso: str) -> list[dict]:
         return [
