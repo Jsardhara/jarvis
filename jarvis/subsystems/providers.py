@@ -5,7 +5,7 @@ Phase 1 ships in-memory mock implementations. Phase 1.5 swaps to MCP
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
 
@@ -54,7 +54,7 @@ class MockGmail:
             "to": to,
             "subject": subject,
             "body": body,
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
         }
         self._sent.append(rec)
         return rec
@@ -129,7 +129,7 @@ class MockCalendar:
 
 
 def _seed_events() -> list[dict]:
-    today = datetime.now(timezone.utc).date().isoformat()
+    today = datetime.now(UTC).date().isoformat()
     return [
         {
             "id": "ev1",

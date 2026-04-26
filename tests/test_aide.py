@@ -2,11 +2,11 @@
 from __future__ import annotations
 
 from jarvis.subsystems.aide import (
-    Aide,
     TIER_ACTION,
     TIER_INFO,
     TIER_MEETING,
     TIER_SKIP,
+    Aide,
     classify_message,
 )
 from jarvis.subsystems.providers import MockGmail

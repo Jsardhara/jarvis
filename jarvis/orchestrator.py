@@ -11,8 +11,7 @@ from typing import Any
 
 from .contract import AgentResponse, IntentClassification
 from .router import classify
-from .state import read_inbox, load_tasks
-
+from .state import load_tasks, read_inbox
 
 SubsystemHandler = Callable[[str], Awaitable[AgentResponse]]
 

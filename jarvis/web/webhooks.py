@@ -32,7 +32,7 @@ from ..subsystems.echo import Echo
 log = logging.getLogger(__name__)
 
 
-def make_app(echo: Echo | None = None) -> "FastAPI":  # pragma: no cover - thin wrapper
+def make_app(echo: Echo | None = None) -> FastAPI:  # pragma: no cover - thin wrapper
     if not HAS_FASTAPI:
         raise RuntimeError("fastapi not installed — pip install jarvis[web]")
     echo = echo or Echo()
@@ -83,7 +83,7 @@ def make_app(echo: Echo | None = None) -> "FastAPI":  # pragma: no cover - thin 
         }
         triage = echo.triage([msg])
         append_inbox(InboxEvent(agent="echo", severity="info",
-                                summary=f"discord msg",
+                                summary="discord msg",
                                 ref={"msg": msg, "triage": triage.result["counts"]}))
         return JSONResponse({"ok": True})
 

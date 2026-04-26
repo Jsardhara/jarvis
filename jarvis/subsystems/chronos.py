@@ -1,7 +1,7 @@
 """Chronos — calendar + tasks."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from ..contract import AgentResponse, Task
 from ..state import add_task, load_tasks, update_task
@@ -9,7 +9,7 @@ from .providers import CalendarProvider
 
 
 def _today_window() -> tuple[str, str]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + timedelta(days=1)
     return start.isoformat(), end.isoformat()
@@ -88,7 +88,7 @@ class Chronos:
         )
 
     def complete(self, task_id: str) -> AgentResponse:
-        updated = update_task(task_id, status="done", updated=datetime.now(timezone.utc).isoformat())
+        updated = update_task(task_id, status="done", updated=datetime.now(UTC).isoformat())
         return AgentResponse(
             agent="chronos",
             intent="complete_task",

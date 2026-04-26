@@ -6,12 +6,11 @@ in process_utterance is fully testable.
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 
 from .stt import STTProvider
 from .tts import TTSProvider
 from .wake import WakeDetector
-
 
 HandleFn = Callable[[str], Awaitable[dict]]
 
@@ -55,7 +54,7 @@ def _voice_summary(response: dict) -> str:
 
 async def run_voice_loop(detector: WakeDetector, stt: STTProvider, tts: TTSProvider,
                          handle: HandleFn,
-                         audio_source: Callable[[], "Iterable[bytes]"] | None = None):  # pragma: no cover
+                         audio_source: Callable[[], Iterable[bytes]] | None = None):  # pragma: no cover
     """One-shot voice cycle. Real loop wraps this in `while True`."""
     if audio_source is None:
         raise RuntimeError("audio_source required (sounddevice or fixture)")

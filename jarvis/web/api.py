@@ -19,11 +19,10 @@ try:
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
-from ..contract import AgentResponse, Task
+from ..contract import Task
 from ..orchestrator import Orchestrator
 from ..state import (
     add_task,
-    append_inbox,
     load_tasks,
     read_inbox,
     update_task,
@@ -93,7 +92,7 @@ class _Broadcaster:
                 self._subs.remove(s)
 
 
-def make_app(orchestrator: Orchestrator | None = None) -> "FastAPI":
+def make_app(orchestrator: Orchestrator | None = None) -> FastAPI:
     if not HAS_FASTAPI:
         raise RuntimeError("fastapi not installed — pip install jarvis[web]")
     o = orchestrator or _build_orchestrator()

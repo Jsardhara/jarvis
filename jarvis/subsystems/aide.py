@@ -4,7 +4,6 @@ from __future__ import annotations
 from ..contract import AgentResponse
 from .providers import GmailProvider
 
-
 # Triage tiers — informed by chief-of-staff skill
 TIER_SKIP = "skip"
 TIER_INFO = "info_only"

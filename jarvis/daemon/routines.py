@@ -10,7 +10,7 @@ from typing import Any
 
 from ..contract import InboxEvent
 from ..state import append_inbox
-from ..subsystems.aide import Aide, TIER_ACTION
+from ..subsystems.aide import TIER_ACTION, Aide
 from ..subsystems.chronos import Chronos
 from ..subsystems.ledger import Ledger
 from ..subsystems.sherlock import Sherlock

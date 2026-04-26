@@ -1,7 +1,7 @@
 """Agent contract — every subsystem agent returns this envelope."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class AgentResponse(BaseModel):
