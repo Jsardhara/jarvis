@@ -1,15 +1,19 @@
 """Ledger — finance + ATLAS bridge.
 
-Thin HTTP client over ATLAS FastAPI. ATLAS endpoints discovered:
-- /portfolio, /positions, /trades, /signals, /strategies, /agents, /system
+Thin HTTP client over ATLAS FastAPI. Verified ATLAS routes (api/routers/*):
+- GET  /system/health
+- GET  /portfolio                 — current snapshot
+- GET  /portfolio/history?limit=  — historical snapshots
+- GET  /trades, /trades/open, /trades/stats, /trades/{id}
+- POST /trades/{id}/close
+- GET  /strategies, /strategies/{id}
+- POST /strategies/{id}/activate, /strategies/{id}/archive, /strategies/generate
 
 When ATLAS is offline, the client falls back to a deterministic mock so
 the orchestrator and daemon can still answer "what would my portfolio
 look like" without crashing.
 """
 from __future__ import annotations
-
-from typing import Any
 
 import httpx
 
@@ -50,21 +54,25 @@ class AtlasClient:
         return out is not None
 
     def portfolio(self) -> dict | None:
-        return self._get("/portfolio") or self._get("/portfolio/summary")
+        return self._get("/portfolio")
 
     def open_positions(self) -> list[dict] | None:
-        out = self._get("/positions/open") or self._get("/portfolio/positions")
+        out = self._get("/trades/open")
         if isinstance(out, list):
             return out
         if isinstance(out, dict):
-            return out.get("positions", [])
+            return out.get("trades") or out.get("positions") or []
         return None
 
     def pnl(self, window: str = "1d") -> dict | None:
-        return self._get(f"/portfolio/pnl?window={window}") or self._get(f"/pnl?window={window}")
+        # ATLAS exposes aggregate trade stats; window currently advisory.
+        out = self._get("/trades/stats")
+        if isinstance(out, dict):
+            out.setdefault("window", window)
+        return out
 
     def run_strategy(self, strategy_id: str, mode: str = "paper") -> dict | None:
-        return self._post("/strategies/run", {"id": strategy_id, "mode": mode})
+        return self._post(f"/strategies/{strategy_id}/activate", {"mode": mode})
 
     def close(self) -> None:
         self._client.close()

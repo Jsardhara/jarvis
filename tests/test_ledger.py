@@ -53,7 +53,7 @@ def test_portfolio_raises_when_mock_disabled():
 
 def test_positions_normalizes_list_response():
     transport = _transport({
-        "GET /positions/open": httpx.Response(200, json=[
+        "GET /trades/open": httpx.Response(200, json=[
             {"id": "p1", "symbol": "BTC", "side": "long"}
         ]),
     })
@@ -65,8 +65,7 @@ def test_positions_normalizes_list_response():
 
 def test_positions_normalizes_dict_response():
     transport = _transport({
-        "GET /positions/open": httpx.Response(404),
-        "GET /portfolio/positions": httpx.Response(200, json={"positions": [{"symbol": "ETH"}]}),
+        "GET /trades/open": httpx.Response(200, json={"trades": [{"symbol": "ETH"}]}),
     })
     led = Ledger(client=AtlasClient("http://t", transport=transport))
     resp = led.positions()
@@ -75,12 +74,13 @@ def test_positions_normalizes_dict_response():
 
 def test_pnl_real():
     transport = _transport({
-        "GET /portfolio/pnl?window=1d": httpx.Response(200, json={"pnl_usd": 50}),
+        "GET /trades/stats": httpx.Response(200, json={"pnl_usd": 50}),
     })
     led = Ledger(client=AtlasClient("http://t", transport=transport))
     resp = led.pnl()
     assert resp.result["mock"] is False
     assert resp.result["pnl"]["pnl_usd"] == 50
+    assert resp.result["pnl"]["window"] == "1d"
 
 
 def test_trigger_strategy_proposes_with_confirm():
@@ -92,7 +92,7 @@ def test_trigger_strategy_proposes_with_confirm():
 
 def test_trigger_strategy_confirmed_calls_post():
     transport = _transport({
-        "POST /strategies/run": httpx.Response(200, json={"id": "alpha-1", "status": "queued"}),
+        "POST /strategies/alpha-1/activate": httpx.Response(200, json={"id": "alpha-1", "status": "queued"}),
     })
     led = Ledger(client=AtlasClient("http://t", transport=transport))
     resp = led.trigger_strategy_confirmed("alpha-1", mode="paper")
