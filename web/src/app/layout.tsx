@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { JetBrains_Mono, IBM_Plex_Sans } from "next/font/google";
+import { JetBrains_Mono, Fraunces } from "next/font/google";
 import { Shell } from "@/components/Shell";
 import { WsProvider } from "@/lib/ws";
 import "./globals.css";
@@ -9,11 +9,12 @@ const mono = JetBrains_Mono({
   variable: "--font-mono-loaded",
   display: "swap",
 });
-const sans = IBM_Plex_Sans({
+
+const display = Fraunces({
   subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  variable: "--font-sans-loaded",
+  variable: "--font-display-loaded",
   display: "swap",
+  axes: ["opsz"],
 });
 
 export const metadata: Metadata = {
@@ -23,7 +24,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${mono.variable} ${sans.variable}`}>
+    <html lang="en" className={`${mono.variable} ${display.variable}`}>
       <body>
         <WsProvider>
           <Shell>{children}</Shell>

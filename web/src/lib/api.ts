@@ -71,6 +71,12 @@ export async function patchTask(id: string, fields: Partial<Task>): Promise<Task
 
 // ─── Mission control: agents + history + confirmations ───
 
+export type VerificationDict = {
+  status: "verified" | "inference" | "unknown" | "post_state_checked";
+  evidence?: string;
+  checked_at?: string;
+};
+
 export type AgentResponseEnvelope = {
   agent: string;
   intent: string;
@@ -81,6 +87,10 @@ export type AgentResponseEnvelope = {
   needs_confirm: boolean;
   request_id: string;
   ts: string;
+  /** Tier 1-5; default 5 until back ships classify.py */
+  tier?: number;
+  /** Verification status; default {status:"unknown"} until back ships verify.py */
+  verification?: VerificationDict;
 };
 
 export type AgentDescriptor = {
