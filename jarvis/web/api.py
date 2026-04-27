@@ -17,6 +17,7 @@ from uuid import uuid4
 try:
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import StreamingResponse
     HAS_FASTAPI = True
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
@@ -292,6 +293,38 @@ def make_app(orchestrator: Orchestrator | None = None,
                                           payload={"confirmation": updated.model_dump()}
                                           ).model_dump()})
         return updated.model_dump()
+
+    # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ─────────────────────
+
+    _jarvis_chat: dict[str, Any] = {"instance": None}
+
+    def _get_jarvis():
+        if _jarvis_chat["instance"] is None:
+            from ..jarvis_agent import JarvisChat
+            _jarvis_chat["instance"] = JarvisChat(registry=reg)
+        return _jarvis_chat["instance"]
+
+    @app.post("/api/jarvis/chat")
+    async def jarvis_chat(payload: dict[str, Any]) -> StreamingResponse:
+        message = str(payload.get("message", "")).strip()
+        if not message:
+            raise HTTPException(status_code=400, detail="message required")
+        chat = _get_jarvis()
+
+        async def gen():
+            try:
+                async for ev in chat.stream(message):
+                    line = json.dumps({"type": ev.type, **ev.payload}, default=str)
+                    yield f"data: {line}\n\n"
+            except Exception as exc:  # pragma: no cover
+                log.exception("jarvis chat stream failed")
+                err = json.dumps({"type": "error", "message": str(exc)})
+                yield f"data: {err}\n\n"
+
+        return StreamingResponse(gen(), media_type="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        })
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):  # pragma: no cover - websocket runtime

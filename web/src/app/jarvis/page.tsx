@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   CircleDashed,
   Loader2,
+  Brain,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -20,44 +21,42 @@ import { cn } from "@/lib/utils";
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 const JARVIS_API = process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
-const JARVIS_WS = JARVIS_API.replace(/^http/, "ws") + "/ws";
 
-interface TraceEvent {
-  type: string;
-  request_id: string;
+interface ToolCall {
+  toolUseId: string;
   agent: string;
-  ts: string;
-  payload?: Record<string, unknown>;
+  action: string;
+  args: Record<string, unknown>;
+  result?: ToolResult;
+}
+
+interface ToolResult {
+  text: string;
+  isError: boolean;
+  parsed?: AgentResponse;
 }
 
 interface AgentResponse {
-  agent: string;
-  intent: string;
-  action: string;
+  agent?: string;
+  intent?: string;
+  action?: string;
   result?: Record<string, unknown>;
   follow_ups?: string[];
-  confidence?: number;
   needs_confirm?: boolean;
   tier?: number;
   verification?: { status?: string };
-  request_id?: string;
-}
-
-interface DispatchResult {
-  request_id: string;
-  intent?: { primary?: string; rationale?: string };
-  responses?: Record<string, AgentResponse>;
-  needs_confirm?: boolean;
 }
 
 interface Turn {
   id: string;
   user: string;
-  startedAt: string;
-  completedAt?: string;
-  events: TraceEvent[];
-  result?: DispatchResult;
-  error?: string;
+  text: string;
+  toolCalls: ToolCall[];
+  status: "streaming" | "done" | "error";
+  thinking: string;
+  costUsd?: number;
+  durationMs?: number;
+  errorMessage?: string;
 }
 
 // ─── Visual helpers ─────────────────────────────────────────────────────────
@@ -79,7 +78,8 @@ const TIER_TONE: Record<number, string> = {
 };
 
 function VerificationPill({ status }: { status?: string }) {
-  const norm = (status ?? "unknown").toLowerCase();
+  if (!status) return null;
+  const norm = status.toLowerCase();
   const tone =
     norm === "verified"
       ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
@@ -101,15 +101,8 @@ export default function JarvisPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
-  const [wsState, setWsState] = useState<"connecting" | "open" | "closed">("connecting");
-  const wsRef = useRef<WebSocket | null>(null);
-  const turnsRef = useRef<Turn[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-
-  // Keep ref in sync so the WS handler always reads the latest turns.
-  useEffect(() => {
-    turnsRef.current = turns;
-  }, [turns]);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Auto-scroll to bottom when new content arrives.
   useEffect(() => {
@@ -118,108 +111,74 @@ export default function JarvisPage() {
     node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
   }, [turns]);
 
-  // WebSocket connection — reconnect on close.
-  useEffect(() => {
-    let cancelled = false;
-    let ws: WebSocket | null = null;
-    let retry = 0;
-
-    function connect() {
-      if (cancelled) return;
-      try {
-        ws = new WebSocket(JARVIS_WS);
-      } catch {
-        setWsState("closed");
-        return;
-      }
-      wsRef.current = ws;
-      setWsState("connecting");
-
-      ws.onopen = () => {
-        retry = 0;
-        setWsState("open");
-      };
-
-      ws.onmessage = (evt) => {
-        let parsed: TraceEvent | null = null;
-        try {
-          parsed = JSON.parse(evt.data);
-        } catch {
-          return;
-        }
-        if (!parsed || !parsed.request_id) return;
-        const requestId = parsed.request_id;
-        setTurns((prev) => {
-          const next = prev.map((t) =>
-            t.id === requestId ? { ...t, events: [...t.events, parsed!] } : t,
-          );
-          return next;
-        });
-      };
-
-      ws.onerror = () => {
-        setWsState("closed");
-      };
-
-      ws.onclose = () => {
-        setWsState("closed");
-        if (cancelled) return;
-        retry = Math.min(retry + 1, 6);
-        setTimeout(connect, 500 * 2 ** retry);
-      };
-    }
-
-    connect();
-    return () => {
-      cancelled = true;
-      if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-    };
-  }, []);
-
   const send = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || busy) return;
     setBusy(true);
-    const startedAt = new Date().toISOString();
+    setInput("");
 
-    let result: DispatchResult | undefined;
-    let dispatchError: string | undefined;
+    const turnId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const fresh: Turn = {
+      id: turnId,
+      user: trimmed,
+      text: "",
+      toolCalls: [],
+      status: "streaming",
+      thinking: "",
+    };
+    setTurns((prev) => [...prev, fresh]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      const res = await fetch(`${JARVIS_API}/api/dispatch`, {
+      const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request: trimmed }),
+        body: JSON.stringify({ message: trimmed }),
+        signal: controller.signal,
       });
-      if (!res.ok) {
-        dispatchError = `HTTP ${res.status}`;
-      } else {
-        result = (await res.json()) as DispatchResult;
+      if (!res.ok || !res.body) {
+        throw new Error(`HTTP ${res.status}`);
       }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const raw of events) {
+          const line = raw.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          try {
+            const evt = JSON.parse(payload) as Record<string, unknown>;
+            applyEvent(turnId, evt, setTurns);
+          } catch {
+            // ignore malformed event
+          }
+        }
+      }
+      setTurns((prev) =>
+        prev.map((t) => (t.id === turnId && t.status === "streaming" ? { ...t, status: "done" } : t)),
+      );
     } catch (err) {
-      dispatchError = err instanceof Error ? err.message : "request failed";
+      const msg = err instanceof Error ? err.message : "request failed";
+      setTurns((prev) =>
+        prev.map((t) =>
+          t.id === turnId ? { ...t, status: "error", errorMessage: msg } : t,
+        ),
+      );
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
     }
-
-    const requestId = result?.request_id ?? `local-${Date.now()}`;
-    const completedAt = new Date().toISOString();
-
-    setTurns((prev) => {
-      // If the WebSocket already started populating events under request_id,
-      // merge them into the new turn record; otherwise create a fresh one.
-      const existing = prev.find((t) => t.id === requestId);
-      const fresh: Turn = {
-        id: requestId,
-        user: trimmed,
-        startedAt,
-        completedAt,
-        events: existing?.events ?? [],
-        result,
-        error: dispatchError,
-      };
-      const filtered = prev.filter((t) => t.id !== requestId);
-      return [...filtered, fresh];
-    });
-    setInput("");
-    setBusy(false);
   }, [busy, input]);
 
   const onKeyDown = useCallback(
@@ -238,9 +197,10 @@ export default function JarvisPage() {
         "Talk to Jarvis…",
         "what's on my calendar today",
         "triage my inbox",
-        "research recent AI news",
-        "paper-scan markets",
-      ][turns.length % 5],
+        "research recent AI hardware moves",
+        "paper-scan the markets and report",
+        "what's the morning briefing look like",
+      ][turns.length % 6],
     [turns.length],
   );
 
@@ -252,19 +212,17 @@ export default function JarvisPage() {
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-primary" />
           <h1 className="text-xl font-semibold">Talk to Jarvis</h1>
+          <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
+            opus 4.7 · soul-loaded
+          </Badge>
         </div>
-        <ConnectionPill state={wsState} />
       </div>
 
       <Card className="flex-1 overflow-hidden">
         <CardContent className="flex h-full flex-col gap-3 p-0">
           <ScrollArea className="flex-1">
-            <div ref={scrollRef} className="space-y-4 p-4">
-              {turns.length === 0 ? (
-                <EmptyHero />
-              ) : (
-                turns.map((t) => <TurnView key={t.id} turn={t} />)
-              )}
+            <div ref={scrollRef} className="space-y-6 p-4">
+              {turns.length === 0 ? <EmptyHero /> : turns.map((t) => <TurnView key={t.id} turn={t} />)}
             </div>
           </ScrollArea>
 
@@ -285,7 +243,7 @@ export default function JarvisPage() {
               </Button>
             </div>
             <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Enter to send · Shift+Enter for newline · Ctrl+C in terminal won't cancel a dispatch
+              Enter to send · Shift+Enter for newline · Jarvis can delegate to tempo / scholar / lens / forge / atlas
             </p>
           </div>
         </CardContent>
@@ -294,28 +252,84 @@ export default function JarvisPage() {
   );
 }
 
-// ─── Sub-components ─────────────────────────────────────────────────────────
+// ─── Stream applier ─────────────────────────────────────────────────────────
 
-function ConnectionPill({ state }: { state: "connecting" | "open" | "closed" }) {
-  const tone =
-    state === "open"
-      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-      : state === "connecting"
-        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-        : "bg-red-500/15 text-red-700 dark:text-red-400";
-  return (
-    <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider", tone)}>
-      live trace · {state}
-    </Badge>
+function applyEvent(
+  turnId: string,
+  evt: Record<string, unknown>,
+  setTurns: React.Dispatch<React.SetStateAction<Turn[]>>,
+) {
+  const type = String(evt.type ?? "");
+  setTurns((prev) =>
+    prev.map((t) => {
+      if (t.id !== turnId) return t;
+      switch (type) {
+        case "text":
+          return { ...t, text: t.text + String(evt.delta ?? "") };
+        case "thinking":
+          return { ...t, thinking: t.thinking + String(evt.delta ?? "") };
+        case "tool_use": {
+          const call: ToolCall = {
+            toolUseId: String(evt.tool_use_id ?? ""),
+            agent: String(evt.agent ?? ""),
+            action: String(evt.action ?? ""),
+            args: (evt.args as Record<string, unknown>) ?? {},
+          };
+          // Skip non-delegate built-ins (e.g. ToolSearch) so we don't clutter UI.
+          if (String(evt.name ?? "").includes("delegate") === false && !call.agent) {
+            return t;
+          }
+          return { ...t, toolCalls: [...t.toolCalls, call] };
+        }
+        case "tool_result": {
+          const id = String(evt.tool_use_id ?? "");
+          const text = String(evt.text ?? "");
+          let parsed: AgentResponse | undefined;
+          try {
+            parsed = JSON.parse(text) as AgentResponse;
+          } catch {
+            parsed = undefined;
+          }
+          return {
+            ...t,
+            toolCalls: t.toolCalls.map((c) =>
+              c.toolUseId === id
+                ? {
+                    ...c,
+                    result: { text, isError: Boolean(evt.is_error), parsed },
+                  }
+                : c,
+            ),
+          };
+        }
+        case "done":
+          return {
+            ...t,
+            status: "done",
+            costUsd: typeof evt.total_cost_usd === "number" ? evt.total_cost_usd : t.costUsd,
+            durationMs: typeof evt.duration_ms === "number" ? evt.duration_ms : t.durationMs,
+          };
+        case "error":
+          return {
+            ...t,
+            status: "error",
+            errorMessage: String(evt.message ?? "stream error"),
+          };
+        default:
+          return t;
+      }
+    }),
   );
 }
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
 
 function EmptyHero() {
   const samples = [
     "what's on my calendar today",
     "triage my inbox",
     "look up news on AI hardware",
-    "open PR to fix the auth bug in jarvis",
+    "open a PR fixing the auth bug in jarvis",
     "paper trade BTC scan",
   ];
   return (
@@ -323,7 +337,9 @@ function EmptyHero() {
       <Sparkles className="mx-auto h-10 w-10 text-primary/70" />
       <h2 className="text-lg font-semibold">Tell Jarvis what you need.</h2>
       <p className="text-sm text-muted-foreground">
-        He&apos;ll classify the tier, check authority, route it to the right subsystem (tempo / atlas / lens / forge / scholar) and you&apos;ll see the live delegation trace below.
+        Opus 4.7 with the OpenClaw soul. He&apos;ll think, decide which subsystem
+        to delegate to (tempo / scholar / lens / forge / atlas), call the tool,
+        and synthesize the answer for you.
       </p>
       <div className="flex flex-wrap justify-center gap-2 pt-1">
         {samples.map((s) => (
@@ -345,82 +361,90 @@ function TurnView({ turn }: { turn: Turn }) {
         </div>
       </div>
 
-      <DelegationTrace turn={turn} />
+      {turn.toolCalls.length > 0 && <DelegationTrace calls={turn.toolCalls} />}
 
-      {turn.error && (
+      {turn.errorMessage && (
         <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-700 dark:text-red-400">
           <AlertTriangle className="h-4 w-4" />
-          {turn.error}
+          {turn.errorMessage}
         </div>
       )}
 
-      {turn.result && <FinalResponseCard result={turn.result} />}
+      {turn.thinking && <ThinkingPanel thinking={turn.thinking} />}
+
+      {turn.text && (
+        <div className="rounded-2xl border bg-muted/40 px-4 py-2 text-sm whitespace-pre-wrap">
+          {turn.text}
+          {turn.status === "streaming" && (
+            <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-foreground align-middle" />
+          )}
+        </div>
+      )}
+
+      {turn.status !== "streaming" && (turn.costUsd !== undefined || turn.durationMs !== undefined) && (
+        <div className="flex justify-end gap-3 text-[10px] text-muted-foreground">
+          {turn.durationMs !== undefined && <span>{(turn.durationMs / 1000).toFixed(1)}s</span>}
+          {turn.costUsd !== undefined && <span>${turn.costUsd.toFixed(4)}</span>}
+        </div>
+      )}
     </div>
   );
 }
 
-function DelegationTrace({ turn }: { turn: Turn }) {
-  if (!turn.events.length && !turn.result && !turn.error) {
-    return (
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" /> Routing…
-      </div>
-    );
-  }
+function ThinkingPanel({ thinking }: { thinking: string }) {
+  return (
+    <details className="group rounded-md border bg-muted/30 px-3 py-2 text-xs">
+      <summary className="flex cursor-pointer items-center gap-2 text-muted-foreground">
+        <Brain className="h-3 w-3" />
+        thinking
+      </summary>
+      <pre className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+        {thinking}
+      </pre>
+    </details>
+  );
+}
 
-  // Group events by agent in arrival order; collapse start/done pairs.
-  const byAgent = new Map<string, TraceEvent[]>();
-  for (const ev of turn.events) {
-    const list = byAgent.get(ev.agent) ?? [];
-    list.push(ev);
-    byAgent.set(ev.agent, list);
-  }
-  const order = Array.from(byAgent.keys());
-
+function DelegationTrace({ calls }: { calls: ToolCall[] }) {
   return (
     <div className="space-y-1.5">
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delegation</div>
       <ol className="space-y-1.5 border-l pl-4">
-        {order.map((agent) => {
-          const evs = byAgent.get(agent) ?? [];
-          const startEv = evs.find((e) => e.type.endsWith(".start"));
-          const doneEv = evs.find((e) => e.type.endsWith(".done"));
-          const errEv = evs.find((e) => e.type.endsWith(".error"));
-          const status = errEv ? "error" : doneEv ? "ok" : "running";
-          const payload = (doneEv ?? startEv)?.payload ?? {};
-          const tier = typeof payload.tier === "number" ? (payload.tier as number) : undefined;
-          const action =
-            typeof payload.action === "string"
-              ? (payload.action as string)
-              : typeof payload.intent === "string"
-                ? (payload.intent as string)
-                : undefined;
-          const verification =
-            typeof payload.verification_status === "string"
-              ? (payload.verification_status as string)
-              : undefined;
-          const duration =
-            typeof payload.duration_ms === "number" ? (payload.duration_ms as number) : undefined;
-
+        {calls.map((c) => {
+          const status = c.result ? (c.result.isError ? "error" : "ok") : "running";
+          const tier = c.result?.parsed?.tier;
+          const verification = c.result?.parsed?.verification?.status;
+          const intent = c.result?.parsed?.intent;
+          const needsConfirm = c.result?.parsed?.needs_confirm;
           return (
-            <li key={agent} className="-ml-[7px] flex items-start gap-2">
-              <StatusDot status={status} />
-              <div className="flex flex-1 flex-wrap items-center gap-1.5 text-xs">
-                <span className="font-mono font-semibold">{agent}</span>
-                {action && <ArrowRight className="h-3 w-3 text-muted-foreground" />}
-                {action && <span className="font-mono text-muted-foreground">{action}</span>}
-                {tier !== undefined && (
-                  <Badge variant="outline" className={cn("text-[10px]", TIER_TONE[tier] ?? "")}>
-                    {TIER_LABEL[tier] ?? `T${tier}`}
-                  </Badge>
-                )}
-                {verification && <VerificationPill status={verification} />}
-                {duration !== undefined && (
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                    {duration} ms
-                  </span>
-                )}
+            <li key={c.toolUseId} className="-ml-[7px]">
+              <div className="flex items-start gap-2">
+                <StatusDot status={status} />
+                <div className="flex flex-1 flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-mono font-semibold">{c.agent || "?"}</span>
+                  <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                  <span className="font-mono text-muted-foreground">{c.action || "?"}</span>
+                  {tier !== undefined && (
+                    <Badge variant="outline" className={cn("text-[10px]", TIER_TONE[tier] ?? "")}>
+                      {TIER_LABEL[tier] ?? `T${tier}`}
+                    </Badge>
+                  )}
+                  <VerificationPill status={verification} />
+                  {needsConfirm && (
+                    <Badge variant="outline" className="text-[10px] uppercase bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                      needs confirm
+                    </Badge>
+                  )}
+                  {intent && status === "ok" && (
+                    <span className="font-mono text-[10px] text-muted-foreground">→ {intent}</span>
+                  )}
+                </div>
               </div>
+              {c.result && c.result.parsed?.result && (
+                <pre className="ml-5 mt-1 max-h-40 overflow-x-auto rounded bg-muted/50 p-2 text-[11px]">
+                  {JSON.stringify(c.result.parsed.result, null, 2).slice(0, 1000)}
+                </pre>
+              )}
             </li>
           );
         })}
@@ -433,91 +457,4 @@ function StatusDot({ status }: { status: "running" | "ok" | "error" }) {
   if (status === "ok") return <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />;
   if (status === "error") return <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />;
   return <CircleDashed className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" />;
-}
-
-function FinalResponseCard({ result }: { result: DispatchResult }) {
-  const responses = result.responses ?? {};
-  const agentNames = Object.keys(responses);
-  if (agentNames.length === 0) {
-    if (result.intent?.rationale) {
-      return (
-        <div className="rounded-md border bg-muted/40 p-3 text-sm">
-          <div className="mb-1 text-[11px] uppercase tracking-wider text-muted-foreground">Jarvis</div>
-          {result.intent.rationale}
-        </div>
-      );
-    }
-    return null;
-  }
-
-  return (
-    <div className="space-y-2">
-      {agentNames.map((agent) => {
-        const r = responses[agent];
-        return (
-          <div key={agent} className="rounded-md border bg-muted/40 p-3 text-sm">
-            <div className="mb-1 flex items-center gap-2">
-              <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                {agent}
-              </span>
-              {r.tier !== undefined && (
-                <Badge variant="outline" className={cn("text-[10px]", TIER_TONE[r.tier] ?? "")}>
-                  {TIER_LABEL[r.tier] ?? `T${r.tier}`}
-                </Badge>
-              )}
-              <VerificationPill status={r.verification?.status} />
-              {r.needs_confirm && (
-                <Badge variant="outline" className="text-[10px] uppercase bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                  needs confirm
-                </Badge>
-              )}
-            </div>
-            <ResultPayload result={r.result} />
-            {r.follow_ups && r.follow_ups.length > 0 && (
-              <div className="mt-2 border-t pt-2 text-xs text-muted-foreground">
-                <span className="font-medium">follow-ups:</span>{" "}
-                {r.follow_ups.join(" · ")}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function ResultPayload({ result }: { result?: Record<string, unknown> }) {
-  if (!result) return null;
-  // Common shapes Jarvis returns — render them friendly when we recognize.
-  const events = result["events"];
-  if (Array.isArray(events) && events.length > 0) {
-    return (
-      <ul className="space-y-1 text-sm">
-        {events.slice(0, 8).map((e, i) => {
-          const ev = e as Record<string, unknown>;
-          return (
-            <li key={i} className="flex flex-wrap items-baseline gap-2">
-              <span className="font-medium">{String(ev.summary ?? ev.title ?? "(event)")}</span>
-              {typeof ev.start === "string" && (
-                <span className="text-xs text-muted-foreground">{ev.start}</span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    );
-  }
-  const items = result["items"] ?? result["tasks"] ?? result["buckets"];
-  if (items) {
-    return (
-      <pre className="overflow-x-auto rounded bg-muted/50 p-2 text-[11px]">
-        {JSON.stringify(items, null, 2).slice(0, 1200)}
-      </pre>
-    );
-  }
-  return (
-    <pre className="overflow-x-auto rounded bg-muted/50 p-2 text-[11px]">
-      {JSON.stringify(result, null, 2).slice(0, 1200)}
-    </pre>
-  );
 }
