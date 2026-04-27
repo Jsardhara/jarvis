@@ -1,26 +1,35 @@
-"""Jarvis chatbot — Claude Opus 4.7 with the OpenClaw soul.
+"""Jarvis chatbot — Sonnet/Opus auto-routing with the OpenClaw soul.
 
-Wraps the claude-agent-sdk ClaudeSDKClient so the user can talk to Jarvis
-in natural language. Jarvis has tools for delegating to each subsystem
-(tempo / scholar / lens / forge / atlas) — every tool call also flows
-through the existing AgentDescriptor.call() so verification, tier, and
-memory are recorded the same way as direct dispatches.
+Wraps the claude-agent-sdk ``ClaudeSDKClient``. Each user turn is routed
+through ``jarvis.model_router.decide_model`` to either:
+
+    Sonnet 4.6  — chitchat, lookups, short turns. Lite soul.
+    Opus 4.7    — heavy tasks, code, sensitive actions. Full soul.
+
+A ``/opus `` or ``/sonnet `` prefix forces the lane.
+
+Two persistent SDK clients are held side-by-side; each owns its own
+session so prompt caching stays warm. When routing flips lanes between
+turns, a brief recap of the last 3 turn pairs is prepended to the new
+lane's first call so Jarvis doesn't appear to forget what just happened.
 
 Streaming
 ---------
 ``JarvisChat.stream(message)`` yields a sequence of typed events the web
 layer turns into SSE frames:
 
-    {"type": "text",     "delta": "...token..."}
-    {"type": "tool_use", "agent": "tempo", "action": "today", "args": {...}, "tool_use_id": "..."}
-    {"type": "tool_result", "tool_use_id": "...", "result": {...}}
-    {"type": "done"}
-    {"type": "error", "message": "..."}
+    {"type": "model",       "model": "...", "reason": "...", "tier": int, "manual": bool}
+    {"type": "text",        "delta": "...token..."}
+    {"type": "tool_use",    "agent": "tempo", "action": "today", "args": {...}, "tool_use_id": "..."}
+    {"type": "tool_result", "tool_use_id": "...", "is_error": bool, "text": "..."}
+    {"type": "done",        "duration_ms": int, "is_error": bool, "total_cost_usd": float, ...}
+    {"type": "error",       "message": "..."}
 """
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,19 +49,36 @@ from claude_agent_sdk import (
     tool,
 )
 
+from jarvis.model_router import (
+    DEFAULT_OPUS_ID,
+    DEFAULT_SONNET_ID,
+    RouteDecision,
+    decide_model,
+)
 from jarvis.subsystems.registry import AgentDescriptor, build_default_registry
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "claude-opus-4-7"
-SOUL_FILENAME = "jarvis_soul.md"
+DEFAULT_MODEL = DEFAULT_OPUS_ID  # back-compat alias
+SOUL_FULL = "jarvis_soul.md"
+SOUL_LITE = "jarvis_soul_lite.md"
+
+_RECAP_TURN_PAIRS = 3
+_RECAP_MAX_CHARS = 800
+_TURN_LOG_MAX = 12  # 6 user + 6 assistant
 
 
 # ---------- Soul loader ----------
 
 
-def load_soul() -> str:
-    here = Path(__file__).parent / "personas" / SOUL_FILENAME
+def load_soul(variant: str = "full") -> str:
+    """Read the soul markdown for the given variant.
+
+    ``variant="full"`` → opus lane (full doctrine).
+    ``variant="lite"`` → sonnet lane (identity + tone + tool contract only).
+    """
+    filename = SOUL_FULL if variant == "full" else SOUL_LITE
+    here = Path(__file__).parent / "personas" / filename
     return here.read_text(encoding="utf-8")
 
 
@@ -106,7 +132,9 @@ def _build_delegate_tool(registry: dict[str, AgentDescriptor]):
         action = str(args.get("action", "")).strip()
         call_args = args.get("args") or {}
         if agent_name not in registry:
-            return _err(f"unknown agent {agent_name!r}; choose tempo / scholar / lens / forge / atlas")
+            return _err(
+                f"unknown agent {agent_name!r}; choose tempo / scholar / lens / forge / atlas"
+            )
         desc = registry[agent_name]
         if action not in desc.actions:
             return _err(
@@ -145,30 +173,49 @@ class StreamEvent:
     payload: dict[str, Any]
 
 
+# Type alias for an injectable model-router (used in tests).
+RouteFn = Callable[[str], tuple[RouteDecision, str]]
+
+
 class JarvisChat:
-    """One persistent SDK client. Conversation history lives inside the SDK
-    session (each ``query`` is a new turn in the same session)."""
+    """Two-client pool with per-turn routing + cross-lane recap.
+
+    The ``model`` kwarg is preserved for back-compat: when explicitly set,
+    routing is bypassed and every turn uses that model with the full soul.
+    """
 
     def __init__(
         self,
         registry: dict[str, AgentDescriptor] | None = None,
-        model: str = DEFAULT_MODEL,
-        soul: str | None = None,
+        model: str | None = None,
+        opus_model: str = DEFAULT_OPUS_ID,
+        sonnet_model: str = DEFAULT_SONNET_ID,
+        route: RouteFn | None = None,
     ):
         self._registry = registry or build_default_registry()
-        self._soul = soul or load_soul()
-        self._model = model
-        self._client: ClaudeSDKClient | None = None
+        self._opus_model = opus_model
+        self._sonnet_model = sonnet_model
+        self._forced_model = model  # if set, routing is bypassed
+        self._route_fn = route or self._default_route
+        self._clients: dict[str, ClaudeSDKClient] = {}
+        self._connected: set[str] = set()
+        self._last_lane: str | None = None
+        self._turn_log: list[dict[str, str]] = []
 
-    def _build_client(self) -> ClaudeSDKClient:
-        if self._client is not None:
-            return self._client
-        delegate = _build_delegate_tool(self._registry)
-        srv = create_sdk_mcp_server(name="jarvis-team", version="0.1.0", tools=[delegate])
+    # ----- routing -----
+
+    def _default_route(self, message: str) -> tuple[RouteDecision, str]:
+        return decide_model(message, opus_id=self._opus_model, sonnet_id=self._sonnet_model)
+
+    # ----- soul + client construction -----
+
+    def _system_for(self, model: str) -> str:
+        variant = "full" if model == self._opus_model else "lite"
+        soul = load_soul(variant)
         agents_block = "\n".join(
             f"- **{name}** — {desc}" for name, desc in _AGENT_DESCRIPTIONS.items()
         )
-        system_addendum = (
+        addendum = (
             "\n\n---\n\n## Tool use\n\n"
             "You have one tool, `delegate(agent, action, args)`. Use it to dispatch "
             "to your team. Available agents and their actions:\n\n"
@@ -177,48 +224,139 @@ class JarvisChat:
             "response for Jyot. Do not pretend to act on his behalf without "
             "actually calling the tool."
         )
-        full_system = self._soul + system_addendum
+        return soul + addendum
+
+    def _build_client_for(self, model: str) -> ClaudeSDKClient:
+        if model in self._clients:
+            return self._clients[model]
+        delegate = _build_delegate_tool(self._registry)
+        srv = create_sdk_mcp_server(name="jarvis-team", version="0.1.0", tools=[delegate])
         opts = ClaudeAgentOptions(
-            model=self._model,
-            system_prompt=full_system,
+            model=model,
+            system_prompt=self._system_for(model),
             mcp_servers={"jarvis-team": srv},
             allowed_tools=["mcp__jarvis-team__delegate"],
-            permission_mode="bypassPermissions",  # tool calls are pre-authorized via authority gate
+            permission_mode="bypassPermissions",
         )
-        self._client = ClaudeSDKClient(options=opts)
-        return self._client
+        client = ClaudeSDKClient(options=opts)
+        self._clients[model] = client
+        return client
 
-    async def connect(self) -> None:
-        client = self._build_client()
+    # ----- recap -----
+
+    def _recap(self) -> str | None:
+        """Return a short context recap of the last few turn pairs, or None."""
+        if not self._turn_log:
+            return None
+        # Take the last N user/assistant pairs
+        pairs: list[tuple[str, str]] = []
+        user_buf: str | None = None
+        for entry in self._turn_log:
+            if entry["role"] == "user":
+                user_buf = entry["text"]
+            elif entry["role"] == "assistant" and user_buf is not None:
+                pairs.append((user_buf, entry["text"]))
+                user_buf = None
+        if not pairs:
+            return None
+        recent = pairs[-_RECAP_TURN_PAIRS:]
+        lines = ["[Earlier in this thread, on a different model:]"]
+        for u, a in recent:
+            lines.append(f"- You said: {u.strip()[:200]}")
+            lines.append(f"- I responded: {a.strip()[:200]}")
+        recap = "\n".join(lines)
+        return recap[:_RECAP_MAX_CHARS]
+
+    def _record_turn(self, role: str, text: str) -> None:
+        if not text:
+            return
+        self._turn_log.append({"role": role, "text": text})
+        if len(self._turn_log) > _TURN_LOG_MAX:
+            self._turn_log = self._turn_log[-_TURN_LOG_MAX:]
+
+    # ----- public API -----
+
+    async def connect(self, model: str | None = None) -> None:
+        target = model or self._opus_model
+        client = self._build_client_for(target)
         await client.connect()
+        self._connected.add(target)
 
     async def close(self) -> None:
-        if self._client is not None:
-            await self._client.disconnect()
-            self._client = None
+        for model, client in list(self._clients.items()):
+            with suppress(Exception):
+                await client.disconnect()
+            self._connected.discard(model)
+        self._clients.clear()
 
     async def stream(self, message: str) -> AsyncIterator[StreamEvent]:
         """Send one user turn, yield events as Claude responds."""
-        client = self._build_client()
-        if not getattr(self, "_connected", False):
+        if self._forced_model is not None:
+            decision = RouteDecision(
+                model=self._forced_model,
+                reason="explicit ctor model= override",
+                tier=0,
+                length_chars=len(message or ""),
+                manual=False,
+            )
+            cleaned = (message or "").strip()
+        else:
+            decision, cleaned = self._route_fn(message)
+
+        # Always emit the model decision first so the UI badges render
+        # before any text streams.
+        yield StreamEvent(
+            "model",
+            {
+                "model": decision.model,
+                "reason": decision.reason,
+                "tier": decision.tier,
+                "manual": decision.manual,
+                "length_chars": decision.length_chars,
+            },
+        )
+
+        client = self._build_client_for(decision.model)
+
+        if decision.model not in self._connected:
             try:
                 await client.connect()
             except Exception as exc:
                 yield StreamEvent("error", {"message": f"connect failed: {exc}"})
                 return
-            self._connected = True
+            self._connected.add(decision.model)
+
+        prompt = cleaned
+        if (
+            self._last_lane is not None
+            and self._last_lane != decision.model
+            and not self._forced_model
+        ):
+            recap = self._recap()
+            if recap:
+                prompt = f"{recap}\n\n[Now Jyot says:]\n{cleaned}"
+
         try:
-            await client.query(message)
+            await client.query(prompt)
         except Exception as exc:
             yield StreamEvent("error", {"message": f"query failed: {exc}"})
             return
 
+        assistant_text_buf: list[str] = []
         try:
             async for sdk_msg in client.receive_response():
                 async for ev in _convert_message(sdk_msg):
+                    if ev.type == "text":
+                        assistant_text_buf.append(str(ev.payload.get("delta", "")))
                     yield ev
         except Exception as exc:
             yield StreamEvent("error", {"message": f"stream error: {exc}"})
+            return
+
+        # Update lane + log AFTER the response completes successfully.
+        self._last_lane = decision.model
+        self._record_turn("user", cleaned)
+        self._record_turn("assistant", "".join(assistant_text_buf))
 
 
 async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:
@@ -229,7 +367,6 @@ async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:
                 if block.text:
                     yield StreamEvent("text", {"delta": block.text})
             elif isinstance(block, ThinkingBlock):
-                # surface thinking lightly — keep payload short
                 yield StreamEvent("thinking", {"delta": block.thinking})
             elif isinstance(block, ToolUseBlock):
                 input_obj = block.input if isinstance(block.input, dict) else {}
@@ -246,8 +383,6 @@ async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:
         return
 
     if isinstance(msg, UserMessage):
-        # Tool results round-trip through the SDK as user messages with
-        # ToolResultBlock content. Surface them so the dashboard can update.
         for block in msg.content if isinstance(msg.content, list) else []:
             if isinstance(block, ToolResultBlock):
                 content = block.content
@@ -271,7 +406,7 @@ async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:
         return
 
     if isinstance(msg, SystemMessage):
-        return  # initial init message, nothing user-visible
+        return
 
     if isinstance(msg, ResultMessage):
         yield StreamEvent(

@@ -10,6 +10,7 @@ import {
   CircleDashed,
   Loader2,
   Brain,
+  Lock,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,7 @@ interface AgentResponse {
 interface Turn {
   id: string;
   user: string;
+  userOverride?: "opus" | "sonnet";
   text: string;
   toolCalls: ToolCall[];
   status: "streaming" | "done" | "error";
@@ -57,6 +59,38 @@ interface Turn {
   costUsd?: number;
   durationMs?: number;
   errorMessage?: string;
+  model?: string;
+  routeReason?: string;
+  manualOverride?: boolean;
+  routeTier?: number;
+}
+
+const SLASH_OVERRIDE = /^\s*\/(opus|sonnet)\s+/i;
+
+function parseOverride(input: string): { override: "opus" | "sonnet" | null; cleaned: string } {
+  const m = SLASH_OVERRIDE.exec(input);
+  if (!m) return { override: null, cleaned: input };
+  return {
+    override: m[1].toLowerCase() as "opus" | "sonnet",
+    cleaned: input.slice(m[0].length),
+  };
+}
+
+function modelLabel(model?: string): string {
+  if (!model) return "auto";
+  if (model.includes("opus")) return "opus 4.7";
+  if (model.includes("sonnet")) return "sonnet 4.6";
+  if (model.includes("haiku")) return "haiku";
+  return model;
+}
+
+function modelTone(model?: string): string {
+  if (!model) return "bg-slate-500/15 text-slate-600 dark:text-slate-400";
+  if (model.includes("opus"))
+    return "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/30";
+  if (model.includes("sonnet"))
+    return "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30";
+  return "bg-slate-500/15 text-slate-600 dark:text-slate-400";
 }
 
 // ─── Visual helpers ─────────────────────────────────────────────────────────
@@ -118,9 +152,11 @@ export default function JarvisPage() {
     setInput("");
 
     const turnId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const { override, cleaned } = parseOverride(trimmed);
     const fresh: Turn = {
       id: turnId,
-      user: trimmed,
+      user: cleaned,
+      userOverride: override ?? undefined,
       text: "",
       toolCalls: [],
       status: "streaming",
@@ -135,7 +171,7 @@ export default function JarvisPage() {
       const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),
+        body: JSON.stringify({ message: trimmed }),  // backend strips slash override
         signal: controller.signal,
       });
       if (!res.ok || !res.body) {
@@ -212,8 +248,12 @@ export default function JarvisPage() {
         <div className="flex items-center gap-2">
           <Sparkles className="h-5 w-5 text-primary" />
           <h1 className="text-xl font-semibold">Talk to Jarvis</h1>
-          <Badge variant="outline" className="text-[10px] uppercase tracking-wider">
-            opus 4.7 · soul-loaded
+          <Badge
+            variant="outline"
+            className="text-[10px] uppercase tracking-wider"
+            title="Auto-routed: short / chitchat → sonnet 4.6 · heavy / risky → opus 4.7. Prefix with /opus or /sonnet to force."
+          >
+            auto-router · sonnet ↔ opus
           </Badge>
         </div>
       </div>
@@ -264,6 +304,14 @@ function applyEvent(
     prev.map((t) => {
       if (t.id !== turnId) return t;
       switch (type) {
+        case "model":
+          return {
+            ...t,
+            model: String(evt.model ?? ""),
+            routeReason: String(evt.reason ?? ""),
+            manualOverride: Boolean(evt.manual),
+            routeTier: typeof evt.tier === "number" ? evt.tier : undefined,
+          };
         case "text":
           return { ...t, text: t.text + String(evt.delta ?? "") };
         case "thinking":
@@ -356,10 +404,40 @@ function TurnView({ turn }: { turn: Turn }) {
   return (
     <div className="space-y-3">
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl bg-primary px-4 py-2 text-sm text-primary-foreground">
-          {turn.user}
+        <div className="max-w-[80%] space-y-1">
+          {turn.userOverride && (
+            <div className="flex justify-end">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[10px] uppercase tracking-wider",
+                  modelTone(turn.userOverride === "opus" ? "claude-opus-4-7" : "claude-sonnet-4-6"),
+                )}
+              >
+                <Lock className="mr-1 h-3 w-3" />
+                forced · {turn.userOverride}
+              </Badge>
+            </div>
+          )}
+          <div className="rounded-2xl bg-primary px-4 py-2 text-sm text-primary-foreground">
+            {turn.user}
+          </div>
         </div>
       </div>
+
+      {turn.model && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <Badge
+            variant="outline"
+            className={cn("text-[10px] uppercase tracking-wider", modelTone(turn.model))}
+            title={turn.routeReason ?? ""}
+          >
+            {turn.manualOverride && <Lock className="mr-1 h-3 w-3" />}
+            {modelLabel(turn.model)}
+          </Badge>
+          {turn.routeReason && <span className="italic">{turn.routeReason}</span>}
+        </div>
+      )}
 
       {turn.toolCalls.length > 0 && <DelegationTrace calls={turn.toolCalls} />}
 
