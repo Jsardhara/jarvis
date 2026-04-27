@@ -135,7 +135,7 @@ def make_app(orchestrator: Orchestrator | None = None,
     app = FastAPI(title="Jarvis API", version="0.2.0")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000"],
+        allow_origins=["http://localhost:3000", "http://localhost:3001"],
         allow_methods=["*"],
         allow_headers=["*"],
     )

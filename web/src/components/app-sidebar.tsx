@@ -29,6 +29,7 @@ import {
   Palette,
   HeartPulse,
   Flag,
+  Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -41,6 +42,7 @@ import type { AgentDefinition } from "@/lib/types";
 
 const mainLinks = [
   { href: "/", label: "Command Center", icon: LayoutDashboard },
+  { href: "/jarvis", label: "Talk to Jarvis", icon: Sparkles },
   { href: "/objectives", label: "Objectives", icon: Crosshair },
   { href: "/projects", label: "Missions", icon: Rocket },
   { href: "/checkpoints", label: "Checkpoints", icon: Flag },
