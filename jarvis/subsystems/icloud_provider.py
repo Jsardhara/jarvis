@@ -12,6 +12,7 @@ Apple Reminders are stored as CalDAV todos in a calendar collection whose
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -171,12 +172,37 @@ class ICloudProvider:
 
     def cancel_event(self, event_id: str) -> dict:
         cal = self._get_calendar()
-        try:
-            evt = cal.event_by_uid(event_id)
-        except Exception:
+        evt = self._find_event_by_uid(cal, event_id)
+        if evt is None:
             return {"cancelled": event_id, "found": False}
-        evt.delete()
+        try:
+            evt.delete()
+        except Exception as exc:
+            logger.warning("delete failed for %s: %s", event_id, exc)
+            return {"cancelled": event_id, "found": False}
         return {"cancelled": event_id, "found": True}
+
+    @staticmethod
+    def _find_event_by_uid(cal: Any, uid: str) -> Any | None:
+        """Look up an event by UID — try event_by_uid, then iterate cal.events()
+        with per-event exception isolation so one malformed VEVENT cannot
+        poison the entire scan (a real iCloud failure mode).
+        """
+        with suppress(Exception):
+            return cal.event_by_uid(uid)
+        try:
+            events = list(cal.events())
+        except Exception as exc:
+            logger.warning("cal.events() listing failed: %s", exc)
+            return None
+        for evt in events:
+            try:
+                vobj = evt.icalendar_component
+                if str(vobj.get("uid", "")) == uid:
+                    return evt
+            except Exception:
+                continue
+        return None
 
     # ---------- tasks (Reminders) ----------
 
@@ -194,12 +220,28 @@ class ICloudProvider:
 
     def complete_task_remote(self, task_id: str) -> dict:
         rem = self._get_reminders()
-        try:
-            todo = rem.todo_by_uid(task_id)
-        except Exception:
+        todo = self._find_todo_by_uid(rem, task_id)
+        if todo is None:
             return {"id": task_id, "status": "not_found"}
-        todo.complete()
+        try:
+            todo.complete()
+        except Exception as exc:
+            logger.warning("todo complete failed for %s: %s", task_id, exc)
+            return {"id": task_id, "status": "not_found"}
         return {"id": task_id, "status": "done"}
+
+    @staticmethod
+    def _find_todo_by_uid(rem: Any, uid: str) -> Any | None:
+        with suppress(Exception):
+            return rem.todo_by_uid(uid)
+        try:
+            for t in rem.todos():
+                vobj = t.icalendar_component
+                if str(vobj.get("uid", "")) == uid:
+                    return t
+        except Exception as exc:
+            logger.warning("todo scan failed: %s", exc)
+        return None
 
 
 # ---------- helpers ----------
