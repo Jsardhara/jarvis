@@ -23,6 +23,7 @@ from ..subsystems.lens import Lens
 from ..subsystems.providers import MockOutlook, MockSearch
 from ..subsystems.scholar import Scholar
 from ..subsystems.tempo import Tempo
+from .mission_control_bridge import sync_tick as mission_control_sync_tick
 from .notifier import default_notifier
 from .routines import (
     atlas_tick,
@@ -63,6 +64,7 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(morning_digest, "cron", hour=18, minute=0,
                   args=[tempo, atlas, scholar, notifier], id="evening")
     sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
+    sched.add_job(mission_control_sync_tick, "interval", seconds=30, id="mc_sync")
 
     return sched
 

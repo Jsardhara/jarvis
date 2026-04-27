@@ -1,0 +1,19 @@
+{
+  "decisions": [
+    {
+      "id": "ee8fa2d4a61c",
+      "requestedBy": "ledger",
+      "taskId": null,
+      "question": "confirm to run strategy alpha-1 in paper",
+      "options": [
+        "approve",
+        "reject"
+      ],
+      "context": "{\n  \"strategy_id\": \"alpha-1\",\n  \"mode\": \"paper\"\n}",
+      "status": "pending",
+      "answer": null,
+      "answeredAt": null,
+      "createdAt": "2026-04-26T23:35:54.782727+00:00"
+    }
+  ]
+}

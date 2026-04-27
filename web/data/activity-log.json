@@ -1,0 +1,391 @@
+{
+  "events": [
+    {
+      "id": "def17263f9451484",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-26T23:35:49.214116+00:00"
+    },
+    {
+      "id": "7e047c1df957e989",
+      "type": "task_completed",
+      "actor": "chronos",
+      "taskId": null,
+      "summary": "chronos.listed",
+      "details": "",
+      "timestamp": "2026-04-26T23:35:49.215529+00:00"
+    },
+    {
+      "id": "ca725e114ad810ab",
+      "type": "task_completed",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.fetched (4125 ms)",
+      "details": "",
+      "timestamp": "2026-04-26T23:35:53.341843+00:00"
+    },
+    {
+      "id": "b0aeb6f9cc940a20",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-26T23:35:54.031937+00:00"
+    },
+    {
+      "id": "075284fc511e3af3",
+      "type": "task_started",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.proposed",
+      "details": "",
+      "timestamp": "2026-04-26T23:35:54.780811+00:00"
+    },
+    {
+      "id": "bac330f5ee6cc2dd",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T13:04:06.867962+00:00"
+    },
+    {
+      "id": "8661d7021f76f689",
+      "type": "task_completed",
+      "actor": "chronos",
+      "taskId": null,
+      "summary": "chronos.listed",
+      "details": "",
+      "timestamp": "2026-04-27T13:04:06.868903+00:00"
+    },
+    {
+      "id": "e4ef8a79f19c25ed",
+      "type": "task_completed",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.fetched (4037 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T13:04:10.907052+00:00"
+    },
+    {
+      "id": "e9a076c8e5d02852",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T13:21:51.782170+00:00"
+    },
+    {
+      "id": "3662d1e7ab63b6e0",
+      "type": "task_completed",
+      "actor": "chronos",
+      "taskId": null,
+      "summary": "chronos.listed",
+      "details": "",
+      "timestamp": "2026-04-27T13:21:51.783227+00:00"
+    },
+    {
+      "id": "e18e12fbdea7d03a",
+      "type": "task_completed",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.fetched (4103 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T13:21:55.887006+00:00"
+    },
+    {
+      "id": "0cfd75518b1ffa69",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T13:24:08.877574+00:00"
+    },
+    {
+      "id": "8c9c92bf76d2ee70",
+      "type": "task_completed",
+      "actor": "chronos",
+      "taskId": null,
+      "summary": "chronos.listed",
+      "details": "",
+      "timestamp": "2026-04-27T13:24:08.878995+00:00"
+    },
+    {
+      "id": "870e288c0458c106",
+      "type": "task_completed",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.fetched (4090 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T13:24:12.970355+00:00"
+    },
+    {
+      "id": "7384f7840a162990",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T13:39:04.688781+00:00"
+    },
+    {
+      "id": "d0bfd2094373ef9f",
+      "type": "task_completed",
+      "actor": "chronos",
+      "taskId": null,
+      "summary": "chronos.listed",
+      "details": "",
+      "timestamp": "2026-04-27T13:39:04.690109+00:00"
+    },
+    {
+      "id": "c643e2663e4f62c6",
+      "type": "task_completed",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.fetched (4094 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T13:39:08.785710+00:00"
+    },
+    {
+      "id": "43cdc093da678071",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T14:24:13.539437+00:00"
+    },
+    {
+      "id": "6b53b8218b89de9e",
+      "type": "task_completed",
+      "actor": "chronos",
+      "taskId": null,
+      "summary": "chronos.listed",
+      "details": "",
+      "timestamp": "2026-04-27T14:24:13.540669+00:00"
+    },
+    {
+      "id": "3cf18f530e33af72",
+      "type": "task_completed",
+      "actor": "ledger",
+      "taskId": null,
+      "summary": "ledger.fetched (4106 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T14:24:17.647918+00:00"
+    },
+    {
+      "id": "5243f387ac9b4db6",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T14:24:25.703274+00:00"
+    },
+    {
+      "id": "d70bf7ae97f73536",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T14:24:26.564847+00:00"
+    },
+    {
+      "id": "bfa4e2eca9e26734",
+      "type": "task_completed",
+      "actor": "aide",
+      "taskId": null,
+      "summary": "aide.triaged",
+      "details": "",
+      "timestamp": "2026-04-27T14:24:27.578055+00:00"
+    },
+    {
+      "id": "78c10af8ee34ca97",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-04-27T16:37:16.034994+00:00"
+    },
+    {
+      "id": "88bf3ee4d00beb8a",
+      "type": "task_completed",
+      "actor": "scholar",
+      "taskId": null,
+      "summary": "scholar.listed (2 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T16:37:16.038838+00:00"
+    },
+    {
+      "id": "a676decf57b5f32a",
+      "type": "task_completed",
+      "actor": "atlas",
+      "taskId": null,
+      "summary": "atlas.fetched (4115 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T16:37:20.155752+00:00"
+    },
+    {
+      "id": "91eca208fb57903a",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-04-27T18:18:40.004416+00:00"
+    },
+    {
+      "id": "8049fe57931904a7",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (3399 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:22:45.339672+00:00"
+    },
+    {
+      "id": "9376a0d18436d946",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-04-27T18:23:28.770531+00:00"
+    },
+    {
+      "id": "7d809f72754e3888",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.created (416 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:24:32.841758+00:00"
+    },
+    {
+      "id": "cc788a8cc04ff72e",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (217 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:24:45.555006+00:00"
+    },
+    {
+      "id": "4decbdc91a7f3176",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.not_found (164 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:24:58.758221+00:00"
+    },
+    {
+      "id": "accb7d62d1799c03",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.not_found (264 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:27:13.105327+00:00"
+    },
+    {
+      "id": "56ca9c253f390db8",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (231 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:27:23.378930+00:00"
+    },
+    {
+      "id": "60373e28893ce503",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.not_found (141 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:28:21.127335+00:00"
+    },
+    {
+      "id": "46bb2299c5f1790d",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.not_found (138 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:28:59.541301+00:00"
+    },
+    {
+      "id": "c99ec0f784e28150",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.not_found (216 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:30:21.475856+00:00"
+    },
+    {
+      "id": "918ce6a2a1f2f39a",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.created (412 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:31:06.235348+00:00"
+    },
+    {
+      "id": "d3667c05bec3dcc0",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.not_found (135 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:31:09.366360+00:00"
+    },
+    {
+      "id": "93732dbb3a5506e6",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.cancelled (2500 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:33:21.355637+00:00"
+    },
+    {
+      "id": "988d38f085ade7ba",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.triaged (5619 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:39:33.102044+00:00"
+    },
+    {
+      "id": "6b3ded79dc361957",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.triaged (5521 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:42:35.444809+00:00"
+    },
+    {
+      "id": "bbdfbcdb95ccec79",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.triaged (6044 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T18:59:08.167277+00:00"
+    }
+  ]
+}

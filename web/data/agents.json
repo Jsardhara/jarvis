@@ -1,0 +1,102 @@
+{
+  "agents": [
+    {
+      "id": "tempo",
+      "name": "Tempo",
+      "icon": "Mail",
+      "description": "Outlook + iCloud — mail, calendar, tasks",
+      "instructions": "Outlook + iCloud — mail, calendar, tasks",
+      "capabilities": [
+        "mail",
+        "calendar",
+        "tasks",
+        "scheduling"
+      ],
+      "skillIds": [],
+      "status": "active",
+      "createdAt": "2026-04-27T19:35:21.155246+00:00",
+      "updatedAt": "2026-04-27T19:35:21.155246+00:00"
+    },
+    {
+      "id": "scholar",
+      "name": "Scholar",
+      "icon": "GraduationCap",
+      "description": "Academics + study planning",
+      "instructions": "Academics + study planning",
+      "capabilities": [
+        "assignments",
+        "study-plans",
+        "summarization"
+      ],
+      "skillIds": [],
+      "status": "active",
+      "createdAt": "2026-04-27T19:35:21.155262+00:00",
+      "updatedAt": "2026-04-27T19:35:21.155262+00:00"
+    },
+    {
+      "id": "lens",
+      "name": "Lens",
+      "icon": "Search",
+      "description": "Web research + monitoring",
+      "instructions": "Web research + monitoring",
+      "capabilities": [
+        "search",
+        "monitor",
+        "synthesize"
+      ],
+      "skillIds": [],
+      "status": "active",
+      "createdAt": "2026-04-27T19:35:21.155269+00:00",
+      "updatedAt": "2026-04-27T19:35:21.155269+00:00"
+    },
+    {
+      "id": "forge",
+      "name": "Forge",
+      "icon": "Code",
+      "description": "Code-work delegation",
+      "instructions": "Code-work delegation",
+      "capabilities": [
+        "code-changes",
+        "PRs",
+        "refactoring"
+      ],
+      "skillIds": [],
+      "status": "active",
+      "createdAt": "2026-04-27T19:35:21.155276+00:00",
+      "updatedAt": "2026-04-27T19:35:21.155276+00:00"
+    },
+    {
+      "id": "atlas",
+      "name": "Atlas",
+      "icon": "BarChart3",
+      "description": "Trading orchestrator (Oracle/Architect/Guardian/Trader/Sage)",
+      "instructions": "Trading orchestrator (Oracle/Architect/Guardian/Trader/Sage)",
+      "capabilities": [
+        "scan-markets",
+        "rank-trades",
+        "risk-check",
+        "execute"
+      ],
+      "skillIds": [],
+      "status": "active",
+      "createdAt": "2026-04-27T19:35:21.155282+00:00",
+      "updatedAt": "2026-04-27T19:35:21.155282+00:00"
+    },
+    {
+      "id": "me",
+      "name": "Me",
+      "icon": "User",
+      "description": "Tasks I do myself — decisions, approvals, creative direction",
+      "instructions": "Tasks I do myself — decisions, approvals, creative direction",
+      "capabilities": [
+        "decision-making",
+        "approvals",
+        "creative-direction"
+      ],
+      "skillIds": [],
+      "status": "active",
+      "createdAt": "2026-04-27T19:35:21.155288+00:00",
+      "updatedAt": "2026-04-27T19:35:21.155288+00:00"
+    }
+  ]
+}
