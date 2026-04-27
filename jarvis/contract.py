@@ -24,6 +24,11 @@ class AgentResponse(BaseModel):
     agent: str = Field(description="Subsystem agent name")
     request_id: str = Field(default_factory=lambda: uuid4().hex[:12])
     ts: str = Field(default_factory=_now_iso)
+    tier: int = Field(default=5, ge=1, le=5, description="Priority tier 1-5")
+    verification: dict[str, Any] = Field(
+        default_factory=lambda: {"status": "unknown"},
+        description="Verification envelope: {status, evidence, checked_at}",
+    )
 
 
 class InboxEvent(BaseModel):

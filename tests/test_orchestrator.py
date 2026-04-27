@@ -17,29 +17,29 @@ def _stub_handler(name: str):
 def test_route_classifies_into_intent():
     o = Orchestrator()
     intent = o.route("check inbox")
-    assert intent.primary == "aide"
+    assert intent.primary == "tempo"
 
 
 def test_dispatch_invokes_primary():
-    o = Orchestrator({"aide": _stub_handler("aide")})
+    o = Orchestrator({"tempo": _stub_handler("tempo")})
     out = asyncio.run(o.dispatch("check inbox"))
-    assert "aide" in out["responses"]
-    assert out["responses"]["aide"]["result"]["echo"] == "check inbox"
+    assert "tempo" in out["responses"]
+    assert out["responses"]["tempo"]["result"]["echo"] == "check inbox"
 
 
 def test_dispatch_invokes_parallel_for_briefing():
     o = Orchestrator({
-        "aide": _stub_handler("aide"),
-        "chronos": _stub_handler("chronos"),
-        "ledger": _stub_handler("ledger"),
+        "tempo": _stub_handler("tempo"),
+        "scholar": _stub_handler("scholar"),
+        "atlas": _stub_handler("atlas"),
     })
     out = asyncio.run(o.dispatch("morning briefing please"))
-    assert {"aide", "chronos", "ledger"} <= set(out["responses"].keys())
+    assert {"tempo", "scholar", "atlas"} <= set(out["responses"].keys())
 
 
 def test_gather_context_includes_inbox_and_tasks():
     add_task(Task(title="open one"))
-    append_inbox(InboxEvent(agent="aide", severity="info", summary="3 unread"))
+    append_inbox(InboxEvent(agent="tempo", severity="info", summary="3 unread"))
     o = Orchestrator()
     ctx = o.gather_context()
     assert any(t["title"] == "open one" for t in ctx["tasks"])
@@ -47,14 +47,14 @@ def test_gather_context_includes_inbox_and_tasks():
 
 
 def test_dispatch_skips_unregistered_handlers():
-    o = Orchestrator({"aide": _stub_handler("aide")})  # no chronos/ledger
+    o = Orchestrator({"tempo": _stub_handler("tempo")})
     out = asyncio.run(o.dispatch("morning briefing"))
-    assert "aide" in out["responses"]
-    assert "chronos" not in out["responses"]
+    assert "tempo" in out["responses"]
+    assert "atlas" not in out["responses"]
 
 
 def test_register_adds_handler():
     o = Orchestrator()
-    o.register("aide", _stub_handler("aide"))
+    o.register("tempo", _stub_handler("tempo"))
     out = asyncio.run(o.dispatch("inbox"))
-    assert "aide" in out["responses"]
+    assert "tempo" in out["responses"]
