@@ -1,27 +1,43 @@
-"""Subsystem registry — central map of agent name -> instance + callable actions.
+"""Subsystem registry — central map of agent name -> instance + actions.
 
-Powers `/api/agents/{name}/dispatch` and the per-agent chat drawer. Each
-agent exposes an explicit allowlist of actions so the API never invokes
-arbitrary attributes. A `default_for_text` callable handles free-text
-input from the drawer (when the user just types a sentence).
+Six top-level agents:
+
+    tempo    — Outlook (mail + calendar + tasks)
+    scholar  — academics + study planning
+    lens     — research + monitoring
+    forge    — code-work delegation
+    atlas    — trading orchestrator (Oracle/Architect/Guardian/Trader/Sage)
+
+Plus jarvis itself as the orchestrator (handled outside the registry).
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from ..contract import AgentResponse
-from .aide import Aide
-from .chronos import Chronos
-from .echo import Echo
+from .atlas import AtlasBridge, AtlasOrchestrator
 from .forge import Forge, MockRunner
-from .hearth import Hearth
-from .ledger import AtlasClient, Ledger
-from .providers import MockCalendar, MockGmail
-from .sherlock import MockSearch, Sherlock
+from .lens import Lens
+from .providers import MockOutlook, MockSearch
+from .scholar import Scholar
+from .tempo import Tempo
+from .tempo_stack import build_default_tempo_stack
 
 ActionFn = Callable[..., AgentResponse]
+
+logger = logging.getLogger(__name__)
+
+
+def _build_outlook() -> Any:
+    """Try real iCloud + Gmail (+Drexel) stack; fall back to MockOutlook on missing env."""
+    try:
+        return build_default_tempo_stack()
+    except RuntimeError as exc:
+        logger.warning("TempoStack unavailable (%s); falling back to MockOutlook", exc)
+        return MockOutlook()
 
 
 @dataclass
@@ -44,93 +60,78 @@ class AgentDescriptor:
 
 
 def build_default_registry() -> dict[str, AgentDescriptor]:
-    aide = Aide(MockGmail())
-    chronos = Chronos(MockCalendar())
-    sherlock = Sherlock(MockSearch())
+    outlook = _build_outlook()
+    tempo = Tempo(outlook)
+    lens = Lens(MockSearch())
     forge = Forge(MockRunner())
-    ledger = Ledger(client=AtlasClient(), allow_mock=True)
-    echo = Echo()
-    hearth = Hearth()
+    atlas = AtlasOrchestrator(bridge=AtlasBridge(), allow_mock=True)
+    scholar = Scholar()
 
     return {
-        "aide": AgentDescriptor(
-            name="aide",
-            instance=aide,
-            description="Email triage + drafts",
+        "tempo": AgentDescriptor(
+            name="tempo",
+            instance=tempo,
+            description="Outlook — mail, calendar, tasks",
             actions={
-                "triage": aide.triage,
-                "draft_reply": aide.draft_reply,
-                "send": aide.send,
+                "triage": tempo.triage,
+                "draft_reply": tempo.draft_reply,
+                "send_mail": tempo.send_mail,
+                "today": tempo.today,
+                "find_free": tempo.find_free,
+                "schedule": tempo.schedule,
+                "cancel": tempo.cancel,
+                "add": tempo.add,
+                "list_open": tempo.list_open,
+                "complete": tempo.complete,
             },
-            default_for_text=lambda _text: aide.triage(),
+            default_for_text=lambda _text: tempo.today(),
         ),
-        "chronos": AgentDescriptor(
-            name="chronos",
-            instance=chronos,
-            description="Calendar + tasks",
+        "scholar": AgentDescriptor(
+            name="scholar",
+            instance=scholar,
+            description="Academics + study planning",
             actions={
-                "today": chronos.today,
-                "find_free": chronos.find_free,
-                "schedule": chronos.schedule,
-                "cancel": chronos.cancel,
-                "add": chronos.add,
-                "list_open": chronos.list_open,
-                "complete": chronos.complete,
+                "list_assignments": scholar.list_assignments,
+                "add_assignment": scholar.add_assignment,
+                "plan_week": scholar.plan_week,
+                "summarize": scholar.summarize,
             },
-            default_for_text=lambda _text: chronos.today(),
+            default_for_text=lambda _text: scholar.list_assignments(),
         ),
-        "sherlock": AgentDescriptor(
-            name="sherlock",
-            instance=sherlock,
-            description="Web research",
+        "lens": AgentDescriptor(
+            name="lens",
+            instance=lens,
+            description="Research + monitoring",
             actions={
-                "quick_search": sherlock.quick_search,
-                "deep_research": sherlock.deep_research,
+                "quick_search": lens.quick_search,
+                "deep_research": lens.deep_research,
+                "monitor": lens.monitor,
             },
-            default_for_text=lambda text: sherlock.quick_search(text),
+            default_for_text=lambda text: lens.quick_search(text),
         ),
         "forge": AgentDescriptor(
             name="forge",
             instance=forge,
-            description="Code agent runner",
+            description="Code-work delegation",
             actions={"execute": forge.execute},
             default_for_text=lambda text: forge.execute(repo="?", task=text, push=False),
         ),
-        "ledger": AgentDescriptor(
-            name="ledger",
-            instance=ledger,
-            description="ATLAS / portfolio",
+        "atlas": AgentDescriptor(
+            name="atlas",
+            instance=atlas,
+            description="Trading orchestrator (Oracle/Architect/Guardian/Trader/Sage)",
             actions={
-                "portfolio": ledger.portfolio,
-                "positions": ledger.positions,
-                "pnl": ledger.pnl,
-                "trigger_strategy": ledger.trigger_strategy,
-                "trigger_strategy_confirmed": ledger.trigger_strategy_confirmed,
+                "portfolio": atlas.portfolio,
+                "positions": atlas.positions,
+                "pnl": atlas.pnl,
+                "oracle_scan": atlas.oracle_scan,
+                "architect_rank": atlas.architect_rank,
+                "guardian_check": atlas.guardian_check,
+                "trader_execute": atlas.trader_execute,
+                "trader_execute_confirmed": atlas.trader_execute_confirmed,
+                "sage_review": atlas.sage_review,
+                "pipeline": atlas.pipeline,
             },
-            default_for_text=lambda _text: ledger.portfolio(),
-        ),
-        "echo": AgentDescriptor(
-            name="echo",
-            instance=echo,
-            description="Slack / Discord / SMS",
-            actions={
-                "triage": echo.triage,
-                "draft_reply": echo.draft_reply,
-                "send": echo.send,
-            },
-            default_for_text=lambda _text: echo.triage([]),
-        ),
-        "hearth": AgentDescriptor(
-            name="hearth",
-            instance=hearth,
-            description="Home Assistant",
-            actions={
-                "list_devices": hearth.list_devices,
-                "light_on": hearth.light_on,
-                "light_on_confirmed": hearth.light_on_confirmed,
-                "thermostat_set": hearth.thermostat_set,
-                "media_play": hearth.media_play,
-            },
-            default_for_text=lambda _text: hearth.list_devices(),
+            default_for_text=lambda _text: atlas.portfolio(),
         ),
     }
