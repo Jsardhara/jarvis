@@ -165,3 +165,99 @@ def test_inspect_agent_log_filters_by_agent():
 
     entries = inspect_agent_log(agent="tempo")
     assert all(e["agent"] == "tempo" for e in entries)
+
+
+# --- announce_agent tests (b) ---
+
+def test_announce_agent_writes_session_memory():
+    from jarvis.daemon.routines import announce_agent
+
+    session: dict = {}
+    new_session = announce_agent("tempo", session)
+    assert new_session.get("announced_agents") == {"tempo"}
+    assert "tempo.online" in new_session
+
+
+def test_announce_agent_idempotent_second_call():
+    from jarvis.daemon.routines import announce_agent
+
+    session: dict = {}
+    s1 = announce_agent("tempo", session)
+    s2 = announce_agent("tempo", s1)
+    # Second call returns same session unchanged — agent already announced
+    assert s2 == s1
+
+
+def test_announce_agent_tracks_multiple_agents():
+    from jarvis.daemon.routines import announce_agent
+
+    session: dict = {}
+    s1 = announce_agent("tempo", session)
+    s2 = announce_agent("atlas", s1)
+    assert s2["announced_agents"] == {"tempo", "atlas"}
+
+
+def test_announce_agent_writes_daily_memory(tmp_path, monkeypatch):
+    from jarvis.config import Settings
+    from jarvis.daemon.routines import announce_agent
+
+    fake = Settings(
+        project_root=tmp_path,
+        state_dir=tmp_path,
+        atlas_api="http://localhost:8000",
+    )
+    monkeypatch.setattr("jarvis.memory._config.get_settings", lambda: fake)
+    session: dict = {}
+    announce_agent("lens", session)
+
+    from jarvis.memory import read_daily
+    # read_daily also calls get_settings, so patch it there too
+    monkeypatch.setattr("jarvis.memory._config.get_settings", lambda: fake)
+    content = read_daily()
+    assert "lens online" in content
+
+
+# --- _verification_health + morning_digest (d) tests ---
+
+def test_verification_health_empty_log():
+    from jarvis.daemon.routines import _verification_health
+
+    health = _verification_health(hours=24)
+    assert health == {"verified": 0.0, "inference": 0.0, "unknown": 0.0}
+
+
+def test_verification_health_counts_statuses(tmp_path, monkeypatch):
+    import json as _json
+
+    from jarvis.config import Settings
+    from jarvis.daemon.routines import _verification_health
+
+    fake = Settings(
+        project_root=tmp_path,
+        state_dir=tmp_path,
+        atlas_api="http://localhost:8000",
+    )
+    monkeypatch.setattr("jarvis.state.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.daemon.routines.get_settings", lambda: fake)
+    log_path = tmp_path / "agent_log.jsonl"
+    now = "2026-04-27T12:00:00+00:00"
+    with log_path.open("w", encoding="utf-8") as f:
+        for vstatus in ("verified", "inference", "unknown"):
+            f.write(_json.dumps({
+                "ts": now, "request_id": f"v-{vstatus}", "agent": "tempo",
+                "action": "triage", "status": "ok", "duration_ms": 0,
+                "confidence": 1.0, "needs_confirm": False, "summary": "",
+                "error": None, "verification": {"status": vstatus},
+            }) + "\n")
+
+    health = _verification_health(hours=24)
+    assert abs(health["verified"] - 1 / 3) < 0.01
+    assert abs(health["inference"] - 1 / 3) < 0.01
+    assert abs(health["unknown"] - 1 / 3) < 0.01
+
+
+def test_morning_digest_includes_verification_health():
+    notifier = NoopNotifier()
+    atlas = AtlasOrchestrator(bridge=_silent_atlas(), allow_mock=True)
+    out = morning_digest(Tempo(MockOutlook()), atlas, Scholar(), notifier)
+    assert "Verification:" in out["body"]

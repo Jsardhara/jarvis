@@ -12,10 +12,15 @@ Six top-level agents drive the recurring layer:
 """
 from __future__ import annotations
 
+import json
 import logging
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..config import get_settings
 from ..contract import InboxEvent
+from ..memory import append_daily, remember_session
 from ..state import append_inbox, read_agent_log
 from ..subsystems.atlas import AtlasOrchestrator
 from ..subsystems.lens import Lens
@@ -99,15 +104,21 @@ def morning_digest(tempo: Tempo, atlas: AtlasOrchestrator, scholar: Scholar,
     cal = tempo.today()
     pnl = atlas.pnl()
     sch = scholar.list_assignments()
+    health = _verification_health(hours=24)
     parts = [
         f"Inbox: {em.result['counts'].get(TIER_ACTION, 0)} action",
         f"Calendar: {cal.result['count']} events",
         f"School: {sch.result['count']} open",
         f"PnL 1d: {pnl.result['pnl'].get('pnl_pct', 0):.2%}",
+        (
+            f"Verification: {health['verified']:.0%} verified"
+            f" | {health['inference']:.0%} inference"
+            f" | {health['unknown']:.0%} unknown"
+        ),
     ]
     body = " | ".join(parts)
     append_inbox(InboxEvent(agent="sentinel", severity="info", summary="morning digest",
-                            ref={"body": body}))
+                            ref={"body": body, "verification_health": health}))
     notifier.push("Morning briefing", body, priority=0)
     return {"body": body}
 
@@ -129,3 +140,57 @@ def inspect_agent_log(agent: str | None = None, limit: int = 20) -> list[dict[st
     """Return recent agent_log entries as plain dicts — usable when live tooling hangs."""
     entries = read_agent_log(agent=agent, limit=limit)
     return [e.model_dump() for e in entries]
+
+
+def announce_agent(agent_name: str, session: dict[str, Any]) -> dict[str, Any]:
+    """Record first-dispatch announcement for an agent in the session tier.
+
+    Idempotent: if agent already in session["announced_agents"], returns session unchanged.
+    Also appends a bullet to today's daily memory file.
+    """
+    announced: set[str] = session.get("announced_agents", set())
+    if agent_name in announced:
+        return session
+    append_daily(f"{agent_name} online")
+    new_announced = announced | {agent_name}
+    return remember_session(
+        remember_session(session, "announced_agents", new_announced),
+        f"{agent_name}.online",
+        True,
+    )
+
+
+def _verification_health(hours: int = 24) -> dict[str, float]:
+    """Return fraction of agent_log entries in last N hours by verification status.
+
+    Reads raw JSONL to pick up the verification field even when AgentLogEntry
+    does not yet model it. Entries missing the field count as 'unknown'.
+    """
+    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    log_path: Path = get_settings().state_dir / "agent_log.jsonl"
+    if not log_path.exists():
+        return {"verified": 0.0, "inference": 0.0, "unknown": 0.0}
+
+    counts: dict[str, int] = {"verified": 0, "inference": 0, "unknown": 0}
+    for raw in log_path.read_text(encoding="utf-8").splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        try:
+            ts = datetime.fromisoformat(entry.get("ts", ""))
+            if ts < cutoff:
+                continue
+        except (ValueError, TypeError):
+            continue
+        status = entry.get("verification", {}).get("status", "unknown")
+        bucket = status if status in counts else "unknown"
+        counts[bucket] += 1
+
+    total = sum(counts.values())
+    if total == 0:
+        return {"verified": 0.0, "inference": 0.0, "unknown": 0.0}
+    return {k: v / total for k, v in counts.items()}
