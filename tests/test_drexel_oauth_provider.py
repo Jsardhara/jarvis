@@ -59,6 +59,17 @@ def cfg(tmp_path):
         address="me@drexel.edu",
         client_id="fake-client-id",
         cache_path=tmp_path / "cache.json",
+        interactive=True,  # default tests run device-flow path
+    )
+
+
+@pytest.fixture
+def cfg_noninteractive(tmp_path):
+    return DrexelConfig(
+        address="me@drexel.edu",
+        client_id="fake-client-id",
+        cache_path=tmp_path / "cache.json",
+        interactive=False,
     )
 
 
@@ -153,6 +164,16 @@ def test_persist_cache_writes_when_state_changed(cfg):
     p._persist_cache(msal_mock)
     assert cfg.cache_path.exists()
     assert cfg.cache_path.read_text(encoding="utf-8") == '{"k":"v"}'
+
+
+def test_acquire_token_noninteractive_raises_without_cache(cfg_noninteractive):
+    msal_mock = MagicMock()
+    msal_mock.get_accounts.return_value = []
+    msal_mock.acquire_token_silent.return_value = None
+    p = DrexelOAuthProvider(cfg_noninteractive, msal_app=msal_mock)
+    with pytest.raises(DrexelOAuthError, match="non-interactive"):
+        p._acquire_token()
+    msal_mock.initiate_device_flow.assert_not_called()
 
 
 def test_persist_cache_skips_when_unchanged(cfg):

@@ -24,7 +24,11 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from jarvis.subsystems.gmail_imap_provider import _extract_body, _map_message
+from jarvis.subsystems.gmail_imap_provider import (
+    _extract_body,
+    _extract_raw,
+    _map_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +53,7 @@ class DrexelConfig:
     tenant: str = "common"
     cache_path: Path | None = None
     label: str = "DREXEL"
+    interactive: bool = False  # only allow blocking device-code flow when True
 
 
 def _xoauth2_sasl(user: str, access_token: str) -> bytes:
@@ -105,6 +110,12 @@ class DrexelOAuthProvider:
         if accounts:
             result = app.acquire_token_silent(OUTLOOK_SCOPES, account=accounts[0])
         if not result:
+            if not self._config.interactive:
+                raise DrexelOAuthError(
+                    "Drexel: no cached token and provider is non-interactive. "
+                    "Run `python -m jarvis.subsystems.drexel_oauth_provider` once "
+                    "to complete the device-code sign-in, then retry."
+                )
             flow = app.initiate_device_flow(scopes=OUTLOOK_SCOPES)
             if "user_code" not in flow:
                 raise DrexelOAuthError(f"device flow init failed: {flow}")
@@ -169,13 +180,10 @@ class DrexelOAuthProvider:
             ids = data[0].split()[-max_results:]
             messages: list[dict] = []
             for mid in reversed(ids):
-                typ, fetched = c.fetch(mid, "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])")
+                typ, fetched = c.fetch(mid, "(BODY.PEEK[])")
                 if typ != "OK":
                     continue
-                raw = b""
-                for part in fetched:
-                    if isinstance(part, tuple) and len(part) >= 2:
-                        raw += part[1]
+                raw = _extract_raw(fetched)
                 msg = email.message_from_bytes(raw)
                 messages.append(_map_message(msg, mid.decode(), self._config.label))
             return messages
@@ -185,10 +193,7 @@ class DrexelOAuthProvider:
             typ, fetched = c.fetch(msg_id.encode(), "(RFC822)")
             if typ != "OK":
                 raise DrexelOAuthError(f"fetch failed for {msg_id}")
-            raw = b""
-            for part in fetched:
-                if isinstance(part, tuple) and len(part) >= 2:
-                    raw += part[1]
+            raw = _extract_raw(fetched)
             msg = email.message_from_bytes(raw)
             mapped = _map_message(msg, msg_id, self._config.label)
             mapped["body"] = _extract_body(msg)
@@ -218,3 +223,31 @@ class DrexelOAuthProvider:
             "ts": datetime.now(UTC).isoformat(),
             "label": self._config.label,
         }
+
+
+def _interactive_auth_cli() -> None:  # pragma: no cover
+    """One-time interactive sign-in. Caches the refresh token to disk."""
+    import os
+
+    from dotenv import load_dotenv
+
+    load_dotenv()
+    addr = os.environ["DREXEL_ADDRESS"]
+    cid = os.environ["DREXEL_CLIENT_ID"]
+    cache = Path(os.environ.get("DREXEL_TOKEN_CACHE", "state/.drexel_msal_cache.json"))
+    p = DrexelOAuthProvider(
+        DrexelConfig(
+            address=addr,
+            client_id=cid,
+            tenant=os.environ.get("DREXEL_TENANT", "common"),
+            cache_path=cache,
+            interactive=True,
+        )
+    )
+    print(f"Acquiring Drexel token for {addr}...")
+    tok = p._acquire_token()
+    print("OK — token cached. (length:", len(tok), "chars)")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    _interactive_auth_cli()

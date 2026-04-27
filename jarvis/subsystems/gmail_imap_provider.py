@@ -93,13 +93,10 @@ class GmailIMAPProvider:
             ids = data[0].split()[-max_results:]
             messages: list[dict] = []
             for mid in reversed(ids):
-                typ, fetched = c.fetch(mid, "(BODY.PEEK[HEADER] BODY.PEEK[TEXT])")
+                typ, fetched = c.fetch(mid, "(BODY.PEEK[])")
                 if typ != "OK":
                     continue
-                raw = b""
-                for part in fetched:
-                    if isinstance(part, tuple) and len(part) >= 2:
-                        raw += part[1]
+                raw = _extract_raw(fetched)
                 msg = email.message_from_bytes(raw)
                 messages.append(_map_message(msg, mid.decode(), self._config.label))
             return messages
@@ -109,10 +106,7 @@ class GmailIMAPProvider:
             typ, fetched = c.fetch(msg_id.encode(), "(RFC822)")
             if typ != "OK":
                 raise GmailIMAPError(f"fetch failed for {msg_id}")
-            raw = b""
-            for part in fetched:
-                if isinstance(part, tuple) and len(part) >= 2:
-                    raw += part[1]
+            raw = _extract_raw(fetched)
             msg = email.message_from_bytes(raw)
             mapped = _map_message(msg, msg_id, self._config.label)
             mapped["body"] = _extract_body(msg)
@@ -145,6 +139,14 @@ class GmailIMAPProvider:
 
 
 # ---------- helpers ----------
+
+
+def _extract_raw(fetched: list) -> bytes:
+    """Pull the literal-message bytes out of imaplib's nested fetch tuple."""
+    for part in fetched:
+        if isinstance(part, tuple) and len(part) >= 2 and isinstance(part[1], bytes):
+            return part[1]
+    return b""
 
 
 def _map_message(msg: email.message.Message, mid: str, label: str) -> dict:

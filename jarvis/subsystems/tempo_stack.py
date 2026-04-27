@@ -114,6 +114,7 @@ def build_default_tempo_stack() -> TempoStack:
                 client_id=drexel_client_id,
                 tenant=os.getenv("DREXEL_TENANT", "common"),
                 cache_path=cache_path,
+                interactive=False,  # service path — auth via the CLI entrypoint
             )
         )
 
