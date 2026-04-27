@@ -151,13 +151,49 @@ def _extract_raw(fetched: list) -> bytes:
 
 def _map_message(msg: email.message.Message, mid: str, label: str) -> dict:
     snippet = _extract_body(msg, max_chars=200)
+    subject = _decode_header_value(msg.get("Subject", ""))
+    from_ = _decode_header_value(msg.get("From", ""))
+    to_ = _decode_header_value(msg.get("To", ""))
+    delivered_to = _decode_header_value(msg.get("Delivered-To", ""))
+    forward_for = _decode_header_value(msg.get("X-Forwarded-For", ""))
+    labels = ["UNREAD", "INBOX", label]
+    forwarded_from = _detect_forward_origin(to_, delivered_to, forward_for)
+    if forwarded_from:
+        labels.append(forwarded_from)
     return {
         "id": mid,
-        "from": str(msg.get("From", "")),
-        "subject": str(msg.get("Subject", "")),
+        "from": from_,
+        "to": to_,
+        "subject": subject,
         "snippet": snippet,
-        "labels": ["UNREAD", "INBOX", label],
+        "labels": labels,
+        "forwarded_from": forwarded_from,
     }
+
+
+def _decode_header_value(raw: Any) -> str:
+    """Decode RFC 2047 encoded headers (=?UTF-8?q?...?=)."""
+    from email.header import decode_header, make_header
+
+    if not raw:
+        return ""
+    try:
+        return str(make_header(decode_header(str(raw))))
+    except Exception:
+        return str(raw)
+
+
+def _detect_forward_origin(to: str, delivered_to: str, forward_for: str) -> str | None:
+    """Return a label like 'DREXEL_FORWARD' when this Gmail message arrived
+    via auto-forward from a recognized school/work mailbox.
+    """
+    import os
+
+    domain = os.getenv("DREXEL_FORWARD_DOMAIN", "drexel.edu").lower()
+    haystack = " ".join([to, delivered_to, forward_for]).lower()
+    if domain and domain in haystack:
+        return "DREXEL_FORWARD"
+    return None
 
 
 def _extract_body(msg: email.message.Message, max_chars: int = 0) -> str:
