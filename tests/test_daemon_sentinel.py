@@ -1,4 +1,4 @@
-"""Sentinel scheduler wiring — verifies all 6 jobs register w/ correct triggers."""
+"""Sentinel scheduler wiring — verifies all jobs register w/ correct triggers."""
 from __future__ import annotations
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -9,16 +9,16 @@ from jarvis.daemon.sentinel import build_scheduler
 def test_build_scheduler_registers_all_jobs():
     sched = build_scheduler(BackgroundScheduler(timezone="UTC"))
     job_ids = {j.id for j in sched.get_jobs()}
-    assert {"email", "calendar", "atlas", "news", "morning", "evening"} <= job_ids
+    assert {"email", "calendar", "atlas", "news", "scholar", "morning", "evening"} <= job_ids
 
 
 def test_intervals_are_configured():
     sched = build_scheduler(BackgroundScheduler(timezone="UTC"))
     by_id = {j.id: j for j in sched.get_jobs()}
-    # IntervalTrigger exposes interval as timedelta
     assert by_id["email"].trigger.interval.total_seconds() == 15 * 60
     assert by_id["atlas"].trigger.interval.total_seconds() == 5 * 60
     assert by_id["news"].trigger.interval.total_seconds() == 30 * 60
+    assert by_id["scholar"].trigger.interval.total_seconds() == 2 * 60 * 60
 
 
 def test_morning_digest_is_cron_at_8am():
@@ -28,3 +28,11 @@ def test_morning_digest_is_cron_at_8am():
     fields = {f.name: str(f) for f in morning.trigger.fields}
     assert fields["hour"] == "8"
     assert fields["minute"] == "0"
+
+
+def test_heartbeat_job_registered():
+    sched = build_scheduler(BackgroundScheduler(timezone="UTC"))
+    job_ids = {j.id for j in sched.get_jobs()}
+    assert "heartbeat" in job_ids
+    by_id = {j.id: j for j in sched.get_jobs()}
+    assert by_id["heartbeat"].trigger.interval.total_seconds() == 60

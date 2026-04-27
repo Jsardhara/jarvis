@@ -3,10 +3,11 @@
 Run:
     python -m jarvis.daemon.sentinel
 
-Schedules cron routines that watch inbox/calendar/atlas/news, write to
-state/inbox.jsonl, and push alerts via Notifier (Pushover or noop).
+Schedules cron routines that watch inbox/calendar/atlas/news/school,
+write to state/inbox.jsonl, and push alerts via Notifier.
 
-Stops cleanly on SIGINT.
+Sentinel is infrastructure, not an agent — it drives the six top-level
+agents (tempo, atlas, lens, scholar, forge) on a schedule.
 """
 from __future__ import annotations
 
@@ -17,42 +18,51 @@ import sys
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from ..subsystems.aide import Aide
-from ..subsystems.chronos import Chronos
-from ..subsystems.ledger import AtlasClient, Ledger
-from ..subsystems.providers import MockCalendar, MockGmail
-from ..subsystems.sherlock import MockSearch, Sherlock
+from ..subsystems.atlas import AtlasBridge, AtlasOrchestrator
+from ..subsystems.lens import Lens
+from ..subsystems.providers import MockOutlook, MockSearch
+from ..subsystems.scholar import Scholar
+from ..subsystems.tempo import Tempo
 from .notifier import default_notifier
-from .routines import atlas_tick, calendar_tick, email_tick, morning_digest, news_tick
+from .routines import (
+    atlas_tick,
+    calendar_tick,
+    email_tick,
+    heartbeat_tick,
+    morning_digest,
+    news_tick,
+    scholar_tick,
+)
 
 log = logging.getLogger("sentinel")
 
 
 def _build_subsystems():
-    """Phase 3 ships with mocks; swap to real MCP/HTTP providers in Phase 1.5/3.1."""
-    aide = Aide(MockGmail())
-    chronos = Chronos(MockCalendar())
-    ledger = Ledger(client=AtlasClient(), allow_mock=True)
-    sherlock = Sherlock(MockSearch())
-    return aide, chronos, ledger, sherlock
+    """Mocks until creds wired. Swap MockOutlook → OutlookProvider once Azure app reg lands."""
+    tempo = Tempo(MockOutlook())
+    atlas = AtlasOrchestrator(bridge=AtlasBridge(), allow_mock=True)
+    lens = Lens(MockSearch())
+    scholar = Scholar()
+    return tempo, atlas, lens, scholar
 
 
 def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingScheduler:
-    """Build a configured scheduler. Exposed for tests so they can use BackgroundScheduler."""
-    aide, chronos, ledger, sherlock = _build_subsystems()
+    tempo, atlas, lens, scholar = _build_subsystems()
     notifier = default_notifier()
     watchlist = [t.strip() for t in os.environ.get("JARVIS_WATCHLIST", "BTC,ETH").split(",") if t.strip()]
 
     sched = scheduler or BlockingScheduler(timezone="UTC")
 
-    sched.add_job(email_tick, "interval", minutes=15, args=[aide, notifier], id="email")
-    sched.add_job(calendar_tick, "interval", hours=1, args=[chronos, notifier], id="calendar")
-    sched.add_job(atlas_tick, "interval", minutes=5, args=[ledger, notifier], id="atlas")
-    sched.add_job(news_tick, "interval", minutes=30, args=[sherlock, watchlist, notifier], id="news")
+    sched.add_job(email_tick, "interval", minutes=15, args=[tempo, notifier], id="email")
+    sched.add_job(calendar_tick, "interval", hours=1, args=[tempo, notifier], id="calendar")
+    sched.add_job(atlas_tick, "interval", minutes=5, args=[atlas, notifier], id="atlas")
+    sched.add_job(news_tick, "interval", minutes=30, args=[lens, watchlist, notifier], id="news")
+    sched.add_job(scholar_tick, "interval", hours=2, args=[scholar, notifier], id="scholar")
     sched.add_job(morning_digest, "cron", hour=8, minute=0,
-                  args=[aide, chronos, ledger, notifier], id="morning")
+                  args=[tempo, atlas, scholar, notifier], id="morning")
     sched.add_job(morning_digest, "cron", hour=18, minute=0,
-                  args=[aide, chronos, ledger, notifier], id="evening")
+                  args=[tempo, atlas, scholar, notifier], id="evening")
+    sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
 
     return sched
 
