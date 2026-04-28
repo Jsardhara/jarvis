@@ -168,7 +168,25 @@ def _map_message(msg: email.message.Message, mid: str, label: str) -> dict:
         "snippet": snippet,
         "labels": labels,
         "forwarded_from": forwarded_from,
+        "date": _parse_message_date(msg.get("Date", "")),
     }
+
+
+def _parse_message_date(raw: Any) -> str:
+    """Parse RFC 2822 Date header → UTC ISO 8601. Empty string on failure."""
+    from email.utils import parsedate_to_datetime
+
+    if not raw:
+        return ""
+    try:
+        dt = parsedate_to_datetime(str(raw))
+    except (TypeError, ValueError):
+        return ""
+    if dt is None:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat()
 
 
 def _decode_header_value(raw: Any) -> str:

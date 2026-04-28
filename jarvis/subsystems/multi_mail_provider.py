@@ -100,6 +100,9 @@ class MultiMailProvider:
                 continue
             for item in items:
                 merged.append({**item, "id": f"{label}:{item['id']}", "account": label})
+        # Sort newest-first by ISO-8601 date when present; missing dates sink
+        # to the bottom but order within the same backend is preserved.
+        merged.sort(key=lambda m: m.get("date") or "", reverse=True)
         return merged[:max_results]
 
     def get_message(self, msg_id: str) -> dict:
