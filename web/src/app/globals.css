@@ -54,6 +54,39 @@
   --success: oklch(0.50 0.20 155);
   --warning: oklch(0.60 0.20 80);
   --info: oklch(0.50 0.22 265);
+
+  /* ─── Pipeline swimlane (Atlas) — light mode ──────────────────────────── */
+  /* Stage states. Reuse semantic tier palette where possible. */
+  --pipeline-stage-pending: oklch(0.78 0.012 260);     /* slate, low-energy   */
+  --pipeline-stage-running: oklch(0.55 0.20 265);      /* indigo, in-flight   */
+  --pipeline-stage-done:    oklch(0.50 0.20 155);      /* green, complete     */
+  --pipeline-stage-blocked: oklch(0.60 0.20 80);       /* amber, gated        */
+  --pipeline-stage-error:   oklch(0.55 0.22 25);       /* red, fault          */
+
+  /* Lane chrome */
+  --pipeline-lane-bg:        oklch(0.985 0 0);         /* paper white         */
+  --pipeline-lane-bg-alt:    oklch(0.965 0.005 260);   /* zebra striping      */
+  --pipeline-lane-divider:   oklch(0.88 0.008 260);    /* hairline rule       */
+  --pipeline-lane-header-bg: oklch(0.95 0.012 260);    /* sticky header band  */
+
+  /* Live event motion */
+  --pipeline-event-pulse-duration: 1100ms;             /* arrival flash       */
+  --pipeline-event-dwell-ms: 600ms;                    /* fade-in ease window */
+
+  /* Charts (extend, don't replace --chart-1..5 which are ranked palette) */
+  --chart-axis: oklch(0.55 0.012 260);                 /* axis labels         */
+  --chart-grid: oklch(0.92 0.006 260);                 /* gridlines           */
+  --chart-tooltip-bg: oklch(0.18 0.030 250);           /* dark inverted chip  */
+  --chart-tooltip-fg: oklch(0.97 0.005 250);
+
+  /* Per-agent bar tones — align with subsystem identity, distinct hues */
+  --chart-bar-tempo:   oklch(0.62 0.18 200);           /* cyan — calendar/mail*/
+  --chart-bar-scholar: oklch(0.58 0.20 290);           /* violet — academia   */
+  --chart-bar-lens:    oklch(0.65 0.18 80);            /* amber — research    */
+  --chart-bar-forge:   oklch(0.55 0.22 25);            /* red — code/PR       */
+  --chart-bar-atlas:   oklch(0.55 0.20 155);           /* green — capital     */
+  --chart-bar-jarvis:  oklch(0.50 0.04 260);           /* graphite — orchestrator */
+  --chart-bar-sentinel: oklch(0.70 0.012 260);         /* light gray — daemon */
 }
 
 .dark {
@@ -118,6 +151,39 @@
   --success: oklch(0.6 0.17 155);
   --warning: oklch(0.7 0.18 80);
   --info: oklch(0.65 0.2 265);
+
+  /* ─── Pipeline swimlane (Atlas) — dark mode ───────────────────────────── */
+  /* Higher chroma + lightness vs light mode so states pop on navy. */
+  --pipeline-stage-pending: oklch(0.50 0.020 250);     /* dim slate           */
+  --pipeline-stage-running: oklch(0.68 0.20 265);      /* bright indigo       */
+  --pipeline-stage-done:    oklch(0.65 0.18 155);      /* mint green          */
+  --pipeline-stage-blocked: oklch(0.72 0.18 80);       /* warm amber          */
+  --pipeline-stage-error:   oklch(0.68 0.22 25);       /* hot red             */
+
+  /* Lane chrome — sit just above --card so lanes feel "etched" into surface */
+  --pipeline-lane-bg:        oklch(0.21 0.030 250);    /* lane surface        */
+  --pipeline-lane-bg-alt:    oklch(0.19 0.030 250);    /* zebra striping      */
+  --pipeline-lane-divider:   oklch(0.30 0.025 250);    /* sharp 1px rule      */
+  --pipeline-lane-header-bg: oklch(0.16 0.040 250);    /* deeper than lane    */
+
+  /* Live event motion (same timings cross-theme; brutalism = no easing drift) */
+  --pipeline-event-pulse-duration: 1100ms;
+  --pipeline-event-dwell-ms: 600ms;
+
+  /* Charts */
+  --chart-axis: oklch(0.65 0.020 250);
+  --chart-grid: oklch(0.28 0.025 250);
+  --chart-tooltip-bg: oklch(0.95 0.005 250);
+  --chart-tooltip-fg: oklch(0.18 0.030 250);
+
+  /* Per-agent bar tones — vibrant on navy */
+  --chart-bar-tempo:   oklch(0.72 0.17 200);
+  --chart-bar-scholar: oklch(0.68 0.20 290);
+  --chart-bar-lens:    oklch(0.75 0.18 80);
+  --chart-bar-forge:   oklch(0.68 0.22 25);
+  --chart-bar-atlas:   oklch(0.68 0.18 155);
+  --chart-bar-jarvis:  oklch(0.72 0.020 250);
+  --chart-bar-sentinel: oklch(0.50 0.020 250);
 }
 
 @theme inline {
@@ -164,6 +230,28 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+  /* Pipeline swimlane */
+  --color-pipeline-stage-pending: var(--pipeline-stage-pending);
+  --color-pipeline-stage-running: var(--pipeline-stage-running);
+  --color-pipeline-stage-done: var(--pipeline-stage-done);
+  --color-pipeline-stage-blocked: var(--pipeline-stage-blocked);
+  --color-pipeline-stage-error: var(--pipeline-stage-error);
+  --color-pipeline-lane-bg: var(--pipeline-lane-bg);
+  --color-pipeline-lane-bg-alt: var(--pipeline-lane-bg-alt);
+  --color-pipeline-lane-divider: var(--pipeline-lane-divider);
+  --color-pipeline-lane-header-bg: var(--pipeline-lane-header-bg);
+  /* Charts */
+  --color-chart-axis: var(--chart-axis);
+  --color-chart-grid: var(--chart-grid);
+  --color-chart-tooltip-bg: var(--chart-tooltip-bg);
+  --color-chart-tooltip-fg: var(--chart-tooltip-fg);
+  --color-chart-bar-tempo: var(--chart-bar-tempo);
+  --color-chart-bar-scholar: var(--chart-bar-scholar);
+  --color-chart-bar-lens: var(--chart-bar-lens);
+  --color-chart-bar-forge: var(--chart-bar-forge);
+  --color-chart-bar-atlas: var(--chart-bar-atlas);
+  --color-chart-bar-jarvis: var(--chart-bar-jarvis);
+  --color-chart-bar-sentinel: var(--chart-bar-sentinel);
   /* Radii */
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -239,6 +327,34 @@
 
 .animate-fade-in-up {
   animation: fade-in-up 0.3s ease-out both;
+}
+
+/* Pipeline event arrival pulse — opacity + outline only (compositor-safe) */
+@keyframes pipeline-event-pulse {
+  0%   { opacity: 0; transform: translateY(2px); }
+  18%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-pipeline-event {
+  animation: pipeline-event-pulse var(--pipeline-event-pulse-duration) cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Running-stage breathing dot — purely opacity, sits inside lane header */
+@keyframes pipeline-stage-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
+.animate-stage-breathe {
+  animation: pipeline-stage-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pipeline-event,
+  .animate-stage-breathe {
+    animation: none;
+  }
 }
 
 /* Hide Next.js dev mode indicator */
