@@ -30,6 +30,7 @@ import {
   HeartPulse,
   Flag,
   Sparkles,
+  Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -58,6 +59,7 @@ const commsLinks = [
   { href: "/activity", label: "Activity", icon: Activity, badgeKey: null },
   { href: "/decisions", label: "Decisions", icon: HelpCircle, badgeKey: "pendingDecisions" as const },
   { href: "/brain-dump", label: "Brain Dump", icon: Lightbulb, badgeKey: null },
+  { href: "/preferences", label: "Preferences", icon: Settings2, badgeKey: null },
 ];
 
 // Dynamic icon lookup by name

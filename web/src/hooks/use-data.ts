@@ -242,7 +242,9 @@ export function useActivityLog() {
 }
 
 export function useInbox() {
-  const { items: messages, ...rest } = useDataResource<InboxMessage>("inbox", "messages", "Message", 10_000);
+  // Polling removed — live updates come from useInboxStream (WebSocket).
+  // An initial fetch (no interval) is still performed for backfill.
+  const { items: messages, ...rest } = useDataResource<InboxMessage>("inbox", "messages", "Message");
   return { messages, ...rest };
 }
 

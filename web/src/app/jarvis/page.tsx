@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
+import { DispatchConfirmDialog } from "@/components/DispatchConfirmDialog";
 import { cn } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -131,10 +132,17 @@ function VerificationPill({ status }: { status?: string }) {
 
 // ─── Page ───────────────────────────────────────────────────────────────────
 
+interface PendingConfirmation {
+  confirmationId: string;
+  summary: string;
+  turnId: string;
+}
+
 export default function JarvisPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmation | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -196,6 +204,27 @@ export default function JarvisPage() {
           try {
             const evt = JSON.parse(payload) as Record<string, unknown>;
             applyEvent(turnId, evt, setTurns);
+
+            // Surface confirmation gate from dispatch responses
+            if (evt.type === "tool_result") {
+              const text = String(evt.text ?? "");
+              try {
+                const parsed = JSON.parse(text) as AgentResponse;
+                if (
+                  parsed.needs_confirm === true &&
+                  typeof (parsed as Record<string, unknown>)["confirmation_id"] === "string"
+                ) {
+                  const cid = (parsed as Record<string, unknown>)["confirmation_id"] as string;
+                  const summaryText =
+                    typeof (parsed as Record<string, unknown>)["summary"] === "string"
+                      ? ((parsed as Record<string, unknown>)["summary"] as string)
+                      : parsed.intent ?? "Action requires operator approval.";
+                  setPendingConfirm({ confirmationId: cid, summary: summaryText, turnId });
+                }
+              } catch {
+                // non-JSON tool result — skip
+              }
+            }
           } catch {
             // ignore malformed event
           }
@@ -243,6 +272,44 @@ export default function JarvisPage() {
   return (
     <div className="flex h-full flex-col">
       <BreadcrumbNav items={[{ label: "Jarvis" }]} />
+
+      {pendingConfirm && (() => {
+        // Capture a stable reference before callbacks mutate state.
+        const captured = pendingConfirm;
+        return (
+          <DispatchConfirmDialog
+            open
+            onOpenChange={(open) => { if (!open) setPendingConfirm(null); }}
+            confirmationId={captured.confirmationId}
+            summary={captured.summary}
+            onApproved={(result) => {
+              setPendingConfirm(null);
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === captured.turnId
+                    ? {
+                        ...t,
+                        text:
+                          t.text +
+                          `\n\n[approved] ${typeof result === "object" && result !== null ? JSON.stringify(result, null, 2).slice(0, 400) : String(result)}`,
+                      }
+                    : t
+                )
+              );
+            }}
+            onRejected={() => {
+              setPendingConfirm(null);
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === captured.turnId
+                    ? { ...t, text: t.text + "\n\n[rejected by operator]" }
+                    : t
+                )
+              );
+            }}
+          />
+        );
+      })()}
 
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
 import { useInbox, useTasks } from "@/hooks/use-data";
+import { useInboxStream } from "@/hooks/useInboxStream";
 import { MessageRowSkeleton } from "@/components/skeletons";
 import { ErrorState } from "@/components/error-state";
 import { Tip } from "@/components/ui/tip";
@@ -124,8 +125,35 @@ function groupIntoThreads(messages: InboxMessage[]): Thread[] {
 // ─── Page Component ─────────────────────────────────────────────────────────
 
 export default function InboxPage() {
-  const { messages, loading, create: createMessage, update: updateMessage, error: inboxError, refetch } = useInbox();
+  const { messages: httpMessages, loading, create: createMessage, update: updateMessage, error: inboxError, refetch } = useInbox();
+  const { events: wsEvents } = useInboxStream();
   const { tasks } = useTasks();
+
+  // Merge HTTP backfill + live WS events, deduplicating by id.
+  const messages: InboxMessage[] = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: InboxMessage[] = [];
+
+    for (const m of httpMessages) {
+      seen.add(m.id);
+      merged.push(m);
+    }
+
+    for (const ev of wsEvents) {
+      // WS inbox.events carry an InboxMessage in ev.payload
+      const candidate = ev.payload as Partial<InboxMessage>;
+      if (
+        typeof candidate.id === "string" &&
+        !seen.has(candidate.id) &&
+        typeof candidate.subject === "string"
+      ) {
+        seen.add(candidate.id);
+        merged.push(candidate as InboxMessage);
+      }
+    }
+
+    return merged;
+  }, [httpMessages, wsEvents]);
   const [filterAgent, setFilterAgent] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [expandedThread, setExpandedThread] = useState<string | null>(null);
