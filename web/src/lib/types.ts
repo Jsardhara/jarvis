@@ -377,6 +377,51 @@ export interface MissionsFile {
   missions: MissionRun[];
 }
 
+// ─── Pipeline Swimlane (Atlas) ────────────────────────────────────────────────
+
+export type PipelineLane = 'oracle' | 'architect' | 'guardian' | 'trader' | 'sage';
+export type PipelineState = 'pending' | 'running' | 'done' | 'blocked' | 'error';
+
+export interface TraceEvent {
+  id: string;
+  pipelineRun: number;
+  lane: PipelineLane;
+  state: PipelineState;
+  startedAt: string;        // ISO 8601
+  endedAt?: string;
+  durationMs?: number;
+  tier?: 1 | 2 | 3 | 4 | 5;
+  intent?: string;
+  needsConfirm?: boolean;
+  violations?: string[];
+  errorMessage?: string;
+}
+
+// ─── Cost Chart (daily rollup) ────────────────────────────────────────────────
+
+export type CostAgent =
+  | 'tempo'
+  | 'scholar'
+  | 'lens'
+  | 'forge'
+  | 'atlas'
+  | 'jarvis'
+  | 'sentinel';
+
+export interface AgentCost {
+  agent: CostAgent;
+  costUsd: number;
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface DailyRollup {
+  date: string;             // YYYY-MM-DD
+  totalUsd: number;
+  perAgent: AgentCost[];
+}
+
 // ─── Atlas Snapshot ───────────────────────────────────────────────────────────
 
 export interface AtlasSnapshot {

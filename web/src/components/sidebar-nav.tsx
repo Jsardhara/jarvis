@@ -11,6 +11,8 @@ import {
   Lightbulb,
   FolderOpen,
   Zap,
+  GitBranch,
+  DollarSign,
 } from "lucide-react";
 
 const links = [
@@ -21,6 +23,8 @@ const links = [
   { href: "/brain-dump", label: "Brain Dump", icon: Lightbulb },
   { href: "/projects", label: "Projects", icon: FolderOpen },
   { href: "/launch", label: "Launch", icon: Zap },
+  { href: "/atlas/pipeline", label: "Atlas Pipeline", icon: GitBranch },
+  { href: "/cost", label: "Cost", icon: DollarSign },
 ];
 
 export function SidebarNav() {
