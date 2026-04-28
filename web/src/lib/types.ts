@@ -377,6 +377,16 @@ export interface MissionsFile {
   missions: MissionRun[];
 }
 
+// ─── Atlas Snapshot ───────────────────────────────────────────────────────────
+
+export interface AtlasSnapshot {
+  portfolio: Record<string, unknown>;
+  pnl: Record<string, unknown>;
+  positions: unknown[];
+  degraded: boolean;
+  ts: string;
+}
+
 // ─── Eisenhower quadrant helpers ──────────────────────────────────────────────
 
 export type EisenhowerQuadrant =
