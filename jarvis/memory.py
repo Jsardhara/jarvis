@@ -3,14 +3,75 @@
 Tier 1 — session:    in-memory dict, caller-owned, immutable operations
 Tier 2 — daily:      state/memory/daily/YYYY-MM-DD.md, markdown append
 Tier 3 — long-term:  state/memory/MEMORY.md, append-only index
+
+Also owns: OperatorPreferences — persisted to state/preferences.json.
 """
 from __future__ import annotations
 
+import json
+import tempfile
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from . import config as _config
+
+# ── Operator preferences ────────────────────────────────────────────────────
+
+
+def get_settings():  # thin re-export so tests can monkeypatch jarvis.memory.get_settings
+    return _config.get_settings()
+
+
+@dataclass(frozen=True)
+class OperatorPreferences:
+    """Persistent operator configuration.
+
+    All fields have sensible defaults so load_preferences() never fails.
+    """
+
+    important_senders: tuple[str, ...] = ()
+    scholar_lead_time_days: int = 7
+    atlas_risk_tolerance: float = 0.05  # max drawdown alert threshold
+    updated_at: str = ""  # ISO timestamp of last save
+
+
+def _preferences_path() -> Path:
+    return get_settings().state_dir / "preferences.json"
+
+
+def load_preferences() -> OperatorPreferences:
+    """Load from state/preferences.json; return defaults if the file is absent."""
+    p = _preferences_path()
+    if not p.exists():
+        return OperatorPreferences()
+    raw = json.loads(p.read_text(encoding="utf-8"))
+    return OperatorPreferences(
+        important_senders=tuple(raw.get("important_senders", ())),
+        scholar_lead_time_days=int(raw.get("scholar_lead_time_days", 7)),
+        atlas_risk_tolerance=float(raw.get("atlas_risk_tolerance", 0.05)),
+        updated_at=raw.get("updated_at", ""),
+    )
+
+
+def save_preferences(prefs: OperatorPreferences) -> None:
+    """Atomically write preferences to state/preferences.json."""
+    p = _preferences_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    data = asdict(prefs)
+    # tuple -> list for JSON serialisation
+    data["important_senders"] = list(data["important_senders"])
+    content = json.dumps(data, indent=2)
+    # Atomic write via temp file in same directory
+    tmp_fd, tmp_name = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
+    try:
+        with open(tmp_fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        Path(tmp_name).replace(p)
+    except Exception:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def _now_iso() -> str:

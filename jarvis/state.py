@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import gzip
 import json
-from collections.abc import Iterable
+import logging
+from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -16,8 +17,29 @@ from .contract import (
     Task,
 )
 
+log = logging.getLogger(__name__)
+
 _WATCHLIST_DEFAULT = ["BTC", "ETH", "SOL"]
 _ROTATE_KEEP_UNCOMPRESSED_DAYS = 7
+
+# ── Inbox listeners — notified synchronously after each append_inbox call ──
+
+_inbox_listeners: list[Callable[[InboxEvent], None]] = []
+
+
+def register_inbox_listener(fn: Callable[[InboxEvent], None]) -> None:
+    """Register a callback to be called after each append_inbox.
+
+    Duplicate registrations are silently ignored.
+    """
+    if fn not in _inbox_listeners:
+        _inbox_listeners.append(fn)
+
+
+def unregister_inbox_listener(fn: Callable[[InboxEvent], None]) -> None:
+    """Remove a previously registered inbox listener (no-op if absent)."""
+    if fn in _inbox_listeners:
+        _inbox_listeners.remove(fn)
 
 TASKS_SCHEMA_VERSION = 1
 
@@ -92,6 +114,11 @@ def append_inbox(event: InboxEvent) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(event.model_dump_json() + "\n")
+    for fn in list(_inbox_listeners):
+        try:
+            fn(event)
+        except Exception:
+            log.warning("inbox listener %r raised", fn, exc_info=True)
 
 
 def read_inbox(limit: int = 20) -> list[InboxEvent]:

@@ -108,6 +108,7 @@ class Confirmation(BaseModel):
     ts: str = Field(default_factory=_now_iso)
     agent: str
     intent: str
+    request: str = Field(default="", description="Original operator request text for replay")
     args: dict[str, Any] = Field(default_factory=dict)
     summary: str = ""
     status: str = Field(default="pending", pattern="^(pending|approved|rejected)$")

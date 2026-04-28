@@ -51,25 +51,22 @@ log = logging.getLogger(__name__)
 # ── Module-level inbox push helper (synchronous; tests call it directly) ──
 
 _active_bus: _Broadcaster | None = None
+_active_loop: asyncio.AbstractEventLoop | None = None
 
 
 def _push_inbox_event(event: InboxEvent) -> None:
     """Fire an inbox.event broadcast if a bus is active.
 
-    Called by the state-layer listener registered in make_app, and also
-    directly by tests that want to exercise the WS path without HTTP.
+    Schedules the broadcast on the captured app event loop using
+    `run_coroutine_threadsafe` so calls from any thread (sentinel,
+    test main thread) are safely delivered without relying on the
+    py3.10+-deprecated implicit-loop behaviour.
     """
-    if _active_bus is None:
+    if _active_bus is None or _active_loop is None:
         return
-    # Schedule on the running event loop; safe to call from sync context.
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.ensure_future(
-                _active_bus.broadcast({"type": "inbox.event", "event": event.model_dump()})
-            )
-    except RuntimeError:
-        pass
+    payload = {"type": "inbox.event", "event": event.model_dump()}
+    if _active_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_active_bus.broadcast(payload), _active_loop)
 
 
 def _build_orchestrator(registry: dict[str, AgentDescriptor]) -> Orchestrator:
@@ -615,6 +612,8 @@ def make_app(
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):  # pragma: no cover - websocket runtime
+        global _active_loop
+        _active_loop = asyncio.get_running_loop()
         await websocket.accept()
         await bus.add(websocket)
         try:
@@ -622,6 +621,11 @@ def make_app(
                 _ = await websocket.receive_text()
         except WebSocketDisconnect:
             await bus.remove(websocket)
+
+    @app.on_event("startup")
+    async def _capture_loop() -> None:
+        global _active_loop
+        _active_loop = asyncio.get_running_loop()
 
     # Test helper: surface bus + registry as app.state so tests can inspect
     app.state.broadcaster = bus
