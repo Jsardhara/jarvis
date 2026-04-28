@@ -113,3 +113,11 @@ class Confirmation(BaseModel):
     status: str = Field(default="pending", pattern="^(pending|approved|rejected)$")
     resolved_ts: str | None = None
     resolved_result: dict[str, Any] | None = None
+
+
+class SentinelHealthEvent(BaseModel):
+    """One line in state/sentinel_health.jsonl — infrastructure heartbeat, not operator inbox."""
+
+    ts: str = Field(default_factory=_now_iso)
+    job_count: int
+    jobs: dict[str, str] = Field(default_factory=dict, description="job_id -> status")

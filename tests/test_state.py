@@ -1,8 +1,17 @@
-"""tasks.json + inbox.jsonl persistence."""
+"""tasks.json + inbox.jsonl + sentinel_health persistence."""
 from __future__ import annotations
 
-from jarvis.contract import InboxEvent, Task
-from jarvis.state import add_task, append_inbox, load_tasks, read_inbox, save_tasks, update_task
+from jarvis.contract import InboxEvent, SentinelHealthEvent, Task
+from jarvis.state import (
+    add_task,
+    append_inbox,
+    append_sentinel_health,
+    load_tasks,
+    read_inbox,
+    read_sentinel_health,
+    save_tasks,
+    update_task,
+)
 
 
 def test_save_load_tasks_roundtrip():
@@ -57,3 +66,36 @@ def test_inbox_empty_when_no_file():
 
 def test_load_tasks_empty_when_no_file():
     assert load_tasks() == []
+
+
+# --- sentinel_health.jsonl ---
+
+
+def test_sentinel_health_empty_when_no_file():
+    assert read_sentinel_health() == []
+
+
+def test_sentinel_health_append_and_read():
+    ev = SentinelHealthEvent(job_count=3, jobs={"email": "scheduled", "atlas": "scheduled", "news": "scheduled"})
+    append_sentinel_health(ev)
+    ticks = read_sentinel_health()
+    assert len(ticks) == 1
+    assert ticks[0].job_count == 3
+    assert ticks[0].jobs["email"] == "scheduled"
+
+
+def test_sentinel_health_limit():
+    for i in range(20):
+        append_sentinel_health(SentinelHealthEvent(job_count=i, jobs={}))
+    tail = read_sentinel_health(limit=5)
+    assert len(tail) == 5
+    assert tail[-1].job_count == 19
+
+
+def test_sentinel_health_does_not_write_inbox():
+    """Heartbeat writes go to sentinel_health.jsonl, not inbox.jsonl."""
+    ev = SentinelHealthEvent(job_count=1, jobs={"email": "scheduled"})
+    append_sentinel_health(ev)
+    # inbox stays clean — no sentinel heartbeat entries
+    inbox = read_inbox()
+    assert all(not (e.agent == "sentinel" and e.summary == "heartbeat") for e in inbox)

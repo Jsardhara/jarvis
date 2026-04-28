@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -124,6 +125,27 @@ def _make_event_sink(bus: _Broadcaster) -> Any:
     return sink
 
 
+def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
+    """Build atlas snapshot payload; returns degraded=True on any failure."""
+    ts = datetime.now(UTC).isoformat()
+    atlas_desc = reg.get("atlas")
+    if atlas_desc is None:
+        return {"portfolio": {}, "pnl": {}, "positions": [], "degraded": True, "ts": ts}
+    try:
+        portfolio = atlas_desc.call("portfolio").result
+        pnl = atlas_desc.call("pnl").result
+        positions_resp = atlas_desc.call("positions").result
+        if isinstance(positions_resp, list):
+            positions = positions_resp
+        else:
+            positions = positions_resp.get("positions", [])
+        degraded = bool(portfolio.get("mock") or pnl.get("mock"))
+    except Exception:
+        log.warning("atlas snapshot failed — returning degraded mock", exc_info=True)
+        return {"portfolio": {}, "pnl": {}, "positions": [], "degraded": True, "ts": ts}
+    return {"portfolio": portfolio, "pnl": pnl, "positions": positions, "degraded": degraded, "ts": ts}
+
+
 def make_app(orchestrator: Orchestrator | None = None,
              registry: dict[str, AgentDescriptor] | None = None) -> FastAPI:
     if not HAS_FASTAPI:
@@ -148,6 +170,16 @@ def make_app(orchestrator: Orchestrator | None = None,
     @app.get("/api/inbox")
     async def inbox(limit: int = 50) -> dict[str, Any]:
         return {"events": [e.model_dump() for e in read_inbox(limit=limit)]}
+
+    @app.get("/api/activity")
+    async def activity(limit: int = 100) -> dict[str, Any]:
+        """Return recent agent_log entries — mirrors /api/inbox shape."""
+        return {"entries": [e.model_dump() for e in read_agent_log(limit=limit)]}
+
+    @app.get("/api/atlas/snapshot")
+    async def atlas_snapshot() -> dict[str, Any]:
+        """Combine portfolio + pnl + positions; set degraded=True when ATLAS is offline."""
+        return _atlas_snapshot_data(reg)
 
     @app.get("/api/tasks")
     async def tasks() -> dict[str, Any]:

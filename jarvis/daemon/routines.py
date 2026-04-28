@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..config import get_settings
-from ..contract import InboxEvent
+from ..contract import InboxEvent, SentinelHealthEvent
 from ..memory import append_daily, remember_session
-from ..state import append_inbox, read_agent_log
+from ..state import append_inbox, append_sentinel_health, read_agent_log
 from ..subsystems.atlas import AtlasOrchestrator
 from ..subsystems.lens import Lens
 from ..subsystems.scholar import Scholar
@@ -124,9 +124,13 @@ def morning_digest(tempo: Tempo, atlas: AtlasOrchestrator, scholar: Scholar,
 
 
 def heartbeat_tick(sched: BaseScheduler, notifier: Notifier) -> dict[str, Any]:
-    """Write a silent health tick to inbox.jsonl with current APScheduler job states."""
-    jobs = {j.id: "scheduled" if not j.pending else "paused"
-            for j in sched.get_jobs()}
+    """Write an infra health tick.
+
+    Mirrors to sentinel_health.jsonl (clean infra file) and keeps a slim
+    entry in inbox.jsonl so existing monitors stay compatible.
+    """
+    jobs = {j.id: "scheduled" if not j.pending else "paused" for j in sched.get_jobs()}
+    append_sentinel_health(SentinelHealthEvent(job_count=len(jobs), jobs=jobs))
     append_inbox(InboxEvent(
         agent="sentinel",
         severity="info",

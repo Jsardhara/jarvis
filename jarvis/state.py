@@ -6,7 +6,13 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from .config import get_settings
-from .contract import AgentLogEntry, Confirmation, InboxEvent, Task
+from .contract import (
+    AgentLogEntry,
+    Confirmation,
+    InboxEvent,
+    SentinelHealthEvent,
+    Task,
+)
 
 TASKS_SCHEMA_VERSION = 1
 
@@ -25,6 +31,10 @@ def _agent_log_path() -> Path:
 
 def _confirmations_path() -> Path:
     return get_settings().state_dir / "confirmations.jsonl"
+
+
+def _sentinel_health_path() -> Path:
+    return get_settings().state_dir / "sentinel_health.jsonl"
 
 
 def load_tasks() -> list[Task]:
@@ -137,3 +147,24 @@ def update_confirmation(confirmation_id: str, **fields) -> Confirmation | None:
                 f.write(updated.model_dump_json() + "\n")
             return updated
     return None
+
+
+# --- Sentinel infrastructure health (not operator inbox) ---
+
+
+def append_sentinel_health(event: SentinelHealthEvent) -> None:
+    """Write a heartbeat tick to sentinel_health.jsonl — NOT inbox.jsonl."""
+    p = _sentinel_health_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a", encoding="utf-8") as f:
+        f.write(event.model_dump_json() + "\n")
+
+
+def read_sentinel_health(limit: int = 100) -> list[SentinelHealthEvent]:
+    """Return recent sentinel health ticks (newest last)."""
+    p = _sentinel_health_path()
+    if not p.exists():
+        return []
+    lines = p.read_text(encoding="utf-8").splitlines()
+    tail = lines[-limit:] if limit else lines
+    return [SentinelHealthEvent(**json.loads(line)) for line in tail if line.strip()]
