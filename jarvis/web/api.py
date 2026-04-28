@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import asdict
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
@@ -24,8 +25,9 @@ try:
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
-from ..contract import AgentLogEntry, Confirmation, Task, TraceEvent
+from ..contract import AgentLogEntry, Confirmation, InboxEvent, Task, TraceEvent
 from ..cost import daily_rollup
+from ..memory import OperatorPreferences, load_preferences, save_preferences
 from ..orchestrator import Orchestrator
 from ..state import (
     add_confirmation,
@@ -36,13 +38,38 @@ from ..state import (
     read_agent_log,
     read_confirmations,
     read_inbox,
+    register_inbox_listener,
     save_watchlist,
+    unregister_inbox_listener,
     update_confirmation,
     update_task,
 )
 from ..subsystems.registry import AgentDescriptor, build_default_registry
 
 log = logging.getLogger(__name__)
+
+# ── Module-level inbox push helper (synchronous; tests call it directly) ──
+
+_active_bus: _Broadcaster | None = None
+
+
+def _push_inbox_event(event: InboxEvent) -> None:
+    """Fire an inbox.event broadcast if a bus is active.
+
+    Called by the state-layer listener registered in make_app, and also
+    directly by tests that want to exercise the WS path without HTTP.
+    """
+    if _active_bus is None:
+        return
+    # Schedule on the running event loop; safe to call from sync context.
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.ensure_future(
+                _active_bus.broadcast({"type": "inbox.event", "event": event.model_dump()})
+            )
+    except RuntimeError:
+        pass
 
 
 def _build_orchestrator(registry: dict[str, AgentDescriptor]) -> Orchestrator:
@@ -59,7 +86,7 @@ def _build_orchestrator(registry: dict[str, AgentDescriptor]) -> Orchestrator:
 class _Broadcaster:
     """Tiny WebSocket fan-out for live agent activity."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._subs: list[WebSocket] = []
         self._lock = asyncio.Lock()
 
@@ -162,16 +189,54 @@ def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
     }
 
 
+def _validate_preferences_payload(payload: dict[str, Any]) -> OperatorPreferences:
+    """Parse + validate PUT /api/preferences body; raise HTTPException on bad input."""
+    senders_raw = payload.get("important_senders", ())
+    lead_raw = payload.get("scholar_lead_time_days", 7)
+    risk_raw = payload.get("atlas_risk_tolerance", 0.05)
+
+    if not isinstance(senders_raw, (list, tuple)):
+        raise HTTPException(status_code=422, detail="important_senders must be a list")
+    if not all(isinstance(s, str) for s in senders_raw):
+        raise HTTPException(status_code=422, detail="important_senders items must be strings")
+    if not isinstance(lead_raw, int) or isinstance(lead_raw, bool):
+        raise HTTPException(status_code=422, detail="scholar_lead_time_days must be an integer")
+    if lead_raw < 0:
+        raise HTTPException(status_code=422, detail="scholar_lead_time_days must be >= 0")
+    try:
+        risk = float(risk_raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="atlas_risk_tolerance must be a number") from None
+    if not (0.0 <= risk <= 1.0):
+        raise HTTPException(
+            status_code=422, detail="atlas_risk_tolerance must be between 0.0 and 1.0"
+        )
+
+    from datetime import UTC, datetime
+
+    return OperatorPreferences(
+        important_senders=tuple(senders_raw),
+        scholar_lead_time_days=int(lead_raw),
+        atlas_risk_tolerance=risk,
+        updated_at=datetime.now(UTC).isoformat(),
+    )
+
+
 def make_app(
     orchestrator: Orchestrator | None = None,
     registry: dict[str, AgentDescriptor] | None = None,
 ) -> FastAPI:
+    global _active_bus
     if not HAS_FASTAPI:
         raise RuntimeError("fastapi not installed — pip install jarvis[web]")
     reg = registry or build_default_registry()
     o = orchestrator or _build_orchestrator(reg)
     bus = _Broadcaster()
+    _active_bus = bus
     o.set_event_sink(_make_event_sink(bus))
+
+    # Register inbox listener so sentinel-written events reach the WS bus.
+    register_inbox_listener(_push_inbox_event)
 
     app = FastAPI(title="Jarvis API", version="0.2.0")
     app.add_middleware(
@@ -180,6 +245,10 @@ def make_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.on_event("shutdown")
+    async def _cleanup() -> None:
+        unregister_inbox_listener(_push_inbox_event)
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -224,17 +293,23 @@ def make_app(
         request = payload.get("request", "")
         result = await o.dispatch(request)
         await bus.broadcast({"type": "dispatch", "request": request, "result": result})
-        # Auto-capture confirmations from any agent that needs_confirm
+
+        # Auto-capture confirmations from any agent that needs_confirm.
+        # Return the id of the first confirmation created (for the C2 dialog).
+        first_conf_id: str | None = None
         for agent_name, resp in result.get("responses", {}).items():
             if resp.get("needs_confirm"):
                 conf = add_confirmation(
                     Confirmation(
                         agent=agent_name,
                         intent=resp.get("intent", ""),
+                        request=request,
                         args=resp.get("result", {}),
                         summary=", ".join(resp.get("follow_ups", []))[:160],
                     )
                 )
+                if first_conf_id is None:
+                    first_conf_id = conf.id
                 await bus.broadcast(
                     {
                         "type": "confirmation.created",
@@ -246,6 +321,34 @@ def make_app(
                         ).model_dump(),
                     }
                 )
+
+        # Also handle authority-blocked dispatches (confirmation_required path)
+        if result.get("confirmation_required") and first_conf_id is None:
+            intent_data = result.get("intent", {})
+            agent_name = intent_data.get("primary", "unknown")
+            conf = add_confirmation(
+                Confirmation(
+                    agent=agent_name,
+                    intent=intent_data.get("raw_request", request),
+                    request=request,
+                    summary=result.get("authority_error", "")[:160],
+                )
+            )
+            first_conf_id = conf.id
+            await bus.broadcast(
+                {
+                    "type": "confirmation.created",
+                    **TraceEvent(
+                        type="confirmation.created",
+                        request_id=result.get("request_id", ""),
+                        agent=agent_name,
+                        payload={"confirmation": conf.model_dump()},
+                    ).model_dump(),
+                }
+            )
+
+        if first_conf_id is not None:
+            return {**result, "confirmation_id": first_conf_id}
         return result
 
     # --- Mission-control: per-agent + confirmations endpoints ---
@@ -380,21 +483,32 @@ def make_app(
 
     @app.post("/api/confirmations/{confirmation_id}/approve")
     async def approve_confirmation(confirmation_id: str) -> dict[str, Any]:
-        updated = update_confirmation(confirmation_id, status="approved")
-        if updated is None:
+        conf = update_confirmation(confirmation_id, status="approved")
+        if conf is None:
             raise HTTPException(status_code=404, detail="confirmation not found")
+
+        # Replay the original request with confirmed=True
+        dispatch_result = await o.dispatch(conf.request, confirmed=True)
+
+        # Persist the replay result back onto the confirmation record
+        conf = update_confirmation(
+            confirmation_id,
+            status="approved",
+            resolved_result=dispatch_result,
+        )
+
         await bus.broadcast(
             {
                 "type": "confirmation.resolved",
                 **TraceEvent(
                     type="confirmation.resolved",
                     request_id=confirmation_id,
-                    agent=updated.agent,
-                    payload={"confirmation": updated.model_dump()},
+                    agent=conf.agent,
+                    payload={"confirmation": conf.model_dump()},
                 ).model_dump(),
             }
         )
-        return updated.model_dump()
+        return {"status": "approved", "id": confirmation_id, "dispatch_result": dispatch_result}
 
     @app.post("/api/confirmations/{confirmation_id}/reject")
     async def reject_confirmation(confirmation_id: str) -> dict[str, Any]:
@@ -412,7 +526,7 @@ def make_app(
                 ).model_dump(),
             }
         )
-        return updated.model_dump()
+        return {"ok": True, "id": confirmation_id, "status": "rejected"}
 
     # ─── Watchlist ────────────────────────────────────────────────────────────
 
@@ -444,6 +558,23 @@ def make_app(
                     status_code=422, detail="date must be YYYY-MM-DD"
                 ) from None
         return daily_rollup(target)
+
+    # ─── Operator preferences ─────────────────────────────────────────────────
+
+    @app.get("/api/preferences")
+    async def get_preferences() -> dict[str, Any]:
+        prefs = load_preferences()
+        data = asdict(prefs)
+        data["important_senders"] = list(data["important_senders"])
+        return data
+
+    @app.put("/api/preferences")
+    async def put_preferences(payload: dict[str, Any]) -> dict[str, Any]:
+        prefs = _validate_preferences_payload(payload)
+        save_preferences(prefs)
+        data = asdict(prefs)
+        data["important_senders"] = list(data["important_senders"])
+        return data
 
     # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ────────────────────
 

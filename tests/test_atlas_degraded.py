@@ -163,3 +163,145 @@ def test_auto_mock_disabled_does_not_check_health():
     assert resp.result.get("mock") is True
     # No degraded flag since health gate was not consulted
     assert resp.result.get("meta", {}).get("degraded") is not True
+
+
+# ---------- Live HTTP tests with respx ----------
+
+
+def test_atlas_bridge_portfolio_timeout():
+    """AtlasBridge.portfolio() handles timeout gracefully."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/portfolio").mock(side_effect=httpx.TimeoutException("timeout"))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.portfolio()
+    assert result is None
+
+
+def test_atlas_bridge_positions_http_error():
+    """AtlasBridge.open_positions() handles 4xx/5xx gracefully."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/trades/open").mock(return_value=httpx.Response(500))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.open_positions()
+    assert result is None
+
+
+def test_atlas_bridge_pnl_success_with_window():
+    """AtlasBridge.pnl() sets default window if missing."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/trades/stats").mock(return_value=httpx.Response(200, json={
+            "pnl_usd": 100.0,
+            "pnl_pct": 0.01,
+        }))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.pnl(window="30d")
+    assert result["window"] == "30d"
+
+
+def test_atlas_bridge_strategies_extracts_from_dict():
+    """AtlasBridge.strategies() extracts from dict with 'strategies' key."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/strategies").mock(return_value=httpx.Response(200, json={
+            "strategies": [
+                {"id": "s1", "score": 0.9},
+                {"id": "s2", "score": 0.7},
+            ],
+        }))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.strategies()
+    assert len(result) == 2
+    assert result[0]["id"] == "s1"
+
+
+def test_atlas_bridge_run_strategy_success():
+    """AtlasBridge.run_strategy() POSTs with mode parameter."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        route = mock.post("/strategies/test_strat/activate")
+        route.mock(return_value=httpx.Response(200, json={
+            "run_id": "r123",
+            "status": "queued",
+        }))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.run_strategy("test_strat", mode="live")
+    assert result["run_id"] == "r123"
+
+
+def test_atlas_orchestrator_positions_count():
+    """AtlasOrchestrator.positions() includes position count."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/api/health").mock(return_value=httpx.Response(200))
+        mock.get("/trades/open").mock(return_value=httpx.Response(200, json=[
+            {"id": "p1"},
+            {"id": "p2"},
+            {"id": "p3"},
+        ]))
+        bridge = AtlasBridge(base_url="http://test")
+        orch = AtlasOrchestrator(bridge=bridge, allow_mock=False, auto_mock_on_offline=True)
+        resp = orch.positions()
+    assert resp.result["count"] == 3
+
+
+def test_atlas_orchestrator_architect_rank_with_regime():
+    """AtlasOrchestrator.architect_rank() filters by regime."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/api/health").mock(return_value=httpx.Response(200))
+        mock.get("/strategies").mock(return_value=httpx.Response(200, json=[
+            {"id": "risk_on_strat", "score": 0.9, "regime_fit": "risk_on"},
+            {"id": "risk_off_strat", "score": 0.8, "regime_fit": "risk_off"},
+            {"id": "neutral_strat", "score": 0.7, "regime_fit": "neutral"},
+        ]))
+        bridge = AtlasBridge(base_url="http://test")
+        orch = AtlasOrchestrator(bridge=bridge, allow_mock=False, auto_mock_on_offline=True)
+        resp = orch.architect_rank(regime="risk_on")
+    ranked = resp.result["ranked"]
+    assert ranked[0]["id"] == "risk_on_strat"
+
+
+def test_atlas_bridge_market_scan_fallback():
+    """AtlasBridge.market_scan() falls back from /market/scan to /oracle/scan."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/market/scan").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/oracle/scan").mock(return_value=httpx.Response(200, json={
+            "regime": "neutral",
+            "top_movers": [],
+        }))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.market_scan()
+    assert result is not None
+    assert result["regime"] == "neutral"
+
+
+def test_atlas_bridge_health_fallback():
+    """AtlasBridge.health() falls back from /system/health to /health."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/system/health").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/health").mock(return_value=httpx.Response(200, json={}))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.health()
+    assert result is True
+
+
+def test_atlas_bridge_open_positions_dict_with_trades_key():
+    """AtlasBridge.open_positions() extracts from dict with 'trades' key."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/trades/open").mock(return_value=httpx.Response(200, json={
+            "trades": [
+                {"id": "t1", "symbol": "BTC/USD"},
+            ],
+        }))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.open_positions()
+    assert len(result) == 1
+
+
+def test_atlas_bridge_open_positions_dict_with_positions_key():
+    """AtlasBridge.open_positions() extracts from dict with 'positions' key."""
+    with respx.mock(base_url="http://test", assert_all_called=False) as mock:
+        mock.get("/trades/open").mock(return_value=httpx.Response(200, json={
+            "positions": [
+                {"id": "p1", "symbol": "ETH/USD"},
+            ],
+        }))
+        bridge = AtlasBridge(base_url="http://test")
+        result = bridge.open_positions()
+    assert len(result) == 1

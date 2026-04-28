@@ -59,7 +59,7 @@ def test_calendar_tick_records_events():
 def test_atlas_tick_alerts_on_drawdown():
     transport = httpx.MockTransport(lambda r: httpx.Response(200, json={"pnl_pct": -0.10}))
     atlas = AtlasOrchestrator(bridge=AtlasBridge("http://t", transport=transport),
-                              allow_mock=False)
+                              allow_mock=False, auto_mock_on_offline=False)
     notifier = NoopNotifier()
     out = atlas_tick(atlas, notifier, drawdown_alert_pct=DRAWDOWN_ALERT_PCT)
     assert out["severity"] == "alert"
@@ -228,6 +228,7 @@ def test_verification_health_empty_log():
 
 def test_verification_health_counts_statuses(tmp_path, monkeypatch):
     import json as _json
+    from datetime import UTC, datetime
 
     from jarvis.config import Settings
     from jarvis.daemon.routines import _verification_health
@@ -240,7 +241,7 @@ def test_verification_health_counts_statuses(tmp_path, monkeypatch):
     monkeypatch.setattr("jarvis.state.get_settings", lambda: fake)
     monkeypatch.setattr("jarvis.daemon.routines.get_settings", lambda: fake)
     log_path = tmp_path / "agent_log.jsonl"
-    now = "2026-04-27T12:00:00+00:00"
+    now = datetime.now(UTC).isoformat()
     with log_path.open("w", encoding="utf-8") as f:
         for vstatus in ("verified", "inference", "unknown"):
             f.write(_json.dumps({

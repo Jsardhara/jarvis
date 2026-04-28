@@ -78,3 +78,98 @@ def test_verify_default_completed_actions():
     resp = AgentResponse(agent="scholar", intent="plan", action="done", result={})
     verified = verify_default(resp)
     assert verified.verification["status"] == "verified"
+
+
+def test_verify_tempo_schedule_action():
+    resp = AgentResponse(agent="tempo", intent="schedule", action="schedule", result={})
+    verified = verify_tempo(resp)
+    assert verified.verification["status"] == "post_state_checked"
+
+
+def test_verify_tempo_cancel_action():
+    resp = AgentResponse(agent="tempo", intent="cancel", action="cancel", result={})
+    verified = verify_tempo(resp)
+    assert verified.verification["status"] == "post_state_checked"
+
+
+def test_verify_tempo_complete_action():
+    resp = AgentResponse(agent="tempo", intent="complete", action="complete", result={})
+    verified = verify_tempo(resp)
+    assert verified.verification["status"] == "post_state_checked"
+
+
+def test_verify_atlas_vetoed_trades():
+    resp = AgentResponse(agent="atlas", intent="trade", action="vetoed", result={})
+    verified = verify_atlas(resp)
+    assert verified.verification["status"] == "inference"
+
+
+def test_verify_atlas_halted_trades():
+    resp = AgentResponse(agent="atlas", intent="trade", action="halted", result={})
+    verified = verify_atlas(resp)
+    assert verified.verification["status"] == "inference"
+
+
+def test_verify_atlas_with_needs_confirm_true():
+    resp = AgentResponse(agent="atlas", intent="trade", action="something", result={}, needs_confirm=True)
+    verified = verify_atlas(resp)
+    assert verified.verification["status"] == "inference"
+
+
+def test_verify_atlas_subagents():
+    for agent in ["atlas.oracle", "atlas.architect", "atlas.guardian", "atlas.trader", "atlas.sage"]:
+        resp = AgentResponse(agent=agent, intent="action", action="done", result={})
+        verified = verify_response(resp)
+        assert verified.verification["status"] in ["verified", "inference"]
+
+
+def test_verify_default_executed_actions():
+    resp = AgentResponse(agent="forge", intent="build", action="executed", result={})
+    verified = verify_default(resp)
+    assert verified.verification["status"] == "verified"
+
+
+def test_verify_default_approved_actions():
+    resp = AgentResponse(agent="lens", intent="research", action="approved", result={})
+    verified = verify_default(resp)
+    assert verified.verification["status"] == "verified"
+
+
+def test_verify_default_reviewed_actions():
+    resp = AgentResponse(agent="scholar", intent="study", action="reviewed", result={})
+    verified = verify_default(resp)
+    assert verified.verification["status"] == "verified"
+
+
+def test_verify_default_ranked_actions():
+    resp = AgentResponse(agent="atlas", intent="rank", action="ranked", result={})
+    verified = verify_default(resp)
+    assert verified.verification["status"] == "verified"
+
+
+def test_verify_default_scanned_actions():
+    resp = AgentResponse(agent="lens", intent="monitor", action="scanned", result={})
+    verified = verify_default(resp)
+    assert verified.verification["status"] == "verified"
+
+
+def test_verify_default_unknown_action_returns_unknown():
+    resp = AgentResponse(agent="unknown_agent", intent="unknown", action="unknown_action", result={})
+    verified = verify_default(resp)
+    assert verified.verification["status"] == "unknown"
+
+
+def test_verify_response_preserves_original_fields():
+    resp = AgentResponse(
+        agent="tempo",
+        intent="read",
+        action="fetched",
+        result={"count": 5},
+        confidence=0.9,
+        follow_ups=["next step"],
+    )
+    verified = verify_response(resp)
+    assert verified.result == resp.result
+    assert verified.confidence == resp.confidence
+    assert verified.follow_ups == resp.follow_ups
+    assert verified.verification["status"] == "verified"
