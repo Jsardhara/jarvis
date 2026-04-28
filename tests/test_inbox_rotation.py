@@ -64,7 +64,7 @@ def test_rotate_inbox_today_entries_stay(tmp_path: Path, monkeypatch) -> None:
     count = rotate_inbox(state_dir=tmp_path)
     assert count == 0
     assert inbox_path.exists()
-    lines = [l for l in inbox_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [line for line in inbox_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == 1
 
 
@@ -86,7 +86,7 @@ def test_rotate_inbox_yesterday_moved_to_archive(tmp_path: Path, monkeypatch) ->
 
     # Today's entry stays in inbox.jsonl
     remaining = [
-        l for l in inbox_path.read_text(encoding="utf-8").splitlines() if l.strip()
+        line for line in inbox_path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
     assert len(remaining) == 1
 
@@ -95,7 +95,7 @@ def test_rotate_inbox_yesterday_moved_to_archive(tmp_path: Path, monkeypatch) ->
     archive_file = archive_dir / f"{yesterday}.jsonl"
     assert archive_file.exists()
     archived = [
-        l for l in archive_file.read_text(encoding="utf-8").splitlines() if l.strip()
+        line for line in archive_file.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
     assert len(archived) == 1
 
@@ -120,7 +120,7 @@ def test_rotate_inbox_old_entries_gzipped(tmp_path: Path, monkeypatch) -> None:
 
     # Ensure it's valid gzip with the entry inside
     with gzip.open(gz_file, "rt", encoding="utf-8") as fh:
-        lines = [l for l in fh.read().splitlines() if l.strip()]
+        lines = [line for line in fh.read().splitlines() if line.strip()]
     assert len(lines) == 1
 
 
@@ -144,7 +144,7 @@ def test_rotate_inbox_mixed_dates(tmp_path: Path, monkeypatch) -> None:
 
     # Today's entry remains
     lines = [
-        l for l in inbox_path.read_text(encoding="utf-8").splitlines() if l.strip()
+        line for line in inbox_path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
     assert len(lines) == 1
 

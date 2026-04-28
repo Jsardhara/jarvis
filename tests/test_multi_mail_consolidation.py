@@ -227,8 +227,10 @@ def test_real_stack_builds_when_apple_and_gmail_env_set():
     assert isinstance(stack, TempoStack)
     # Mail surface is MultiMailProvider; calendar is ICloudProvider.
     from jarvis.subsystems.icloud_provider import ICloudProvider
-    from jarvis.subsystems.multi_mail_provider import MultiMailProvider as MMP
+    from jarvis.subsystems.multi_mail_provider import (
+        MultiMailProvider,
+    )
 
-    assert isinstance(stack.mail, MMP)
+    assert isinstance(stack.mail, MultiMailProvider)
     assert isinstance(stack.calendar, ICloudProvider)
     assert "GMAIL" in stack.mail.labels

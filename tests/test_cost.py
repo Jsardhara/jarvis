@@ -27,7 +27,7 @@ def test_log_cost_appends_entry(tmp_path: Path, monkeypatch) -> None:
 
     log_path = tmp_path / "cost_log.jsonl"
     assert log_path.exists()
-    lines = [l for l in log_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    lines = [line for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == 1
     entry = json.loads(lines[0])
     assert entry["agent"] == "tempo"
@@ -49,8 +49,8 @@ def test_log_cost_appends_multiple(tmp_path: Path, monkeypatch) -> None:
     log_cost("atlas", "claude-opus-4-7", 200, 100)
 
     lines = [
-        l for l in (tmp_path / "cost_log.jsonl").read_text(encoding="utf-8").splitlines()
-        if l.strip()
+        line for line in (tmp_path / "cost_log.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
     ]
     assert len(lines) == 2
 
