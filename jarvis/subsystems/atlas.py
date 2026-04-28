@@ -27,6 +27,8 @@ import httpx
 from ..config import get_settings
 from ..contract import AgentResponse, TraceEvent
 
+_DEGRADED_META: dict = {"degraded": True}
+
 EventSink = Callable[[TraceEvent], Awaitable[None]]
 
 
@@ -161,103 +163,175 @@ def _mock_strategies() -> list[dict]:
 
 
 class AtlasOrchestrator:
-    def __init__(self, bridge: AtlasBridge | None = None, allow_mock: bool = True):
+    _health_ttl_seconds: float = 5.0
+
+    def __init__(
+        self,
+        bridge: AtlasBridge | None = None,
+        allow_mock: bool = True,
+        auto_mock_on_offline: bool = True,
+    ):
         self.bridge = bridge or AtlasBridge()
         self.allow_mock = allow_mock
+        self.auto_mock_on_offline = auto_mock_on_offline
+        # Cache: (result: bool, expires_at: float)
+        self._health_cache: tuple[bool, float] | None = None
+
+    def _health_check(self) -> bool:
+        """Return True if ATLAS is reachable; False otherwise. Result cached for _health_ttl_seconds."""
+        now = time.monotonic()
+        if self._health_cache is not None:
+            result, expires_at = self._health_cache
+            if now < expires_at:
+                return result
+        try:
+            resp = httpx.get(f"{self.bridge.base_url}/api/health", timeout=1.0)
+            alive = resp.status_code == 200
+        except Exception:
+            alive = False
+        self._health_cache = (alive, now + self._health_ttl_seconds)
+        return alive
+
+    def _is_offline(self) -> bool:
+        """Return True when auto_mock_on_offline is set and health probe fails."""
+        return self.auto_mock_on_offline and not self._health_check()
 
     # ---- Read-only surface (no confirmation) ----
 
     def portfolio(self) -> AgentResponse:
-        data = self.bridge.portfolio()
-        used_mock = data is None
-        if used_mock:
-            if not self.allow_mock:
-                raise AtlasUnavailableError("ATLAS portfolio endpoint unreachable")
+        degraded = self._is_offline()
+        if degraded:
             data = _mock_portfolio()
+            used_mock = True
+        else:
+            data = self.bridge.portfolio()
+            used_mock = data is None
+            if used_mock:
+                if not self.allow_mock:
+                    raise AtlasUnavailableError("ATLAS portfolio endpoint unreachable")
+                data = _mock_portfolio()
+        result: dict = {"portfolio": data, "mock": used_mock}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas",
             intent="get_portfolio",
             action="fetched",
-            result={"portfolio": data, "mock": used_mock},
+            result=result,
             confidence=0.7 if used_mock else 1.0,
             follow_ups=["start ATLAS API on :8000"] if used_mock else [],
         )
 
     def positions(self) -> AgentResponse:
-        data = self.bridge.open_positions()
-        used_mock = data is None
-        if used_mock:
-            if not self.allow_mock:
-                raise AtlasUnavailableError("ATLAS positions endpoint unreachable")
-            data = _mock_positions()
+        degraded = self._is_offline()
+        if degraded:
+            data: list[dict] = _mock_positions()
+            used_mock = True
+        else:
+            data = self.bridge.open_positions()
+            used_mock = data is None
+            if used_mock:
+                if not self.allow_mock:
+                    raise AtlasUnavailableError("ATLAS positions endpoint unreachable")
+                data = _mock_positions()
+        result: dict = {"positions": data, "count": len(data), "mock": used_mock}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas",
             intent="list_positions",
             action="fetched",
-            result={"positions": data, "count": len(data), "mock": used_mock},
+            result=result,
             confidence=0.7 if used_mock else 1.0,
         )
 
     def pnl(self, window: str = "1d") -> AgentResponse:
-        data = self.bridge.pnl(window)
-        used_mock = data is None
-        if used_mock:
-            if not self.allow_mock:
-                raise AtlasUnavailableError("ATLAS pnl endpoint unreachable")
-            data = _mock_pnl(window)
+        degraded = self._is_offline()
+        if degraded:
+            pnl_data = _mock_pnl(window)
+            used_mock = True
+        else:
+            pnl_data = self.bridge.pnl(window)
+            used_mock = pnl_data is None
+            if used_mock:
+                if not self.allow_mock:
+                    raise AtlasUnavailableError("ATLAS pnl endpoint unreachable")
+                pnl_data = _mock_pnl(window)
+        result: dict = {"pnl": pnl_data, "mock": used_mock}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas",
             intent="get_pnl",
             action="fetched",
-            result={"pnl": data, "mock": used_mock},
+            result=result,
             confidence=0.7 if used_mock else 1.0,
         )
 
     # ---- Sub-stage agents (Oracle / Architect / Guardian / Trader / Sage) ----
 
     def oracle_scan(self) -> AgentResponse:
-        data = self.bridge.market_scan() or (_mock_market_scan() if self.allow_mock else None)
+        degraded = self._is_offline()
+        if degraded:
+            data = _mock_market_scan()
+        else:
+            data = self.bridge.market_scan() or (_mock_market_scan() if self.allow_mock else None)
         if data is None:
             raise AtlasUnavailableError("ATLAS market scan unreachable")
+        used_mock = data.get("source") == "mock"
+        result: dict = {"scan": data, "mock": used_mock}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.oracle",
             intent="market_scan",
             action="scanned",
-            result={"scan": data, "mock": data.get("source") == "mock"},
+            result=result,
             confidence=0.8,
         )
 
     def architect_rank(self, regime: str | None = None) -> AgentResponse:
-        strats = self.bridge.strategies() or (_mock_strategies() if self.allow_mock else None)
+        degraded = self._is_offline()
+        if degraded:
+            strats: list[dict] = _mock_strategies()
+        else:
+            strats = self.bridge.strategies() or (_mock_strategies() if self.allow_mock else None)
         if strats is None:
             raise AtlasUnavailableError("ATLAS strategies endpoint unreachable")
         ranked = sorted(strats, key=lambda s: s.get("score", 0), reverse=True)
         if regime:
             ranked = [s for s in ranked if s.get("regime_fit") in (regime, "neutral")] or ranked
+        result: dict = {"ranked": ranked, "regime": regime, "top": ranked[0] if ranked else None}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.architect",
             intent="rank_strategies",
             action="ranked",
-            result={"ranked": ranked, "regime": regime, "top": ranked[0] if ranked else None},
+            result=result,
             confidence=0.75,
         )
 
     def guardian_check(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
         """Hard risk gate. Veto power. Live mode triggers stricter rules."""
+        degraded = self._is_offline()
         violations: list[str] = []
         if mode == "live":
             violations.append("live mode requires explicit operator confirmation")
         approved = len(violations) == 0
+        result: dict = {
+            "strategy_id": strategy_id,
+            "mode": mode,
+            "approved": approved,
+            "violations": violations,
+        }
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.guardian",
             intent="risk_check",
             action="approved" if approved else "blocked",
-            result={
-                "strategy_id": strategy_id,
-                "mode": mode,
-                "approved": approved,
-                "violations": violations,
-            },
+            result=result,
             needs_confirm=mode == "live",
             follow_ups=["confirm to override and run live"] if not approved else [],
             confidence=0.95,
@@ -265,40 +339,56 @@ class AtlasOrchestrator:
 
     def trader_execute(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
         """Execution. Always proposes — operator confirms before run."""
+        degraded = self._is_offline()
+        result: dict = {"strategy_id": strategy_id, "mode": mode}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.trader",
             intent="execute_strategy",
             action="proposed",
-            result={"strategy_id": strategy_id, "mode": mode},
+            result=result,
             needs_confirm=True,
             follow_ups=[f"confirm to run strategy {strategy_id} in {mode}"],
             confidence=0.9,
         )
 
     def trader_execute_confirmed(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
-        out = self.bridge.run_strategy(strategy_id, mode)
-        used_mock = out is None
-        if used_mock:
+        degraded = self._is_offline()
+        if degraded:
             out = {"id": strategy_id, "mode": mode, "status": "queued", "source": "mock"}
+            used_mock = True
+        else:
+            out = self.bridge.run_strategy(strategy_id, mode)
+            used_mock = out is None
+            if used_mock:
+                out = {"id": strategy_id, "mode": mode, "status": "queued", "source": "mock"}
+        result: dict = {"run": out, "mock": used_mock}
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.trader",
             intent="execute_strategy",
             action="executed",
-            result={"run": out, "mock": used_mock},
+            result=result,
             confidence=0.7 if used_mock else 1.0,
         )
 
     def sage_review(self, run_id: str) -> AgentResponse:
         """Post-trade analysis stub. Real impl reads ATLAS trade history + lessons."""
+        degraded = self._is_offline()
+        result: dict = {
+            "run_id": run_id,
+            "lessons": [],
+            "summary": "post-trade analysis pending real run",
+        }
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.sage",
             intent="post_trade_review",
             action="reviewed",
-            result={
-                "run_id": run_id,
-                "lessons": [],
-                "summary": "post-trade analysis pending real run",
-            },
+            result=result,
             confidence=0.5,
         )
 
@@ -336,17 +426,24 @@ class AtlasOrchestrator:
             await _emit(stage, result, int((time.perf_counter() - started) * 1000))
             return result
 
+        degraded = self._is_offline()
         oracle = await _run_stage("oracle", self.oracle_scan)
         regime = oracle.result.get("scan", {}).get("regime")
 
         architect = await _run_stage("architect", lambda: self.architect_rank(regime=regime))
         top = architect.result.get("top")
         if not top:
+            halted_result: dict = {
+                "reason": "no candidate strategy",
+                "stages": ["oracle", "architect"],
+            }
+            if degraded:
+                halted_result["meta"] = _DEGRADED_META
             return AgentResponse(
                 agent="atlas",
                 intent="pipeline",
                 action="halted",
-                result={"reason": "no candidate strategy", "stages": ["oracle", "architect"]},
+                result=halted_result,
                 confidence=0.7,
             )
 
@@ -355,15 +452,18 @@ class AtlasOrchestrator:
             "guardian", lambda: self.guardian_check(strategy_id, mode=mode)
         )
         if not guardian.result.get("approved"):
+            vetoed_result: dict = {
+                "strategy_id": strategy_id,
+                "violations": guardian.result.get("violations", []),
+                "stages": ["oracle", "architect", "guardian"],
+            }
+            if degraded:
+                vetoed_result["meta"] = _DEGRADED_META
             return AgentResponse(
                 agent="atlas",
                 intent="pipeline",
                 action="vetoed",
-                result={
-                    "strategy_id": strategy_id,
-                    "violations": guardian.result.get("violations", []),
-                    "stages": ["oracle", "architect", "guardian"],
-                },
+                result=vetoed_result,
                 needs_confirm=True,
                 follow_ups=["override Guardian and confirm live execution"],
                 confidence=0.85,
@@ -372,61 +472,77 @@ class AtlasOrchestrator:
         trader = await _run_stage(
             "trader", lambda: self.trader_execute(strategy_id, mode=mode)
         )
+        proposed_result: dict = {
+            "strategy_id": strategy_id,
+            "mode": mode,
+            "stages": ["oracle", "architect", "guardian", "trader"],
+            "trader_proposal": trader.result,
+        }
+        if degraded:
+            proposed_result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas",
             intent="pipeline",
             action="proposed",
-            result={
-                "strategy_id": strategy_id,
-                "mode": mode,
-                "stages": ["oracle", "architect", "guardian", "trader"],
-                "trader_proposal": trader.result,
-            },
+            result=proposed_result,
             needs_confirm=True,
             follow_ups=[f"confirm to execute {strategy_id} in {mode}"],
             confidence=0.85,
         )
 
     def pipeline(self, mode: str = "paper") -> AgentResponse:
+        degraded = self._is_offline()
         oracle = self.oracle_scan()
         regime = oracle.result.get("scan", {}).get("regime")
         architect = self.architect_rank(regime=regime)
         top = architect.result.get("top")
         if not top:
+            result: dict = {
+                "reason": "no candidate strategy",
+                "stages": ["oracle", "architect"],
+            }
+            if degraded:
+                result["meta"] = _DEGRADED_META
             return AgentResponse(
                 agent="atlas",
                 intent="pipeline",
                 action="halted",
-                result={"reason": "no candidate strategy", "stages": ["oracle", "architect"]},
+                result=result,
                 confidence=0.7,
             )
         strategy_id = top["id"]
         guardian = self.guardian_check(strategy_id, mode=mode)
         if not guardian.result.get("approved"):
+            result = {
+                "strategy_id": strategy_id,
+                "violations": guardian.result.get("violations", []),
+                "stages": ["oracle", "architect", "guardian"],
+            }
+            if degraded:
+                result["meta"] = _DEGRADED_META
             return AgentResponse(
                 agent="atlas",
                 intent="pipeline",
                 action="vetoed",
-                result={
-                    "strategy_id": strategy_id,
-                    "violations": guardian.result.get("violations", []),
-                    "stages": ["oracle", "architect", "guardian"],
-                },
+                result=result,
                 needs_confirm=True,
                 follow_ups=["override Guardian and confirm live execution"],
                 confidence=0.85,
             )
         trader = self.trader_execute(strategy_id, mode=mode)
+        result = {
+            "strategy_id": strategy_id,
+            "mode": mode,
+            "stages": ["oracle", "architect", "guardian", "trader"],
+            "trader_proposal": trader.result,
+        }
+        if degraded:
+            result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas",
             intent="pipeline",
             action="proposed",
-            result={
-                "strategy_id": strategy_id,
-                "mode": mode,
-                "stages": ["oracle", "architect", "guardian", "trader"],
-                "trader_proposal": trader.result,
-            },
+            result=result,
             needs_confirm=True,
             follow_ups=[f"confirm to execute {strategy_id} in {mode}"],
             confidence=0.85,

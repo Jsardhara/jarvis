@@ -13,15 +13,16 @@ Plus jarvis itself as the orchestrator (handled outside the registry).
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from ..contract import AgentResponse
 from .atlas import AtlasBridge, AtlasOrchestrator
 from .forge import Forge, MockRunner
 from .lens import Lens
-from .providers import MockOutlook, MockSearch
+from .providers import ExaSearch, MockOutlook, MockSearch
 from .scholar import Scholar
 from .tempo import Tempo
 from .tempo_stack import build_default_tempo_stack
@@ -40,6 +41,19 @@ def _build_outlook() -> Any:
         return MockOutlook()
 
 
+def _tempo_is_live() -> bool:
+    """Return True when at least one real mail-provider env var is set."""
+    return bool(os.environ.get("APPLE_ID") or os.environ.get("GMAIL_ADDRESS"))
+
+
+def _lens_provider() -> tuple[Any, Literal["live", "mock"]]:
+    """Return (provider_instance, mode) for Lens based on env."""
+    key = os.environ.get("EXA_API_KEY")
+    if key:
+        return ExaSearch(api_key=key), "live"
+    return MockSearch(), "mock"
+
+
 @dataclass
 class AgentDescriptor:
     name: str
@@ -47,6 +61,7 @@ class AgentDescriptor:
     actions: dict[str, ActionFn] = field(default_factory=dict)
     default_for_text: ActionFn | None = None
     description: str = ""
+    mode: Literal["live", "mock"] = "mock"
 
     def call(self, action: str, args: dict[str, Any] | None = None) -> AgentResponse:
         if action not in self.actions:
@@ -60,11 +75,28 @@ class AgentDescriptor:
 
 
 def build_default_registry() -> dict[str, AgentDescriptor]:
+    # Tempo: live when a real provider env var is present
+    tempo_live = _tempo_is_live()
     outlook = _build_outlook()
+    tempo_mode: Literal["live", "mock"] = "live" if tempo_live else "mock"
+    if tempo_live:
+        logger.info("tempo: live mode (real mail provider)")
+    else:
+        logger.info("tempo: mock mode (no APPLE_ID / GMAIL_ADDRESS)")
     tempo = Tempo(outlook)
-    lens = Lens(MockSearch())
+
+    # Lens: live when EXA_API_KEY present
+    lens_provider, lens_mode = _lens_provider()
+    lens = Lens(lens_provider)
+
+    # Forge: always mock until Plan F1 lands
     forge = Forge(MockRunner())
-    atlas = AtlasOrchestrator(bridge=AtlasBridge(), allow_mock=True)
+
+    # Atlas: auto_mock_on_offline — health check decides live/mock per-call
+    atlas_bridge = AtlasBridge()
+    atlas = AtlasOrchestrator(bridge=atlas_bridge, allow_mock=True, auto_mock_on_offline=True)
+    atlas_mode: Literal["live", "mock"] = "live" if atlas._health_check() else "mock"
+
     scholar = Scholar()
 
     return {
@@ -72,6 +104,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="tempo",
             instance=tempo,
             description="Outlook — mail, calendar, tasks",
+            mode=tempo_mode,
             actions={
                 "triage": tempo.triage,
                 "draft_reply": tempo.draft_reply,
@@ -90,6 +123,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="scholar",
             instance=scholar,
             description="Academics + study planning",
+            mode="live",
             actions={
                 "list_assignments": scholar.list_assignments,
                 "add_assignment": scholar.add_assignment,
@@ -102,6 +136,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="lens",
             instance=lens,
             description="Research + monitoring",
+            mode=lens_mode,
             actions={
                 "quick_search": lens.quick_search,
                 "deep_research": lens.deep_research,
@@ -113,6 +148,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="forge",
             instance=forge,
             description="Code-work delegation",
+            mode="mock",
             actions={"execute": forge.execute},
             default_for_text=lambda text: forge.execute(repo="?", task=text, push=False),
         ),
@@ -120,6 +156,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="atlas",
             instance=atlas,
             description="Trading orchestrator (Oracle/Architect/Guardian/Trader/Sage)",
+            mode=atlas_mode,
             actions={
                 "portfolio": atlas.portfolio,
                 "positions": atlas.positions,

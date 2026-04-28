@@ -230,6 +230,7 @@ def make_app(orchestrator: Orchestrator | None = None,
                 {
                     "name": d.name,
                     "description": d.description,
+                    "mode": d.mode,
                     "actions": list(d.actions.keys()),
                 }
                 for d in reg.values()
