@@ -11,7 +11,7 @@ import asyncio
 import json
 import logging
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -19,20 +19,24 @@ try:
     from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import StreamingResponse
+
     HAS_FASTAPI = True
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
 from ..contract import AgentLogEntry, Confirmation, Task, TraceEvent
+from ..cost import daily_rollup
 from ..orchestrator import Orchestrator
 from ..state import (
     add_confirmation,
     add_task,
     append_agent_log,
     load_tasks,
+    load_watchlist,
     read_agent_log,
     read_confirmations,
     read_inbox,
+    save_watchlist,
     update_confirmation,
     update_task,
 )
@@ -44,8 +48,10 @@ log = logging.getLogger(__name__)
 def _build_orchestrator(registry: dict[str, AgentDescriptor]) -> Orchestrator:
     o = Orchestrator()
     for name, desc in registry.items():
+
         async def _handler(req: str, _desc: AgentDescriptor = desc) -> Any:
             return _desc.call_text(req)
+
         o.register(name, _handler)
     return o
 
@@ -92,6 +98,7 @@ def _summarize_result(result: dict[str, Any]) -> str:
 
 def _make_event_sink(bus: _Broadcaster) -> Any:
     """Build an EventSink that broadcasts + persists agent_log + auto-confirmations."""
+
     async def sink(event: TraceEvent) -> None:
         # Broadcast every trace event
         await bus.broadcast({"type": event.type, **event.model_dump()})
@@ -113,15 +120,18 @@ def _make_event_sink(bus: _Broadcaster) -> Any:
             append_agent_log(entry)
         elif event.type == "agent.error" and event.agent:
             payload = event.payload or {}
-            append_agent_log(AgentLogEntry(
-                ts=event.ts,
-                request_id=event.request_id,
-                agent=event.agent,
-                action="?",
-                status="error",
-                duration_ms=int(payload.get("duration_ms", 0)),
-                error=str(payload.get("error", "")),
-            ))
+            append_agent_log(
+                AgentLogEntry(
+                    ts=event.ts,
+                    request_id=event.request_id,
+                    agent=event.agent,
+                    action="?",
+                    status="error",
+                    duration_ms=int(payload.get("duration_ms", 0)),
+                    error=str(payload.get("error", "")),
+                )
+            )
+
     return sink
 
 
@@ -143,11 +153,19 @@ def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
     except Exception:
         log.warning("atlas snapshot failed — returning degraded mock", exc_info=True)
         return {"portfolio": {}, "pnl": {}, "positions": [], "degraded": True, "ts": ts}
-    return {"portfolio": portfolio, "pnl": pnl, "positions": positions, "degraded": degraded, "ts": ts}
+    return {
+        "portfolio": portfolio,
+        "pnl": pnl,
+        "positions": positions,
+        "degraded": degraded,
+        "ts": ts,
+    }
 
 
-def make_app(orchestrator: Orchestrator | None = None,
-             registry: dict[str, AgentDescriptor] | None = None) -> FastAPI:
+def make_app(
+    orchestrator: Orchestrator | None = None,
+    registry: dict[str, AgentDescriptor] | None = None,
+) -> FastAPI:
     if not HAS_FASTAPI:
         raise RuntimeError("fastapi not installed — pip install jarvis[web]")
     reg = registry or build_default_registry()
@@ -187,8 +205,13 @@ def make_app(orchestrator: Orchestrator | None = None,
 
     @app.post("/api/tasks")
     async def create_task(payload: dict[str, Any]) -> dict[str, Any]:
-        t = add_task(Task(title=payload["title"], due=payload.get("due"),
-                          tags=payload.get("tags", [])))
+        t = add_task(
+            Task(
+                title=payload["title"],
+                due=payload.get("due"),
+                tags=payload.get("tags", []),
+            )
+        )
         return t.model_dump()
 
     @app.patch("/api/tasks/{task_id}")
@@ -204,21 +227,25 @@ def make_app(orchestrator: Orchestrator | None = None,
         # Auto-capture confirmations from any agent that needs_confirm
         for agent_name, resp in result.get("responses", {}).items():
             if resp.get("needs_confirm"):
-                conf = add_confirmation(Confirmation(
-                    agent=agent_name,
-                    intent=resp.get("intent", ""),
-                    args=resp.get("result", {}),
-                    summary=", ".join(resp.get("follow_ups", []))[:160],
-                ))
-                await bus.broadcast({
-                    "type": "confirmation.created",
-                    **TraceEvent(
-                        type="confirmation.created",
-                        request_id=result.get("request_id", ""),
+                conf = add_confirmation(
+                    Confirmation(
                         agent=agent_name,
-                        payload={"confirmation": conf.model_dump()},
-                    ).model_dump(),
-                })
+                        intent=resp.get("intent", ""),
+                        args=resp.get("result", {}),
+                        summary=", ".join(resp.get("follow_ups", []))[:160],
+                    )
+                )
+                await bus.broadcast(
+                    {
+                        "type": "confirmation.created",
+                        **TraceEvent(
+                            type="confirmation.created",
+                            request_id=result.get("request_id", ""),
+                            agent=agent_name,
+                            payload={"confirmation": conf.model_dump()},
+                        ).model_dump(),
+                    }
+                )
         return result
 
     # --- Mission-control: per-agent + confirmations endpoints ---
@@ -246,49 +273,95 @@ def make_app(orchestrator: Orchestrator | None = None,
         action = payload.get("action")
         text = payload.get("text", "")
 
-        await bus.broadcast({"type": "agent.start",
-                             **TraceEvent(type="agent.start", request_id=request_id,
-                                          agent=name, payload={"text": text, "action": action}
-                                          ).model_dump()})
+        await bus.broadcast(
+            {
+                "type": "agent.start",
+                **TraceEvent(
+                    type="agent.start",
+                    request_id=request_id,
+                    agent=name,
+                    payload={"text": text, "action": action},
+                ).model_dump(),
+            }
+        )
         started = time.perf_counter()
         try:
-            resp = desc.call(action, payload.get("args", {})) if action else desc.call_text(text)
+            resp = (
+                desc.call(action, payload.get("args", {})) if action else desc.call_text(text)
+            )
         except Exception as exc:
             duration = int((time.perf_counter() - started) * 1000)
-            append_agent_log(AgentLogEntry(
-                request_id=request_id, agent=name, action=action or "text",
-                status="error", duration_ms=duration, error=str(exc),
-            ))
-            await bus.broadcast({"type": "agent.error",
-                                 **TraceEvent(type="agent.error", request_id=request_id,
-                                              agent=name,
-                                              payload={"error": str(exc), "duration_ms": duration}
-                                              ).model_dump()})
+            append_agent_log(
+                AgentLogEntry(
+                    request_id=request_id,
+                    agent=name,
+                    action=action or "text",
+                    status="error",
+                    duration_ms=duration,
+                    error=str(exc),
+                )
+            )
+            await bus.broadcast(
+                {
+                    "type": "agent.error",
+                    **TraceEvent(
+                        type="agent.error",
+                        request_id=request_id,
+                        agent=name,
+                        payload={"error": str(exc), "duration_ms": duration},
+                    ).model_dump(),
+                }
+            )
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         duration = int((time.perf_counter() - started) * 1000)
-        append_agent_log(AgentLogEntry(
-            request_id=request_id, agent=name, action=resp.action,
-            status="proposed" if resp.needs_confirm else "ok",
-            duration_ms=duration, confidence=resp.confidence,
-            needs_confirm=resp.needs_confirm,
-        ))
-        await bus.broadcast({"type": "agent.done",
-                             **TraceEvent(type="agent.done", request_id=request_id, agent=name,
-                                          payload={"duration_ms": duration, "action": resp.action,
-                                                   "confidence": resp.confidence,
-                                                   "needs_confirm": resp.needs_confirm}
-                                          ).model_dump()})
+        append_agent_log(
+            AgentLogEntry(
+                request_id=request_id,
+                agent=name,
+                action=resp.action,
+                status="proposed" if resp.needs_confirm else "ok",
+                duration_ms=duration,
+                confidence=resp.confidence,
+                needs_confirm=resp.needs_confirm,
+            )
+        )
+        await bus.broadcast(
+            {
+                "type": "agent.done",
+                **TraceEvent(
+                    type="agent.done",
+                    request_id=request_id,
+                    agent=name,
+                    payload={
+                        "duration_ms": duration,
+                        "action": resp.action,
+                        "confidence": resp.confidence,
+                        "needs_confirm": resp.needs_confirm,
+                    },
+                ).model_dump(),
+            }
+        )
         if resp.needs_confirm:
-            conf = add_confirmation(Confirmation(
-                agent=name, intent=resp.intent, args=resp.result,
-                summary=", ".join(resp.follow_ups)[:160],
-            ))
-            await bus.broadcast({"type": "confirmation.created",
-                                 **TraceEvent(type="confirmation.created", request_id=request_id,
-                                              agent=name,
-                                              payload={"confirmation": conf.model_dump()}
-                                              ).model_dump()})
+            conf = add_confirmation(
+                Confirmation(
+                    agent=name,
+                    intent=resp.intent,
+                    args=resp.result,
+                    summary=", ".join(resp.follow_ups)[:160],
+                )
+            )
+            await bus.broadcast(
+                {
+                    "type": "confirmation.created",
+                    **TraceEvent(
+                        type="confirmation.created",
+                        request_id=request_id,
+                        agent=name,
+                        payload={"confirmation": conf.model_dump()},
+                    ).model_dump(),
+                }
+            )
         return resp.model_dump()
 
     @app.get("/api/agents/{name}/history")
@@ -299,7 +372,9 @@ def make_app(orchestrator: Orchestrator | None = None,
         return {"entries": [e.model_dump() for e in entries]}
 
     @app.get("/api/confirmations")
-    async def list_confirmations(status: str | None = None, limit: int = 100) -> dict[str, Any]:
+    async def list_confirmations(
+        status: str | None = None, limit: int = 100
+    ) -> dict[str, Any]:
         items = read_confirmations(status=status, limit=limit)
         return {"confirmations": [c.model_dump() for c in items]}
 
@@ -308,11 +383,17 @@ def make_app(orchestrator: Orchestrator | None = None,
         updated = update_confirmation(confirmation_id, status="approved")
         if updated is None:
             raise HTTPException(status_code=404, detail="confirmation not found")
-        await bus.broadcast({"type": "confirmation.resolved",
-                             **TraceEvent(type="confirmation.resolved",
-                                          request_id=confirmation_id, agent=updated.agent,
-                                          payload={"confirmation": updated.model_dump()}
-                                          ).model_dump()})
+        await bus.broadcast(
+            {
+                "type": "confirmation.resolved",
+                **TraceEvent(
+                    type="confirmation.resolved",
+                    request_id=confirmation_id,
+                    agent=updated.agent,
+                    payload={"confirmation": updated.model_dump()},
+                ).model_dump(),
+            }
+        )
         return updated.model_dump()
 
     @app.post("/api/confirmations/{confirmation_id}/reject")
@@ -320,20 +401,58 @@ def make_app(orchestrator: Orchestrator | None = None,
         updated = update_confirmation(confirmation_id, status="rejected")
         if updated is None:
             raise HTTPException(status_code=404, detail="confirmation not found")
-        await bus.broadcast({"type": "confirmation.resolved",
-                             **TraceEvent(type="confirmation.resolved",
-                                          request_id=confirmation_id, agent=updated.agent,
-                                          payload={"confirmation": updated.model_dump()}
-                                          ).model_dump()})
+        await bus.broadcast(
+            {
+                "type": "confirmation.resolved",
+                **TraceEvent(
+                    type="confirmation.resolved",
+                    request_id=confirmation_id,
+                    agent=updated.agent,
+                    payload={"confirmation": updated.model_dump()},
+                ).model_dump(),
+            }
+        )
         return updated.model_dump()
 
-    # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ─────────────────────
+    # ─── Watchlist ────────────────────────────────────────────────────────────
+
+    @app.get("/api/watchlist")
+    async def get_watchlist() -> dict[str, Any]:
+        return {"items": load_watchlist()}
+
+    @app.put("/api/watchlist")
+    async def put_watchlist(payload: dict[str, Any]) -> dict[str, Any]:
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise HTTPException(status_code=422, detail="items must be a list")
+        if not all(isinstance(i, str) for i in items):
+            raise HTTPException(status_code=422, detail="all items must be strings")
+        save_watchlist(items)
+        return {"items": load_watchlist()}
+
+    # ─── Cost telemetry ───────────────────────────────────────────────────────
+
+    @app.get("/api/cost/rollup")
+    async def cost_rollup(date_str: str | None = None) -> dict[str, Any]:
+        """Return daily cost rollup.  Query param ``date`` accepts YYYY-MM-DD."""
+        target: date | None = None
+        if date_str is not None:
+            try:
+                target = date.fromisoformat(date_str)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="date must be YYYY-MM-DD"
+                ) from None
+        return daily_rollup(target)
+
+    # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ────────────────────
 
     _jarvis_chat: dict[str, Any] = {"instance": None}
 
     def _get_jarvis():
         if _jarvis_chat["instance"] is None:
             from ..jarvis_agent import JarvisChat
+
             _jarvis_chat["instance"] = JarvisChat(registry=reg)
         return _jarvis_chat["instance"]
 
@@ -354,10 +473,14 @@ def make_app(orchestrator: Orchestrator | None = None,
                 err = json.dumps({"type": "error", "message": str(exc)})
                 yield f"data: {err}\n\n"
 
-        return StreamingResponse(gen(), media_type="text/event-stream", headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        })
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):  # pragma: no cover - websocket runtime

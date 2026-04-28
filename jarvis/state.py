@@ -1,8 +1,10 @@
 """State persistence — tasks.json + inbox.jsonl + agent_log.jsonl + confirmations.jsonl."""
 from __future__ import annotations
 
+import gzip
 import json
 from collections.abc import Iterable
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from .config import get_settings
@@ -13,6 +15,9 @@ from .contract import (
     SentinelHealthEvent,
     Task,
 )
+
+_WATCHLIST_DEFAULT = ["BTC", "ETH", "SOL"]
+_ROTATE_KEEP_UNCOMPRESSED_DAYS = 7
 
 TASKS_SCHEMA_VERSION = 1
 
@@ -35,6 +40,15 @@ def _confirmations_path() -> Path:
 
 def _sentinel_health_path() -> Path:
     return get_settings().state_dir / "sentinel_health.jsonl"
+
+
+def _watchlist_path() -> Path:
+    return get_settings().state_dir / "watchlist.json"
+
+
+def _inbox_archive_dir(state_dir: Path | None = None) -> Path:
+    base = state_dir if state_dir is not None else get_settings().state_dir
+    return base / "inbox"
 
 
 def load_tasks() -> list[Task]:
@@ -168,3 +182,110 @@ def read_sentinel_health(limit: int = 100) -> list[SentinelHealthEvent]:
     lines = p.read_text(encoding="utf-8").splitlines()
     tail = lines[-limit:] if limit else lines
     return [SentinelHealthEvent(**json.loads(line)) for line in tail if line.strip()]
+
+
+# --- Watchlist ---
+
+
+def load_watchlist() -> list[str]:
+    """Return watchlist items.  Creates watchlist.json with defaults if absent."""
+    p = _watchlist_path()
+    if not p.exists():
+        save_watchlist(list(_WATCHLIST_DEFAULT))
+    data = json.loads(p.read_text(encoding="utf-8"))
+    return list(data.get("items", _WATCHLIST_DEFAULT))
+
+
+def save_watchlist(items: list[str]) -> None:
+    """Persist watchlist items to state/watchlist.json."""
+    p = _watchlist_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"items": list(items)}, indent=2), encoding="utf-8")
+
+
+# --- Inbox rotation ---
+
+
+def _parse_entry_date(raw: str) -> date | None:
+    """Extract the calendar date from a JSONL inbox entry, or None on failure."""
+    try:
+        entry = json.loads(raw)
+        ts_str = entry.get("ts", "")
+        if not ts_str:
+            return None
+        dt = datetime.fromisoformat(ts_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).date()
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
+
+
+def rotate_inbox(state_dir: Path | None = None) -> int:
+    """Move non-today entries from inbox.jsonl into per-day archive files.
+
+    Rules:
+    - Today's entries stay in inbox.jsonl uncompressed.
+    - Entries from 1–7 days ago go to state/inbox/YYYY-MM-DD.jsonl (plain).
+    - Entries 8+ days old go to state/inbox/YYYY-MM-DD.jsonl.gz (gzipped).
+
+    Returns the count of entries moved out of inbox.jsonl.
+    """
+    base = state_dir if state_dir is not None else get_settings().state_dir
+    archive_dir = base / "inbox"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    inbox = base / "inbox.jsonl"
+    if not inbox.exists():
+        return 0
+
+    today = date.today()
+    cutoff_gz = today.replace(day=today.day)  # reference point
+
+    lines = inbox.read_text(encoding="utf-8").splitlines()
+    keep: list[str] = []
+    by_date: dict[date, list[str]] = {}
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        entry_date = _parse_entry_date(stripped)
+        if entry_date is None or entry_date >= today:
+            keep.append(stripped)
+        else:
+            by_date.setdefault(entry_date, []).append(stripped)
+
+    rotated = sum(len(v) for v in by_date.values())
+    if rotated == 0:
+        return 0
+
+    # Write today's entries back
+    inbox.write_text("\n".join(keep) + ("\n" if keep else ""), encoding="utf-8")
+
+    # Archive each date
+    for entry_date, entry_lines in by_date.items():
+        age_days = (today - entry_date).days
+        content = "\n".join(entry_lines) + "\n"
+        if age_days <= _ROTATE_KEEP_UNCOMPRESSED_DAYS:
+            dest = archive_dir / f"{entry_date.isoformat()}.jsonl"
+            _append_to_archive_plain(dest, content)
+        else:
+            dest_gz = archive_dir / f"{entry_date.isoformat()}.jsonl.gz"
+            _append_to_archive_gz(dest_gz, content)
+
+    return rotated
+
+
+def _append_to_archive_plain(path: Path, content: str) -> None:
+    with path.open("a", encoding="utf-8") as f:
+        f.write(content)
+
+
+def _append_to_archive_gz(path: Path, content: str) -> None:
+    existing = b""
+    if path.exists():
+        with gzip.open(path, "rb") as fh:
+            existing = fh.read()
+    with gzip.open(path, "wb") as fh:
+        fh.write(existing + content.encode("utf-8"))
