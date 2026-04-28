@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import asdict
 from datetime import UTC, date, datetime
@@ -17,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 try:
-    from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+    from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import StreamingResponse
 
@@ -572,6 +573,64 @@ def make_app(
         data = asdict(prefs)
         data["important_senders"] = list(data["important_senders"])
         return data
+
+    # ─── Scholar ingest — file upload → summary + auto-assignment ────────────
+
+    _DEADLINE_RE = re.compile(
+        r"due\s+(?:by|on)?\s*([A-Z][a-z]+\s+\d{1,2}(?:,?\s*\d{4})?)",
+        re.IGNORECASE,
+    )
+
+    def _extract_text_from_upload(filename: str, content: bytes, content_type: str) -> str:
+        name_lower = filename.lower()
+        if name_lower.endswith(".pdf") or content_type == "application/pdf":
+            try:
+                import io
+
+                from pypdf import PdfReader
+
+                reader = PdfReader(io.BytesIO(content))
+                return "\n".join(page.extract_text() or "" for page in reader.pages)
+            except Exception as exc:
+                log.warning("pdf parse failed for %s: %s", filename, exc)
+                return ""
+        if name_lower.endswith((".txt", ".md")) or content_type.startswith("text/"):
+            try:
+                return content.decode("utf-8")
+            except UnicodeDecodeError:
+                return content.decode("utf-8", errors="ignore")
+        raise HTTPException(status_code=400, detail=f"unsupported file type: {filename}")
+
+    @app.post("/api/scholar/ingest")
+    async def scholar_ingest(file: UploadFile = File(...)) -> dict[str, Any]:
+        content = await file.read()
+        filename = file.filename or "upload"
+        text = _extract_text_from_upload(filename, content, file.content_type or "")
+
+        lens_desc = reg.get("lens")
+        scholar_desc = reg.get("scholar")
+        if lens_desc is None or scholar_desc is None:
+            raise HTTPException(status_code=503, detail="lens/scholar not registered")
+
+        lens_resp = lens_desc.instance.deep_research(text, depth=2)
+        summary = lens_resp.result.get("markdown", "")
+
+        assignment_dump: dict[str, Any] | None = None
+        match = _DEADLINE_RE.search(text)
+        if match:
+            due_str = match.group(1).strip()
+            sch_resp = scholar_desc.instance.add_assignment(
+                title=f"Ingested: {filename}",
+                course="?",
+                due=due_str,
+            )
+            assignment_dump = sch_resp.result.get("assignment")
+
+        return {
+            "filename": filename,
+            "summary": summary,
+            "assignment": assignment_dump,
+        }
 
     # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ────────────────────
 

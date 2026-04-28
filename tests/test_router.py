@@ -1,4 +1,4 @@
-"""Intent classifier tests."""
+"""Intent classifier tests — six-agent routing."""
 from __future__ import annotations
 
 import pytest
@@ -7,18 +7,21 @@ from jarvis.router import classify
 
 
 @pytest.mark.parametrize("request_text,expected", [
-    ("check my inbox", "aide"),
-    ("draft a reply to Bob", "aide"),
-    ("what's on my calendar today", "chronos"),
-    ("schedule a meeting Tuesday 3pm", "chronos"),
-    ("add a todo to call dentist", "chronos"),
-    ("research the new Anthropic model", "sherlock"),
-    ("look up FastAPI middleware patterns", "sherlock"),
-    ("fix the bug in atlas/api/main.py", "forge"),
+    ("check my outlook inbox", "tempo"),
+    ("draft a reply to Bob", "tempo"),
+    ("what's on my calendar today", "tempo"),
+    ("schedule a meeting Tuesday 3pm", "tempo"),
+    ("add a todo to call dentist", "tempo"),
+    ("research the new Anthropic model", "lens"),
+    ("look up FastAPI middleware patterns", "lens"),
+    ("monitor anthropic releases", "lens"),
+    ("fix the bug in main.py", "forge"),
     ("ship the new feature to repo X", "forge"),
-    ("what's my portfolio doing", "ledger"),
-    ("any open positions in ATLAS", "ledger"),
-    ("reply to that slack DM", "echo"),
+    ("what's my portfolio doing", "atlas"),
+    ("any open positions", "atlas"),
+    ("backtest the trend strategy", "atlas"),
+    ("when is my CS401 assignment due", "scholar"),
+    ("plan my study sessions for the midterm", "scholar"),
 ])
 def test_single_agent_routing(request_text: str, expected: str):
     c = classify(request_text)
@@ -28,9 +31,9 @@ def test_single_agent_routing(request_text: str, expected: str):
 
 def test_briefing_multi_dispatch():
     c = classify("give me my morning briefing")
-    assert c.primary == "aide"
-    assert "chronos" in c.parallel
-    assert "ledger" in c.parallel
+    assert c.primary == "tempo"
+    assert "scholar" in c.parallel
+    assert "atlas" in c.parallel
 
 
 def test_empty_request():
@@ -45,8 +48,7 @@ def test_unmatched_falls_to_jarvis():
     assert c.confidence < 0.5
 
 
-def test_multi_rule_match_picks_primary_and_parallel():
-    # 'email' + 'calendar' both hit
-    c = classify("any email about the calendar invite")
-    assert c.primary == "aide"
-    assert "chronos" in c.parallel
+def test_multi_rule_match_routes_primary_then_parallel():
+    c = classify("any email about the calendar invite then research the topic")
+    assert c.primary == "tempo"
+    assert "lens" in c.parallel

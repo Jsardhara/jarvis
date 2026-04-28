@@ -1,0 +1,15 @@
+CS501 Machine Learning — Assignment 3
+
+Topic: Gradient Descent Optimization
+
+In this assignment, you will implement stochastic gradient descent (SGD)
+and its variants (Adam, AdaGrad) from scratch using NumPy.
+
+Part 1: Implement vanilla SGD and test on a 2D regression problem.
+Part 2: Implement Adam optimizer and compare convergence.
+Part 3: Write a short report comparing the optimizers.
+
+This assignment is due on May 10, 2026.
+
+Submission: Upload your code and report to Drexel Learn.
+Points: 100 (code 70, report 30)
