@@ -443,20 +443,20 @@ export default function ScholarPage() {
   const [sessionProblemsSolved, setSessionProblemsSolved] = useState(0);
   const [sessionCorrect, setSessionCorrect] = useState(0);
 
-  // API data
+  // API data — scoped to current course so memory is per-course
   const {
     data: dueCards,
     loading: dueLoading,
     error: dueError,
     refetch: dueRefetch,
-  } = useDueCards();
+  } = useDueCards(course);
 
   const {
     data: weakData,
     loading: weakLoading,
     error: weakError,
     refetch: weakRefetch,
-  } = useWeakTopics(8);
+  } = useWeakTopics(8, course);
 
   const { data: docs } = useScholarDocs();
 
@@ -469,14 +469,20 @@ export default function ScholarPage() {
   const showImportSeed = !hasAnyDocs && cards.length === 0;
 
   const handleImportSeed = useCallback(async () => {
-    const result = await importSeed("linalg");
+    // Pick a seed slug based on course; fall back to linalg for the default
+    const seedSlug =
+      course.toLowerCase().includes("linear") ||
+      course.toLowerCase().includes("algebra")
+        ? "linalg"
+        : "linalg";
+    const result = await importSeed({ seedName: seedSlug, course });
     if (result) {
-      showSuccess(`IMPORTED ${result.cards_imported} CARDS`);
+      showSuccess(`IMPORTED ${result.cards_imported} CARDS · ${course}`);
       dueRefetch();
     } else {
       showError("SEED IMPORT FAILED — check API");
     }
-  }, [importSeed, dueRefetch]);
+  }, [importSeed, dueRefetch, course]);
 
   const handleStartExam = useCallback(() => {
     setShowExamConfig(true);

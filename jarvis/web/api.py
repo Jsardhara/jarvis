@@ -723,9 +723,12 @@ def make_app(
         return {"data": card, "error": None}
 
     @app.get("/api/scholar/due")
-    async def scholar_due_cards() -> dict[str, Any]:
-        svc = _get_study_service()
-        return {"data": svc.due_cards(), "error": None}
+    async def scholar_due_cards(course: str | None = None) -> dict[str, Any]:
+        try:
+            resp = reg["scholar"].call("due_flashcards", {"course": course})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result.get("flashcards", []), "error": None}
 
     # ─── Frontend-friendly aliases (shorter paths, body-based rate) ──────────
 
@@ -780,9 +783,13 @@ def make_app(
         return {"data": resp.result, "error": None}
 
     @app.get("/api/scholar/weak")
-    async def scholar_weak(top_n: int = 8) -> dict[str, Any]:
+    async def scholar_weak(
+        top_n: int = 8, course: str | None = None
+    ) -> dict[str, Any]:
         try:
-            resp = reg["scholar"].call("weak_topics", {"top_n": int(top_n)})
+            resp = reg["scholar"].call(
+                "weak_topics", {"top_n": int(top_n), "course": course}
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"data": resp.result, "error": None}
@@ -804,9 +811,13 @@ def make_app(
         return {"data": resp.result, "error": None}
 
     @app.post("/api/scholar/seed/{seed_name}")
-    async def scholar_seed(seed_name: str) -> dict[str, Any]:
+    async def scholar_seed(
+        seed_name: str, course: str | None = None
+    ) -> dict[str, Any]:
         try:
-            resp = reg["scholar"].call("import_seed", {"seed_name": seed_name})
+            resp = reg["scholar"].call(
+                "import_seed", {"seed_name": seed_name, "course": course}
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"data": resp.result, "error": None}

@@ -226,12 +226,14 @@ function useMutation<TIn, TOut>(
 
 // ─── Public hooks ─────────────────────────────────────────────────────────────
 
-export function useDueCards() {
-  return useFetch<DueCard[]>("/api/scholar/due");
+export function useDueCards(course?: string) {
+  const q = course ? `?course=${encodeURIComponent(course)}` : "";
+  return useFetch<DueCard[]>(`/api/scholar/due${q}`);
 }
 
-export function useWeakTopics(topN: number = 8) {
-  return useFetch<WeakTopicsResult>(`/api/scholar/weak?top_n=${topN}`);
+export function useWeakTopics(topN: number = 8, course?: string) {
+  const q = course ? `&course=${encodeURIComponent(course)}` : "";
+  return useFetch<WeakTopicsResult>(`/api/scholar/weak?top_n=${topN}${q}`);
 }
 
 export function useScholarDocs() {
@@ -372,7 +374,12 @@ export function useStartExam() {
 }
 
 export function useImportSeed() {
-  return useMutation<string, SeedResult>((seedName) => `/api/scholar/seed/${seedName}`);
+  return useMutation<{ seedName: string; course?: string }, SeedResult>(
+    ({ seedName, course }) => {
+      const q = course ? `?course=${encodeURIComponent(course)}` : "";
+      return `/api/scholar/seed/${seedName}${q}`;
+    },
+  );
 }
 
 export { scholarFetch };

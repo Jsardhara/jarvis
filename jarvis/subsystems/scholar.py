@@ -148,20 +148,64 @@ def _update_problem(problem_id: str, updates: dict[str, Any]) -> dict[str, Any] 
     return found
 
 
-def _load_weak_topics() -> dict[str, Any]:
+_GLOBAL_COURSE = "_global"
+
+# Map seed-file slugs to display course names
+_SEED_COURSE_MAP: dict[str, str] = {
+    "linalg": "Linear Algebra",
+    "linalg_exam": "Linear Algebra",
+}
+
+
+def _pretty_course(seed_name: str) -> str:
+    """Pretty-print a seed name into a course label."""
+    if seed_name in _SEED_COURSE_MAP:
+        return _SEED_COURSE_MAP[seed_name]
+    return seed_name.replace("_", " ").replace("-", " ").title()
+
+
+def _course_key(course: str | None) -> str:
+    """Normalise a course name for the weak-topics keyspace."""
+    return course.strip() if course and course.strip() else _GLOBAL_COURSE
+
+
+def _load_weak_topics() -> dict[str, dict[str, Any]]:
+    """Return weak-topic store keyed by course name.
+
+    Auto-migrates legacy flat shape `{concept: stats}` into
+    `{_global: {concept: stats}}` on first read.
+    """
     path = _weak_topics_path()
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    raw: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    if not raw:
+        return {}
+    # Legacy flat format detection: any value with miss_count means flat.
+    is_flat = any(
+        isinstance(v, dict) and "miss_count" in v for v in raw.values()
+    )
+    if is_flat:
+        return {_GLOBAL_COURSE: raw}
+    # Already nested by course
+    return {k: dict(v) for k, v in raw.items() if isinstance(v, dict)}
 
 
-def _save_weak_topics(data: dict[str, Any]) -> None:
-    _weak_topics_path().write_text(json.dumps(data, indent=2))
+def _save_weak_topics(data: dict[str, dict[str, Any]]) -> None:
+    _weak_topics_path().write_text(
+        json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
-def _top_weak_topics(data: dict[str, Any], top_n: int) -> list[dict[str, Any]]:
-    """Return top N entries sorted by miss_count desc."""
-    items = sorted(data.items(), key=lambda kv: kv[1].get("miss_count", 0), reverse=True)
+def _top_weak_topics(
+    course_slice: dict[str, Any], top_n: int
+) -> list[dict[str, Any]]:
+    """Return top N entries from a single course's weak-topic slice."""
+    items = sorted(
+        course_slice.items(),
+        key=lambda kv: kv[1].get("miss_count", 0),
+        reverse=True,
+    )
     return [
         {
             "concept": concept,
@@ -358,8 +402,11 @@ class Scholar:
             confidence=1.0,
         )
 
-    def due_flashcards(self) -> AgentResponse:
+    def due_flashcards(self, course: str | None = None) -> AgentResponse:
         cards = self._svc().due_cards()
+        if course:
+            tag = f"course:{course.strip()}"
+            cards = [c for c in cards if tag in (c.get("tags") or [])]
         return AgentResponse(
             agent="scholar",
             intent="due_flashcards",
@@ -415,25 +462,33 @@ class Scholar:
         )
 
     def rate_problem(self, problem_id: str, correct: bool) -> AgentResponse:
-        """Record whether the operator got a problem right; update weak topics."""
+        """Record whether the operator got a problem right; update weak topics
+        scoped to the problem's original course."""
         updated = _update_problem(problem_id, {"rated_correct": correct})
         if updated is None:
             raise ValueError(f"problem {problem_id!r} not found")
 
+        course_key = _course_key(updated.get("course"))
         topics = _load_weak_topics()
+        course_slice = dict(topics.get(course_key, {}))
+
         if not correct:
             concepts: list[str] = updated.get("response", {}).get("concepts_used", [])
             now_iso = datetime.now(UTC).isoformat()
             for concept in concepts:
-                entry = topics.get(concept, {"miss_count": 0, "last_seen": "", "sample_problem_ids": []})
+                entry = course_slice.get(
+                    concept,
+                    {"miss_count": 0, "last_seen": "", "sample_problem_ids": []},
+                )
                 sample_ids: list[str] = list(entry.get("sample_problem_ids", []))
                 if problem_id not in sample_ids:
                     sample_ids.append(problem_id)
-                topics[concept] = {
+                course_slice[concept] = {
                     "miss_count": entry.get("miss_count", 0) + 1,
                     "last_seen": now_iso,
                     "sample_problem_ids": sample_ids[-10:],
                 }
+            topics[course_key] = course_slice
             _save_weak_topics(topics)
 
         return AgentResponse(
@@ -443,19 +498,27 @@ class Scholar:
             result={
                 "problem_id": problem_id,
                 "correct": correct,
-                "weak_topics_after": _top_weak_topics(topics, 8),
+                "course": course_key if course_key != _GLOBAL_COURSE else None,
+                "weak_topics_after": _top_weak_topics(course_slice, 8),
             },
             confidence=1.0,
         )
 
-    def weak_topics(self, top_n: int = 8) -> AgentResponse:
-        """Return top N concepts by miss count."""
+    def weak_topics(
+        self, top_n: int = 8, course: str | None = None
+    ) -> AgentResponse:
+        """Return top N concepts by miss count, scoped to a single course."""
         topics = _load_weak_topics()
+        course_key = _course_key(course)
+        course_slice = topics.get(course_key, {})
         return AgentResponse(
             agent="scholar",
             intent="weak_topics",
             action="listed",
-            result={"weak_topics": _top_weak_topics(topics, top_n)},
+            result={
+                "course": course_key if course_key != _GLOBAL_COURSE else None,
+                "weak_topics": _top_weak_topics(course_slice, top_n),
+            },
             confidence=1.0,
         )
 
@@ -531,11 +594,22 @@ class Scholar:
 
     # ── Seed import ──────────────────────────────────────────────────────────
 
-    def import_seed(self, seed_name: str) -> AgentResponse:
-        """Load a seed JSON file into StudyService as flashcards."""
+    def import_seed(
+        self, seed_name: str, course: str | None = None
+    ) -> AgentResponse:
+        """Load a seed JSON file into StudyService as flashcards.
+
+        Each imported card is tagged ``course:{course}`` so per-course filters
+        on ``due_flashcards`` match. ``course`` defaults to a pretty version
+        of ``seed_name`` (e.g. ``"linalg_exam"`` → ``"Linear Algebra"`` if a
+        known mapping exists, else title-cased seed name).
+        """
         seed_file = _seeds_dir() / f"{seed_name}.json"
         if not seed_file.exists():
             raise ValueError(f"seed {seed_name!r} not found at {seed_file}")
+
+        course_name = (course or _pretty_course(seed_name)).strip()
+        course_tag = f"course:{course_name}"
 
         raw_cards: list[dict[str, Any]] = json.loads(seed_file.read_text(encoding="utf-8"))
         svc = self._svc()
@@ -543,7 +617,7 @@ class Scholar:
         # Create a virtual document to attach cards to
         doc = svc.upload_document(
             f"{seed_name}.txt",
-            f"Seed deck: {seed_name}".encode(),
+            f"Seed deck: {seed_name} ({course_name})".encode(),
         )
         doc_id: str = doc["id"]
 
@@ -557,13 +631,17 @@ class Scholar:
 
         with get_session() as session:
             for item in raw_cards:
+                concept_tags = list(item.get("concept_tags", []))
+                # Always include the course tag so filters match
+                if course_tag not in concept_tags:
+                    concept_tags.append(course_tag)
                 card = StudyFlashcard(
                     id=uuid4().hex,
                     doc_id=doc_id,
                     front=str(item.get("front", "")),
                     back=str(item.get("back", "")),
                     source_page=None,
-                    tags=json.dumps(item.get("concept_tags", [])),
+                    tags=json.dumps(concept_tags),
                     ease_factor=2.5,
                     interval=1,
                     repetitions=0,
@@ -575,13 +653,19 @@ class Scholar:
                     "id": card.id,
                     "front": card.front,
                     "back": card.back,
-                    "tags": item.get("concept_tags", []),
+                    "tags": concept_tags,
                 })
 
         return AgentResponse(
             agent="scholar",
             intent="import_seed",
             action="imported",
-            result={"seed_name": seed_name, "doc_id": doc_id, "cards_imported": len(saved), "cards": saved},
+            result={
+                "seed_name": seed_name,
+                "course": course_name,
+                "doc_id": doc_id,
+                "cards_imported": len(saved),
+                "cards": saved,
+            },
             confidence=1.0,
         )
