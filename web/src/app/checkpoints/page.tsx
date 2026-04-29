@@ -238,7 +238,7 @@ export default function CheckpointsPage() {
   // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-5">
       <BreadcrumbNav items={[{ label: "Checkpoints" }]} />
 
       <div className="flex items-center justify-between flex-wrap gap-2">

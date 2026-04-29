@@ -26,6 +26,7 @@ try:
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
+from .. import config  # noqa: F401  side-effect: load_dotenv() so APPLE_ID/GMAIL_* reach subsystems
 from ..contract import AgentLogEntry, Confirmation, InboxEvent, Task, TraceEvent
 from ..cost import daily_rollup
 from ..memory import OperatorPreferences, load_preferences, save_preferences
@@ -631,6 +632,184 @@ def make_app(
             "summary": summary,
             "assignment": assignment_dump,
         }
+
+    # ─── Scholar Study Companion ─────────────────────────────────────────────
+
+    def _get_study_service():  # type: ignore[return]
+        from ..subsystems.scholar_study import StudyService
+        from ..subsystems.study_db import init_db
+
+        init_db()
+        return StudyService()
+
+    @app.get("/api/scholar/documents")
+    async def scholar_list_docs() -> dict[str, Any]:
+        svc = _get_study_service()
+        return {"data": svc.list_documents(), "error": None}
+
+    @app.post("/api/scholar/documents")
+    async def scholar_upload_doc(file: UploadFile = File(...)) -> dict[str, Any]:
+        content = await file.read()
+        filename = file.filename or "upload"
+        svc = _get_study_service()
+        try:
+            doc = svc.upload_document(filename, content)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"data": doc, "error": None}
+
+    @app.get("/api/scholar/documents/{doc_id}")
+    async def scholar_get_doc(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        doc = svc.get_document(doc_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return {"data": doc, "error": None}
+
+    @app.delete("/api/scholar/documents/{doc_id}")
+    async def scholar_delete_doc(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        ok = svc.delete_document(doc_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="document not found")
+        return {"data": {"deleted": True}, "error": None}
+
+    @app.get("/api/scholar/documents/{doc_id}/summary")
+    async def scholar_get_summary(doc_id: str) -> dict[str, Any]:
+        from ..subsystems.scholar_study import _get_api_key
+
+        try:
+            api_key = _get_api_key()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        svc = _get_study_service()
+        try:
+            summary = svc.get_summary(doc_id, api_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": summary, "error": None}
+
+    @app.get("/api/scholar/documents/{doc_id}/flashcards")
+    async def scholar_list_flashcards(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        cards = svc.get_flashcards(doc_id)
+        return {"data": cards, "error": None}
+
+    @app.post("/api/scholar/documents/{doc_id}/flashcards")
+    async def scholar_generate_flashcards(doc_id: str) -> dict[str, Any]:
+        from ..subsystems.scholar_study import _get_api_key
+
+        try:
+            api_key = _get_api_key()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        svc = _get_study_service()
+        try:
+            cards = svc.generate_flashcards(doc_id, api_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": cards, "error": None}
+
+    @app.post("/api/scholar/flashcards/{card_id}/rate")
+    async def scholar_rate_card(card_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        rating = payload.get("rating")
+        if rating not in (0, 1, 2, 3):
+            raise HTTPException(status_code=400, detail="rating must be 0-3")
+        svc = _get_study_service()
+        try:
+            card = svc.rate_card(card_id, int(rating))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": card, "error": None}
+
+    @app.get("/api/scholar/due")
+    async def scholar_due_cards() -> dict[str, Any]:
+        svc = _get_study_service()
+        return {"data": svc.due_cards(), "error": None}
+
+    # ─── Frontend-friendly aliases (shorter paths, body-based rate) ──────────
+
+    @app.get("/api/scholar/docs")
+    async def scholar_list_docs_alias() -> dict[str, Any]:
+        svc = _get_study_service()
+        return {"data": svc.list_documents(), "error": None}
+
+    @app.post("/api/scholar/rate")
+    async def scholar_rate_card_alias(payload: dict[str, Any]) -> dict[str, Any]:
+        card_id = str(payload.get("card_id", "")).strip()
+        rating = payload.get("rating")
+        if not card_id:
+            raise HTTPException(status_code=400, detail="card_id required")
+        if rating not in (0, 1, 2, 3, 4, 5):
+            raise HTTPException(status_code=400, detail="rating must be 0-5")
+        # Map 0-5 SM-2 scale → 0-3 Anki scale used by StudyService
+        sm2_to_anki = {0: 0, 1: 0, 2: 1, 3: 2, 4: 2, 5: 3}
+        mapped = sm2_to_anki[int(rating)]
+        svc = _get_study_service()
+        try:
+            card = svc.rate_card(card_id, mapped)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": card, "error": None}
+
+    # ─── Problem solver / exam mode / weak topics (Linalg companion) ─────────
+
+    @app.post("/api/scholar/solve")
+    async def scholar_solve(payload: dict[str, Any]) -> dict[str, Any]:
+        problem = str(payload.get("problem", "")).strip()
+        if not problem:
+            raise HTTPException(status_code=400, detail="problem required")
+        course = payload.get("course")
+        course_str = str(course) if course else None
+        try:
+            resp = reg["scholar"].call("solve_problem", {"problem": problem, "course": course_str})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/rate-problem")
+    async def scholar_rate_problem(payload: dict[str, Any]) -> dict[str, Any]:
+        problem_id = str(payload.get("problem_id", "")).strip()
+        if not problem_id:
+            raise HTTPException(status_code=400, detail="problem_id required")
+        correct = bool(payload.get("correct"))
+        try:
+            resp = reg["scholar"].call("rate_problem", {"problem_id": problem_id, "correct": correct})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/scholar/weak")
+    async def scholar_weak(top_n: int = 8) -> dict[str, Any]:
+        try:
+            resp = reg["scholar"].call("weak_topics", {"top_n": int(top_n)})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/exam")
+    async def scholar_exam(payload: dict[str, Any]) -> dict[str, Any]:
+        course = str(payload.get("course", "")).strip()
+        if not course:
+            raise HTTPException(status_code=400, detail="course required")
+        duration_min = int(payload.get("duration_min", 60))
+        problem_count = int(payload.get("problem_count", 5))
+        try:
+            resp = reg["scholar"].call(
+                "exam_session",
+                {"course": course, "duration_min": duration_min, "problem_count": problem_count},
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/seed/{seed_name}")
+    async def scholar_seed(seed_name: str) -> dict[str, Any]:
+        try:
+            resp = reg["scholar"].call("import_seed", {"seed_name": seed_name})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
 
     # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ────────────────────
 

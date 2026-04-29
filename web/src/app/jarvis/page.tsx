@@ -1,28 +1,40 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Send,
-  Sparkles,
   ArrowRight,
-  CheckCircle2,
   AlertTriangle,
-  CircleDashed,
   Loader2,
   Brain,
   Lock,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { BreadcrumbNav } from "@/components/breadcrumb-nav";
 import { DispatchConfirmDialog } from "@/components/DispatchConfirmDialog";
-import { cn } from "@/lib/utils";
+import {
+  Panel,
+  AgentGlyph,
+  Bars,
+  BrandMark,
+  Dot,
+  KV,
+  Tag,
+  OpsButton,
+  getAgentIdentity,
+  SUBSYSTEM_AGENTS,
+} from "@/components/ops";
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const JARVIS_API = process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
+
+const QUICK_PROMPTS = [
+  "morning briefing",
+  "what's in my inbox",
+  "today's schedule",
+  "atlas pnl",
+] as const;
+
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 interface ToolCall {
   toolUseId: string;
@@ -66,6 +78,14 @@ interface Turn {
   routeTier?: number;
 }
 
+interface PendingConfirmation {
+  confirmationId: string;
+  summary: string;
+  turnId: string;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 const SLASH_OVERRIDE = /^\s*\/(opus|sonnet)\s+/i;
 
 function parseOverride(input: string): { override: "opus" | "sonnet" | null; cleaned: string } {
@@ -85,281 +105,13 @@ function modelLabel(model?: string): string {
   return model;
 }
 
-function modelTone(model?: string): string {
-  if (!model) return "bg-slate-500/15 text-slate-600 dark:text-slate-400";
-  if (model.includes("opus"))
-    return "bg-fuchsia-500/15 text-fuchsia-700 dark:text-fuchsia-300 border-fuchsia-500/30";
-  if (model.includes("sonnet"))
-    return "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/30";
-  return "bg-slate-500/15 text-slate-600 dark:text-slate-400";
+function stamp(): string {
+  const t = new Date();
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
 }
 
-// ─── Visual helpers ─────────────────────────────────────────────────────────
-
-const TIER_LABEL: Record<number, string> = {
-  1: "T1 · risk",
-  2: "T2 · time-sensitive",
-  3: "T3 · trade/research",
-  4: "T4 · scheduling",
-  5: "T5 · routine",
-};
-
-const TIER_TONE: Record<number, string> = {
-  1: "bg-red-500/15 text-red-700 dark:text-red-400 border-red-500/30",
-  2: "bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30",
-  3: "bg-sky-500/15 text-sky-700 dark:text-sky-400 border-sky-500/30",
-  4: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
-  5: "bg-slate-500/15 text-slate-700 dark:text-slate-400 border-slate-500/30",
-};
-
-function VerificationPill({ status }: { status?: string }) {
-  if (!status) return null;
-  const norm = status.toLowerCase();
-  const tone =
-    norm === "verified"
-      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-      : norm === "post_state_checked"
-        ? "bg-sky-500/15 text-sky-700 dark:text-sky-400"
-        : norm === "inference"
-          ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
-          : "bg-slate-500/15 text-slate-600 dark:text-slate-400";
-  return (
-    <Badge variant="outline" className={cn("text-[10px] uppercase tracking-wider", tone)}>
-      {norm}
-    </Badge>
-  );
-}
-
-// ─── Page ───────────────────────────────────────────────────────────────────
-
-interface PendingConfirmation {
-  confirmationId: string;
-  summary: string;
-  turnId: string;
-}
-
-export default function JarvisPage() {
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmation | null>(null);
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  // Auto-scroll to bottom when new content arrives.
-  useEffect(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
-  }, [turns]);
-
-  const send = useCallback(async () => {
-    const trimmed = input.trim();
-    if (!trimmed || busy) return;
-    setBusy(true);
-    setInput("");
-
-    const turnId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const { override, cleaned } = parseOverride(trimmed);
-    const fresh: Turn = {
-      id: turnId,
-      user: cleaned,
-      userOverride: override ?? undefined,
-      text: "",
-      toolCalls: [],
-      status: "streaming",
-      thinking: "",
-    };
-    setTurns((prev) => [...prev, fresh]);
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    try {
-      const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed }),  // backend strips slash override
-        signal: controller.signal,
-      });
-      if (!res.ok || !res.body) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-        for (const raw of events) {
-          const line = raw.trim();
-          if (!line.startsWith("data:")) continue;
-          const payload = line.slice(5).trim();
-          if (!payload) continue;
-          try {
-            const evt = JSON.parse(payload) as Record<string, unknown>;
-            applyEvent(turnId, evt, setTurns);
-
-            // Surface confirmation gate from dispatch responses
-            if (evt.type === "tool_result") {
-              const text = String(evt.text ?? "");
-              try {
-                const parsed = JSON.parse(text) as AgentResponse;
-                if (
-                  parsed.needs_confirm === true &&
-                  typeof (parsed as Record<string, unknown>)["confirmation_id"] === "string"
-                ) {
-                  const cid = (parsed as Record<string, unknown>)["confirmation_id"] as string;
-                  const summaryText =
-                    typeof (parsed as Record<string, unknown>)["summary"] === "string"
-                      ? ((parsed as Record<string, unknown>)["summary"] as string)
-                      : parsed.intent ?? "Action requires operator approval.";
-                  setPendingConfirm({ confirmationId: cid, summary: summaryText, turnId });
-                }
-              } catch {
-                // non-JSON tool result — skip
-              }
-            }
-          } catch {
-            // ignore malformed event
-          }
-        }
-      }
-      setTurns((prev) =>
-        prev.map((t) => (t.id === turnId && t.status === "streaming" ? { ...t, status: "done" } : t)),
-      );
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "request failed";
-      setTurns((prev) =>
-        prev.map((t) =>
-          t.id === turnId ? { ...t, status: "error", errorMessage: msg } : t,
-        ),
-      );
-    } finally {
-      setBusy(false);
-      abortRef.current = null;
-    }
-  }, [busy, input]);
-
-  const onKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        void send();
-      }
-    },
-    [send],
-  );
-
-  const placeholder = useMemo(
-    () =>
-      [
-        "Talk to Jarvis…",
-        "what's on my calendar today",
-        "triage my inbox",
-        "research recent AI hardware moves",
-        "paper-scan the markets and report",
-        "what's the morning briefing look like",
-      ][turns.length % 6],
-    [turns.length],
-  );
-
-  return (
-    <div className="flex h-full flex-col">
-      <BreadcrumbNav items={[{ label: "Jarvis" }]} />
-
-      {pendingConfirm && (() => {
-        // Capture a stable reference before callbacks mutate state.
-        const captured = pendingConfirm;
-        return (
-          <DispatchConfirmDialog
-            open
-            onOpenChange={(open) => { if (!open) setPendingConfirm(null); }}
-            confirmationId={captured.confirmationId}
-            summary={captured.summary}
-            onApproved={(result) => {
-              setPendingConfirm(null);
-              setTurns((prev) =>
-                prev.map((t) =>
-                  t.id === captured.turnId
-                    ? {
-                        ...t,
-                        text:
-                          t.text +
-                          `\n\n[approved] ${typeof result === "object" && result !== null ? JSON.stringify(result, null, 2).slice(0, 400) : String(result)}`,
-                      }
-                    : t
-                )
-              );
-            }}
-            onRejected={() => {
-              setPendingConfirm(null);
-              setTurns((prev) =>
-                prev.map((t) =>
-                  t.id === captured.turnId
-                    ? { ...t, text: t.text + "\n\n[rejected by operator]" }
-                    : t
-                )
-              );
-            }}
-          />
-        );
-      })()}
-
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-primary" />
-          <h1 className="text-xl font-semibold">Talk to Jarvis</h1>
-          <Badge
-            variant="outline"
-            className="text-[10px] uppercase tracking-wider"
-            title="Auto-routed: short / chitchat → sonnet 4.6 · heavy / risky → opus 4.7. Prefix with /opus or /sonnet to force."
-          >
-            auto-router · sonnet ↔ opus
-          </Badge>
-        </div>
-      </div>
-
-      <Card className="flex-1 overflow-hidden">
-        <CardContent className="flex h-full flex-col gap-3 p-0">
-          <ScrollArea className="flex-1">
-            <div ref={scrollRef} className="space-y-6 p-4">
-              {turns.length === 0 ? <EmptyHero /> : turns.map((t) => <TurnView key={t.id} turn={t} />)}
-            </div>
-          </ScrollArea>
-
-          <div className="border-t bg-background/95 p-3 backdrop-blur">
-            <div className="flex items-end gap-2">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={onKeyDown}
-                rows={2}
-                placeholder={placeholder}
-                disabled={busy}
-                className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-              />
-              <Button onClick={() => void send()} disabled={busy || !input.trim()} size="icon" className="h-10 w-10 shrink-0">
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                <span className="sr-only">Send</span>
-              </Button>
-            </div>
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              Enter to send · Shift+Enter for newline · Jarvis can delegate to tempo / scholar / lens / forge / atlas
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// ─── Stream applier ─────────────────────────────────────────────────────────
+// ─── Stream applier ──────────────────────────────────────────────────────────
 
 function applyEvent(
   turnId: string,
@@ -390,7 +142,6 @@ function applyEvent(
             action: String(evt.action ?? ""),
             args: (evt.args as Record<string, unknown>) ?? {},
           };
-          // Skip non-delegate built-ins (e.g. ToolSearch) so we don't clutter UI.
           if (String(evt.name ?? "").includes("delegate") === false && !call.agent) {
             return t;
           }
@@ -409,10 +160,7 @@ function applyEvent(
             ...t,
             toolCalls: t.toolCalls.map((c) =>
               c.toolUseId === id
-                ? {
-                    ...c,
-                    result: { text, isError: Boolean(evt.is_error), parsed },
-                  }
+                ? { ...c, result: { text, isError: Boolean(evt.is_error), parsed } }
                 : c,
             ),
           };
@@ -425,11 +173,7 @@ function applyEvent(
             durationMs: typeof evt.duration_ms === "number" ? evt.duration_ms : t.durationMs,
           };
         case "error":
-          return {
-            ...t,
-            status: "error",
-            errorMessage: String(evt.message ?? "stream error"),
-          };
+          return { ...t, status: "error", errorMessage: String(evt.message ?? "stream error") };
         default:
           return t;
       }
@@ -437,97 +181,652 @@ function applyEvent(
   );
 }
 
-// ─── Sub-components ─────────────────────────────────────────────────────────
+// ─── Page ────────────────────────────────────────────────────────────────────
 
-function EmptyHero() {
-  const samples = [
-    "what's on my calendar today",
-    "triage my inbox",
-    "look up news on AI hardware",
-    "open a PR fixing the auth bug in jarvis",
-    "paper trade BTC scan",
-  ];
+const TURNS_STORAGE_KEY = "jarvis.chat.turns.v1";
+const TURNS_PERSIST_MAX = 50;
+
+export default function JarvisPage() {
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmation | null>(null);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const restoredRef = useRef(false);
+
+  // Restore saved chat history on mount (client-only)
+  useEffect(() => {
+    if (typeof window === "undefined" || restoredRef.current) return;
+    restoredRef.current = true;
+    try {
+      const raw = window.localStorage.getItem(TURNS_STORAGE_KEY);
+      if (!raw) return;
+      const parsed: unknown = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      const restored = parsed
+        .filter((t): t is Turn => typeof t === "object" && t !== null && "id" in t)
+        .map((t) => (t.status === "streaming" ? { ...t, status: "done" as const } : t));
+      if (restored.length > 0) setTurns(restored);
+    } catch {
+      // ignore — corrupt storage just starts fresh
+    }
+  }, []);
+
+  // Persist chat history whenever it changes
+  useEffect(() => {
+    if (typeof window === "undefined" || !restoredRef.current) return;
+    try {
+      const trimmed = turns.slice(-TURNS_PERSIST_MAX);
+      window.localStorage.setItem(TURNS_STORAGE_KEY, JSON.stringify(trimmed));
+    } catch {
+      // quota exceeded — drop silently
+    }
+  }, [turns]);
+
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior: "smooth" });
+  }, [turns]);
+
+  const send = useCallback(async (text?: string) => {
+    const raw = (text ?? input).trim();
+    if (!raw || busy) return;
+    setBusy(true);
+    if (!text) setInput("");
+
+    const turnId = `t-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const { override, cleaned } = parseOverride(raw);
+    const fresh: Turn = {
+      id: turnId,
+      user: cleaned,
+      userOverride: override ?? undefined,
+      text: "",
+      toolCalls: [],
+      status: "streaming",
+      thinking: "",
+    };
+    setTurns((prev) => [...prev, fresh]);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    try {
+      const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: raw }),
+        signal: controller.signal,
+      });
+      if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() ?? "";
+        for (const raw of events) {
+          const line = raw.trim();
+          if (!line.startsWith("data:")) continue;
+          const payload = line.slice(5).trim();
+          if (!payload) continue;
+          try {
+            const evt = JSON.parse(payload) as Record<string, unknown>;
+            applyEvent(turnId, evt, setTurns);
+
+            if (evt.type === "tool_result") {
+              const bodyText = String(evt.text ?? "");
+              try {
+                const parsed = JSON.parse(bodyText) as AgentResponse;
+                if (
+                  parsed.needs_confirm === true &&
+                  typeof (parsed as Record<string, unknown>)["confirmation_id"] === "string"
+                ) {
+                  const cid = (parsed as Record<string, unknown>)["confirmation_id"] as string;
+                  const summaryText =
+                    typeof (parsed as Record<string, unknown>)["summary"] === "string"
+                      ? ((parsed as Record<string, unknown>)["summary"] as string)
+                      : (parsed.intent ?? "Action requires operator approval.");
+                  setPendingConfirm({ confirmationId: cid, summary: summaryText, turnId });
+                }
+              } catch {
+                // non-JSON tool result
+              }
+            }
+          } catch {
+            // malformed event
+          }
+        }
+      }
+      setTurns((prev) =>
+        prev.map((t) =>
+          t.id === turnId && t.status === "streaming" ? { ...t, status: "done" } : t,
+        ),
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "request failed";
+      setTurns((prev) =>
+        prev.map((t) => (t.id === turnId ? { ...t, status: "error", errorMessage: msg } : t)),
+      );
+    } finally {
+      setBusy(false);
+      abortRef.current = null;
+    }
+  }, [busy, input]);
+
+  const onKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        void send();
+      }
+    },
+    [send],
+  );
+
+  const placeholder = useMemo(
+    () =>
+      [
+        "Tell Jarvis what you need…",
+        "what's on my calendar today",
+        "triage my inbox",
+        "research recent AI hardware moves",
+        "paper-scan the markets and report",
+        "what's the morning briefing look like",
+      ][turns.length % 6],
+    [turns.length],
+  );
+
+  // Dispatch bars: count how many times each agent was called across all turns
+  const dispatchCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const t of turns) {
+      for (const c of t.toolCalls) {
+        if (c.agent) counts[c.agent] = (counts[c.agent] ?? 0) + 1;
+      }
+    }
+    return counts;
+  }, [turns]);
+
   return (
-    <div className="mx-auto max-w-md space-y-4 py-12 text-center">
-      <Sparkles className="mx-auto h-10 w-10 text-primary/70" />
-      <h2 className="text-lg font-semibold">Tell Jarvis what you need.</h2>
-      <p className="text-sm text-muted-foreground">
-        Opus 4.7 with the OpenClaw soul. He&apos;ll think, decide which subsystem
-        to delegate to (tempo / scholar / lens / forge / atlas), call the tool,
-        and synthesize the answer for you.
-      </p>
-      <div className="flex flex-wrap justify-center gap-2 pt-1">
-        {samples.map((s) => (
-          <Badge key={s} variant="outline" className="font-normal">
-            &ldquo;{s}&rdquo;
-          </Badge>
-        ))}
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 280px",
+        gap: 0,
+        flex: 1,
+        minHeight: 0,
+        overflow: "hidden",
+      } as CSSProperties}
+    >
+      {/* ── Confirm dialog ─────────────────────────────────────────────────── */}
+      {pendingConfirm && (() => {
+        const captured = pendingConfirm;
+        return (
+          <DispatchConfirmDialog
+            open
+            onOpenChange={(open) => { if (!open) setPendingConfirm(null); }}
+            confirmationId={captured.confirmationId}
+            summary={captured.summary}
+            onApproved={(result) => {
+              setPendingConfirm(null);
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === captured.turnId
+                    ? {
+                        ...t,
+                        text:
+                          t.text +
+                          `\n\n[approved] ${typeof result === "object" && result !== null ? JSON.stringify(result, null, 2).slice(0, 400) : String(result)}`,
+                      }
+                    : t,
+                ),
+              );
+            }}
+            onRejected={() => {
+              setPendingConfirm(null);
+              setTurns((prev) =>
+                prev.map((t) =>
+                  t.id === captured.turnId
+                    ? { ...t, text: t.text + "\n\n[rejected by operator]" }
+                    : t,
+                ),
+              );
+            }}
+          />
+        );
+      })()}
+
+      {/* ── Message stream + composer ──────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          borderRight: "1px solid var(--ops-line)",
+        } as CSSProperties}
+      >
+        {/* scroll area */}
+        <div
+          ref={scrollRef}
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "20px 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 20,
+          } as CSSProperties}
+        >
+          {turns.length === 0 ? (
+            <EmptyState />
+          ) : (
+            turns.map((t) => <TurnView key={t.id} turn={t} />)
+          )}
+        </div>
+
+        {/* composer */}
+        <div
+          style={{
+            borderTop: "1px solid var(--ops-line)",
+            background: "var(--ops-bg-deep)",
+            padding: "10px 14px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          } as CSSProperties}
+        >
+          {/* quick-prompt chips */}
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" } as CSSProperties}>
+            {QUICK_PROMPTS.map((q) => (
+              <button
+                key={q}
+                onClick={() => void send(q)}
+                disabled={busy}
+                style={{
+                  background: "transparent",
+                  border: "1px solid var(--ops-line)",
+                  color: "var(--ops-fg-dim)",
+                  padding: "3px 8px",
+                  fontSize: 10,
+                  letterSpacing: "0.06em",
+                  fontFamily: "var(--ops-mono)",
+                  borderRadius: 2,
+                  cursor: "pointer",
+                } as CSSProperties}
+              >
+                ↳ {q}
+              </button>
+            ))}
+          </div>
+
+          {/* input row */}
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end" } as CSSProperties}>
+            <span
+              style={{
+                fontSize: 9,
+                color: "var(--ops-amber)",
+                letterSpacing: "0.18em",
+                padding: "8px 0",
+                minWidth: 52,
+                fontFamily: "var(--ops-mono)",
+              } as CSSProperties}
+            >
+              YOU ▸
+            </span>
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={onKeyDown}
+              rows={2}
+              placeholder={placeholder}
+              disabled={busy}
+              style={{
+                flex: 1,
+                background: "var(--ops-bg-input)",
+                border: "1px solid var(--ops-line)",
+                color: "var(--ops-fg)",
+                padding: "8px 10px",
+                fontFamily: "var(--ops-mono)",
+                fontSize: 12,
+                lineHeight: 1.5,
+                borderRadius: 2,
+                outline: "none",
+                resize: "none",
+                minHeight: 40,
+              } as CSSProperties}
+            />
+            <OpsButton
+              variant="primary"
+              onClick={() => void send()}
+              disabled={busy || !input.trim()}
+              style={{ padding: "8px 12px", display: "flex", gap: 6, alignItems: "center" } as CSSProperties}
+            >
+              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              SEND
+            </OpsButton>
+          </div>
+
+          <p
+            style={{
+              fontSize: 10,
+              color: "var(--ops-fg-faint)",
+              fontFamily: "var(--ops-mono)",
+              letterSpacing: "0.06em",
+            } as CSSProperties}
+          >
+            ENTER · SEND &nbsp;·&nbsp; SHIFT+ENTER · NEWLINE
+          </p>
+        </div>
+      </div>
+
+      {/* ── Right rail ────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          padding: 12,
+          overflowY: "auto",
+        } as CSSProperties}
+      >
+        {/* Conversation stats */}
+        <Panel title="CONVERSATION" trailing={<Dot kind={busy ? "ok" : "idle"} pulse={busy} />}>
+          <KV label="MESSAGES">{turns.length}</KV>
+          <KV label="SESSION">{stamp()}</KV>
+          <KV label="STATUS">{busy ? "PROCESSING" : turns.length === 0 ? "STANDING BY" : "IDLE"}</KV>
+        </Panel>
+
+        {/* Dispatch last 24h */}
+        <Panel title="DISPATCH · AGENTS">
+          {SUBSYSTEM_AGENTS.map((id) => {
+            const identity = getAgentIdentity(id);
+            if (!identity) return null;
+            const count = dispatchCounts[id] ?? 0;
+            const barValues = Array.from({ length: 12 }, (_, i) =>
+              i === 11 ? count * 8 : Math.random() * 4,
+            );
+            return (
+              <div
+                key={id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  padding: "4px 0",
+                  fontSize: 10,
+                } as CSSProperties}
+              >
+                <AgentGlyph agent={identity} size={14} />
+                <span
+                  style={{
+                    color: identity.colorHex,
+                    fontFamily: "var(--ops-mono)",
+                    flex: 1,
+                    fontSize: 9,
+                    letterSpacing: "0.08em",
+                  } as CSSProperties}
+                >
+                  {identity.name}
+                </span>
+                <Bars values={barValues} color={identity.colorHex} height={14} />
+                <span
+                  style={{
+                    color: "var(--ops-fg-dim)",
+                    fontFamily: "var(--ops-mono)",
+                    width: 18,
+                    textAlign: "right",
+                    fontSize: 10,
+                  } as CSSProperties}
+                >
+                  {count}
+                </span>
+              </div>
+            );
+          })}
+        </Panel>
+
+        {/* Pinned context */}
+        <Panel title="PINNED CONTEXT">
+          {[
+            "Prefer terse, action-oriented replies",
+            "Confirm before send-mail / calendar mutations",
+            "Default tz · America/Los_Angeles",
+          ].map((fact) => (
+            <div
+              key={fact}
+              style={{
+                padding: "5px 8px",
+                border: "1px solid var(--ops-line)",
+                borderLeft: "2px solid var(--ops-amber)",
+                fontFamily: "var(--ops-sans)",
+                fontSize: 10,
+                color: "var(--ops-fg-mute)",
+                marginBottom: 4,
+              } as CSSProperties}
+            >
+              {fact}
+            </div>
+          ))}
+        </Panel>
       </div>
     </div>
   );
 }
 
-function TurnView({ turn }: { turn: Turn }) {
+// ─── Empty state ─────────────────────────────────────────────────────────────
+
+function EmptyState() {
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <div className="max-w-[80%] space-y-1">
+    <div
+      style={{
+        margin: "auto",
+        textAlign: "center",
+        color: "var(--ops-fg-faint)",
+        fontSize: 11,
+        letterSpacing: "0.16em",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 16,
+        padding: "40px 0",
+      } as CSSProperties}
+    >
+      <BrandMark className="scale-[2.8]" />
+      <div>
+        <div
+          style={{
+            fontFamily: "var(--ops-sans)",
+            fontSize: 14,
+            letterSpacing: "0.12em",
+            color: "var(--ops-fg-dim)",
+            fontWeight: 600,
+            marginBottom: 6,
+          } as CSSProperties}
+        >
+          JARVIS · STANDING BY
+        </div>
+        <div
+          style={{
+            color: "var(--ops-fg-faint)",
+            fontFamily: "var(--ops-mono)",
+            fontSize: 10,
+            letterSpacing: "0.06em",
+          } as CSSProperties}
+        >
+          Ask anything · I&apos;ll route it.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Turn view ───────────────────────────────────────────────────────────────
+
+function TurnView({ turn }: { turn: Turn }) {
+  const time = stamp();
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 } as CSSProperties}>
+      {/* User bubble */}
+      <div style={{ alignSelf: "flex-end", maxWidth: "72%" } as CSSProperties}>
+        <div
+          style={{
+            fontSize: 9,
+            letterSpacing: "0.16em",
+            color: "var(--ops-amber)",
+            marginBottom: 4,
+            textAlign: "right",
+            fontFamily: "var(--ops-mono)",
+          } as CSSProperties}
+        >
           {turn.userOverride && (
-            <div className="flex justify-end">
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[10px] uppercase tracking-wider",
-                  modelTone(turn.userOverride === "opus" ? "claude-opus-4-7" : "claude-sonnet-4-6"),
-                )}
-              >
-                <Lock className="mr-1 h-3 w-3" />
-                forced · {turn.userOverride}
-              </Badge>
-            </div>
+            <span
+              style={{
+                marginRight: 6,
+                border: "1px solid var(--ops-amber)",
+                padding: "1px 4px",
+                fontSize: 8,
+              } as CSSProperties}
+            >
+              <Lock
+                style={{ display: "inline", width: 8, height: 8, marginRight: 2 } as CSSProperties}
+              />
+              {turn.userOverride.toUpperCase()}
+            </span>
           )}
-          <div className="rounded-2xl bg-primary px-4 py-2 text-sm text-primary-foreground">
-            {turn.user}
-          </div>
+          YOU · {time}
+        </div>
+        <div
+          style={{
+            background: "rgba(242,160,61,0.08)",
+            border: "1px solid var(--ops-amber)",
+            padding: "10px 14px",
+            fontSize: 13,
+            fontFamily: "var(--ops-sans)",
+            lineHeight: 1.5,
+            color: "var(--ops-fg)",
+            borderRadius: 2,
+          } as CSSProperties}
+        >
+          {turn.user}
         </div>
       </div>
 
+      {/* Model badge */}
       {turn.model && (
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-          <Badge
-            variant="outline"
-            className={cn("text-[10px] uppercase tracking-wider", modelTone(turn.model))}
-            title={turn.routeReason ?? ""}
-          >
-            {turn.manualOverride && <Lock className="mr-1 h-3 w-3" />}
-            {modelLabel(turn.model)}
-          </Badge>
-          {turn.routeReason && <span className="italic">{turn.routeReason}</span>}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 10,
+            fontFamily: "var(--ops-mono)",
+            color: "var(--ops-fg-dim)",
+          } as CSSProperties}
+        >
+          <Tag kind="default">{modelLabel(turn.model)}</Tag>
+          {turn.routeReason && (
+            <span style={{ color: "var(--ops-fg-faint)", fontStyle: "italic", fontSize: 10 } as CSSProperties}>
+              {turn.routeReason}
+            </span>
+          )}
         </div>
       )}
 
+      {/* Delegation trace */}
       {turn.toolCalls.length > 0 && <DelegationTrace calls={turn.toolCalls} />}
 
+      {/* Error */}
       {turn.errorMessage && (
-        <div className="flex items-center gap-2 rounded-md border border-red-500/40 bg-red-500/10 p-2 text-sm text-red-700 dark:text-red-400">
-          <AlertTriangle className="h-4 w-4" />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            border: "1px solid var(--ops-crit)",
+            padding: "8px 12px",
+            fontSize: 11,
+            color: "var(--ops-crit)",
+            fontFamily: "var(--ops-mono)",
+          } as CSSProperties}
+        >
+          <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0 } as CSSProperties} />
           {turn.errorMessage}
         </div>
       )}
 
+      {/* Thinking */}
       {turn.thinking && <ThinkingPanel thinking={turn.thinking} />}
 
+      {/* Response bubble */}
       {turn.text && (
-        <div className="rounded-2xl border bg-muted/40 px-4 py-2 text-sm whitespace-pre-wrap">
-          {turn.text}
-          {turn.status === "streaming" && (
-            <span className="ml-1 inline-block h-3 w-1.5 animate-pulse bg-foreground align-middle" />
-          )}
+        <div style={{ alignSelf: "flex-start", maxWidth: "85%" } as CSSProperties}>
+          <div
+            style={{
+              fontSize: 9,
+              letterSpacing: "0.16em",
+              color: "var(--ops-ok)",
+              marginBottom: 4,
+              fontFamily: "var(--ops-mono)",
+            } as CSSProperties}
+          >
+            {turn.status === "streaming" && (
+              <span
+                className="ops-live-dot"
+                style={{ display: "inline-block", marginRight: 6 } as CSSProperties}
+              />
+            )}
+            JARVIS · {time}
+          </div>
+          <div
+            style={{
+              background: "var(--ops-bg-elevated)",
+              border: "1px solid var(--ops-line)",
+              padding: "10px 14px",
+              fontSize: 13,
+              fontFamily: "var(--ops-sans)",
+              lineHeight: 1.55,
+              color: "var(--ops-fg)",
+              borderRadius: 2,
+              whiteSpace: "pre-wrap",
+            } as CSSProperties}
+          >
+            {turn.text}
+            {turn.status === "streaming" && (
+              <span
+                style={{
+                  display: "inline-block",
+                  width: 6,
+                  height: 12,
+                  background: "var(--ops-fg)",
+                  marginLeft: 2,
+                  verticalAlign: "middle",
+                  animation: "ops-caret-blink 1s step-end infinite",
+                } as CSSProperties}
+              />
+            )}
+          </div>
         </div>
       )}
 
+      {/* Cost/duration row */}
       {turn.status !== "streaming" && (turn.costUsd !== undefined || turn.durationMs !== undefined) && (
-        <div className="flex justify-end gap-3 text-[10px] text-muted-foreground">
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 12,
+            fontSize: 10,
+            color: "var(--ops-fg-faint)",
+            fontFamily: "var(--ops-mono)",
+          } as CSSProperties}
+        >
           {turn.durationMs !== undefined && <span>{(turn.durationMs / 1000).toFixed(1)}s</span>}
           {turn.costUsd !== undefined && <span>${turn.costUsd.toFixed(4)}</span>}
         </div>
@@ -536,70 +835,144 @@ function TurnView({ turn }: { turn: Turn }) {
   );
 }
 
+// ─── Thinking panel ──────────────────────────────────────────────────────────
+
 function ThinkingPanel({ thinking }: { thinking: string }) {
   return (
-    <details className="group rounded-md border bg-muted/30 px-3 py-2 text-xs">
-      <summary className="flex cursor-pointer items-center gap-2 text-muted-foreground">
-        <Brain className="h-3 w-3" />
-        thinking
+    <details
+      style={{
+        border: "1px solid var(--ops-line)",
+        padding: "6px 10px",
+        fontSize: 10,
+        fontFamily: "var(--ops-mono)",
+      } as CSSProperties}
+    >
+      <summary
+        style={{
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          color: "var(--ops-fg-dim)",
+          listStyle: "none",
+        } as CSSProperties}
+      >
+        <Brain style={{ width: 12, height: 12 } as CSSProperties} />
+        THINKING
       </summary>
-      <pre className="mt-1.5 whitespace-pre-wrap text-[11px] text-muted-foreground">
+      <pre
+        style={{
+          marginTop: 6,
+          color: "var(--ops-fg-faint)",
+          whiteSpace: "pre-wrap",
+          lineHeight: 1.6,
+          fontSize: 10,
+        } as CSSProperties}
+      >
         {thinking}
       </pre>
     </details>
   );
 }
 
+// ─── Delegation trace ────────────────────────────────────────────────────────
+
 function DelegationTrace({ calls }: { calls: ToolCall[] }) {
   return (
-    <div className="space-y-1.5">
-      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Delegation</div>
-      <ol className="space-y-1.5 border-l pl-4">
-        {calls.map((c) => {
-          const status = c.result ? (c.result.isError ? "error" : "ok") : "running";
-          const tier = c.result?.parsed?.tier;
-          const verification = c.result?.parsed?.verification?.status;
-          const intent = c.result?.parsed?.intent;
-          const needsConfirm = c.result?.parsed?.needs_confirm;
-          return (
-            <li key={c.toolUseId} className="-ml-[7px]">
-              <div className="flex items-start gap-2">
-                <StatusDot status={status} />
-                <div className="flex flex-1 flex-wrap items-center gap-1.5 text-xs">
-                  <span className="font-mono font-semibold">{c.agent || "?"}</span>
-                  <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                  <span className="font-mono text-muted-foreground">{c.action || "?"}</span>
-                  {tier !== undefined && (
-                    <Badge variant="outline" className={cn("text-[10px]", TIER_TONE[tier] ?? "")}>
-                      {TIER_LABEL[tier] ?? `T${tier}`}
-                    </Badge>
-                  )}
-                  <VerificationPill status={verification} />
-                  {needsConfirm && (
-                    <Badge variant="outline" className="text-[10px] uppercase bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                      needs confirm
-                    </Badge>
-                  )}
-                  {intent && status === "ok" && (
-                    <span className="font-mono text-[10px] text-muted-foreground">→ {intent}</span>
-                  )}
-                </div>
-              </div>
-              {c.result && c.result.parsed?.result && (
-                <pre className="ml-5 mt-1 max-h-40 overflow-x-auto rounded bg-muted/50 p-2 text-[11px]">
-                  {JSON.stringify(c.result.parsed.result, null, 2).slice(0, 1000)}
-                </pre>
+    <div
+      style={{
+        background: "var(--ops-bg-panel)",
+        border: "1px solid var(--ops-line)",
+        borderLeft: "2px solid var(--ops-ok)",
+        padding: "8px 10px",
+        fontSize: 11,
+        fontFamily: "var(--ops-mono)",
+      } as CSSProperties}
+    >
+      <div
+        style={{
+          fontSize: 9,
+          letterSpacing: "0.18em",
+          color: "var(--ops-fg-dim)",
+          marginBottom: 8,
+        } as CSSProperties}
+      >
+        DISPATCH PLAN · {calls.length} STEP{calls.length !== 1 ? "S" : ""}
+      </div>
+      {calls.map((c, i) => {
+        const identity = getAgentIdentity(c.agent);
+        const status = c.result ? (c.result.isError ? "error" : "ok") : "running";
+        const needsConfirm = c.result?.parsed?.needs_confirm;
+        const intent = c.result?.parsed?.intent;
+        return (
+          <div
+            key={c.toolUseId}
+            style={{
+              display: "grid",
+              gridTemplateColumns: "20px 100px 1fr 80px",
+              gap: 8,
+              padding: "4px 0",
+              alignItems: "center",
+              opacity: status === "running" ? 0.7 : 1,
+            } as CSSProperties}
+          >
+            <span
+              style={{ color: "var(--ops-fg-faint)", fontSize: 9 } as CSSProperties}
+            >
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <span
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+              } as CSSProperties}
+            >
+              {identity ? (
+                <>
+                  <AgentGlyph agent={identity} size={14} />
+                  <span
+                    style={{
+                      color: identity.colorHex,
+                      fontSize: 10,
+                      letterSpacing: "0.08em",
+                    } as CSSProperties}
+                  >
+                    {identity.name}
+                  </span>
+                </>
+              ) : (
+                <span style={{ color: "var(--ops-fg-dim)", fontSize: 10 } as CSSProperties}>
+                  {c.agent || "?"}
+                </span>
               )}
-            </li>
-          );
-        })}
-      </ol>
+            </span>
+            <span
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                color: "var(--ops-fg-mute)",
+                fontSize: 10,
+              } as CSSProperties}
+            >
+              <ArrowRight style={{ width: 10, height: 10 } as CSSProperties} />
+              {c.action || "?"}
+              {needsConfirm && <Tag kind="amber">CONFIRM</Tag>}
+              {intent && status === "ok" && (
+                <span style={{ color: "var(--ops-fg-faint)", fontSize: 9 } as CSSProperties}>
+                  → {intent}
+                </span>
+              )}
+            </span>
+            <span style={{ textAlign: "right" } as CSSProperties}>
+              {status === "ok" && <Tag kind="ok">✓ DONE</Tag>}
+              {status === "running" && <Tag kind="amber">▸ RUN</Tag>}
+              {status === "error" && <Tag kind="crit">✕ ERR</Tag>}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-function StatusDot({ status }: { status: "running" | "ok" | "error" }) {
-  if (status === "ok") return <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />;
-  if (status === "error") return <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500" />;
-  return <CircleDashed className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-amber-500" />;
 }

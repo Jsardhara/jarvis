@@ -2,191 +2,187 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ═══════════════════════════════════════════════════════════════
+   JARVIS // OPERATIONS BLACK
+   Mission-control aesthetic — dark, technical, schematic
+   Single source of truth for the Ops Black token system.
+   Existing shadcn semantic tokens (--background, --card, etc.)
+   are remapped to ops-* values so legacy components inherit
+   the new look without mass refactors.
+   ═══════════════════════════════════════════════════════════════ */
+
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0.064 270.94);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0.064 270.94);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0.022 270.94);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0.064 270.94);
-  --destructive: oklch(0.577 0.245 27.33);
-  --destructive-foreground: oklch(0.985 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0.165 254.62);
-  --radius: 0.625rem;
+  /* ─── Operations Black: surfaces ─────────────────────────────── */
+  --ops-bg-void: #070809;
+  --ops-bg-deep: #0B0D10;
+  --ops-bg-panel: #0F1114;
+  --ops-bg-elevated: #14171C;
+  --ops-bg-input: #16191E;
+  --ops-bg-hover: #1A1E24;
 
-  --chart-1: oklch(0.646 0.222 41.12);
-  --chart-2: oklch(0.6 0.118 184.71);
-  --chart-3: oklch(0.398 0.07 227.39);
-  --chart-4: oklch(0.828 0.189 84.43);
-  --chart-5: oklch(0.769 0.188 70.08);
+  /* ─── Operations Black: borders / lines ──────────────────────── */
+  --ops-line-faint: #14171C;
+  --ops-line: #1F242B;
+  --ops-line-strong: #2A3038;
+  --ops-line-bright: #3A424D;
 
-  --sidebar-background: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.556 0.022 270.94);
-  --sidebar-primary: oklch(0.205 0.064 270.94);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0.064 270.94);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0.165 254.62);
+  /* ─── Operations Black: foreground ───────────────────────────── */
+  --ops-fg: #E8E6DF;
+  --ops-fg-mute: #B0B3B8;
+  --ops-fg-dim: #7A7E86;
+  --ops-fg-faint: #4F545C;
 
-  /* Eisenhower quadrant accent colors — light mode */
-  --quadrant-do: oklch(0.55 0.22 25);
-  --quadrant-schedule: oklch(0.50 0.22 265);
-  --quadrant-delegate: oklch(0.55 0.18 80);
-  --quadrant-eliminate: oklch(0.45 0.03 260);
+  /* ─── Mission accent (sodium-vapor amber) ────────────────────── */
+  --ops-amber: #F2A03D;
+  --ops-amber-bright: #FFB652;
+  --ops-amber-glow: rgba(242, 160, 61, 0.18);
 
-  /* Status colors — light mode */
-  --status-not-started: oklch(0.55 0.03 260);
-  --status-in-progress: oklch(0.50 0.22 265);
-  --status-done: oklch(0.50 0.20 155);
+  /* ─── Status hues ────────────────────────────────────────────── */
+  --ops-ok: #6FCF7F;
+  --ops-warn: #F2A03D;
+  --ops-crit: #E5484D;
+  --ops-info: #7CB6E8;
 
-  /* Success / Warning / Info — light mode */
-  --success: oklch(0.50 0.20 155);
-  --warning: oklch(0.60 0.20 80);
-  --info: oklch(0.50 0.22 265);
+  /* ─── Agent identity hues (locked five + sentinel) ───────────── */
+  --ops-agent-tempo:    #7CB6E8;  /* mail + cal + tasks — sky blue */
+  --ops-agent-scholar:  #B98CE0;  /* academics — violet            */
+  --ops-agent-lens:     #E0859E;  /* research — rose               */
+  --ops-agent-forge:    #6FCF7F;  /* code — emerald                */
+  --ops-agent-atlas:    #E0B85C;  /* trading — gold                */
+  --ops-agent-sentinel: #5FD3D3;  /* daemon — cyan                 */
 
-  /* ─── Pipeline swimlane (Atlas) — light mode ──────────────────────────── */
-  /* Stage states. Reuse semantic tier palette where possible. */
-  --pipeline-stage-pending: oklch(0.78 0.012 260);     /* slate, low-energy   */
-  --pipeline-stage-running: oklch(0.55 0.20 265);      /* indigo, in-flight   */
-  --pipeline-stage-done:    oklch(0.50 0.20 155);      /* green, complete     */
-  --pipeline-stage-blocked: oklch(0.60 0.20 80);       /* amber, gated        */
-  --pipeline-stage-error:   oklch(0.55 0.22 25);       /* red, fault          */
+  /* ─── Type stack ─────────────────────────────────────────────── */
+  --ops-mono: var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --ops-sans: var(--font-space-grotesk), 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
 
-  /* Lane chrome */
-  --pipeline-lane-bg:        oklch(0.985 0 0);         /* paper white         */
-  --pipeline-lane-bg-alt:    oklch(0.965 0.005 260);   /* zebra striping      */
-  --pipeline-lane-divider:   oklch(0.88 0.008 260);    /* hairline rule       */
-  --pipeline-lane-header-bg: oklch(0.95 0.012 260);    /* sticky header band  */
+  /* ─── Layout grid ────────────────────────────────────────────── */
+  --ops-sidebar-w: 220px;
+  --ops-topbar-h: 44px;
+  --ops-statusbar-h: 28px;
 
-  /* Live event motion */
-  --pipeline-event-pulse-duration: 1100ms;             /* arrival flash       */
-  --pipeline-event-dwell-ms: 600ms;                    /* fade-in ease window */
+  /* ─── Density modifier (tweaks panel can override) ───────────── */
+  --ops-density: 1;
 
-  /* Charts (extend, don't replace --chart-1..5 which are ranked palette) */
-  --chart-axis: oklch(0.55 0.012 260);                 /* axis labels         */
-  --chart-grid: oklch(0.92 0.006 260);                 /* gridlines           */
-  --chart-tooltip-bg: oklch(0.18 0.030 250);           /* dark inverted chip  */
-  --chart-tooltip-fg: oklch(0.97 0.005 250);
+  /* ─── Motion ──────────────────────────────────────────────────── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
 
-  /* Per-agent bar tones — align with subsystem identity, distinct hues */
-  --chart-bar-tempo:   oklch(0.62 0.18 200);           /* cyan — calendar/mail*/
-  --chart-bar-scholar: oklch(0.58 0.20 290);           /* violet — academia   */
-  --chart-bar-lens:    oklch(0.65 0.18 80);            /* amber — research    */
-  --chart-bar-forge:   oklch(0.55 0.22 25);            /* red — code/PR       */
-  --chart-bar-atlas:   oklch(0.55 0.20 155);           /* green — capital     */
-  --chart-bar-jarvis:  oklch(0.50 0.04 260);           /* graphite — orchestrator */
-  --chart-bar-sentinel: oklch(0.70 0.012 260);         /* light gray — daemon */
-}
+  /* ─── Legacy shadcn tokens (light mode kept intact for forms) ── */
+  --background: var(--ops-bg-void);
+  --foreground: var(--ops-fg);
+  --card: var(--ops-bg-panel);
+  --card-foreground: var(--ops-fg);
+  --popover: var(--ops-bg-elevated);
+  --popover-foreground: var(--ops-fg);
+  --primary: var(--ops-amber);
+  --primary-foreground: var(--ops-bg-void);
+  --secondary: var(--ops-bg-elevated);
+  --secondary-foreground: var(--ops-fg-mute);
+  --muted: var(--ops-bg-panel);
+  --muted-foreground: var(--ops-fg-dim);
+  --accent: var(--ops-bg-elevated);
+  --accent-foreground: var(--ops-fg);
+  --destructive: var(--ops-crit);
+  --destructive-foreground: var(--ops-fg);
+  --border: var(--ops-line);
+  --input: var(--ops-bg-input);
+  --ring: var(--ops-amber);
+  --radius: 2px;
 
-.dark {
-  /* Deep navy blue base — identifiably blue, not black */
-  --background: oklch(0.17 0.035 250);
-  --foreground: oklch(0.93 0.008 250);
-  /* Elevated card surface */
-  --card: oklch(0.20 0.035 250);
-  --card-foreground: oklch(0.93 0.008 250);
-  /* Popovers slightly above cards */
-  --popover: oklch(0.22 0.035 250);
-  --popover-foreground: oklch(0.93 0.008 250);
-  /* Vibrant indigo primary */
-  --primary: oklch(0.65 0.2 265);
-  --primary-foreground: oklch(0.98 0 0);
-  /* Subtle secondary surface */
-  --secondary: oklch(0.25 0.030 250);
-  --secondary-foreground: oklch(0.88 0.008 250);
-  /* Muted for subdued backgrounds */
-  --muted: oklch(0.23 0.030 250);
-  --muted-foreground: oklch(0.70 0.020 250);
-  /* Accent — slightly brighter surface */
-  --accent: oklch(0.26 0.035 250);
-  --accent-foreground: oklch(0.93 0.008 250);
-  /* Destructive red */
-  --destructive: oklch(0.65 0.2 25);
-  --destructive-foreground: oklch(0.98 0 0);
-  /* Subtle borders with blue tint */
-  --border: oklch(0.28 0.025 250);
-  --input: oklch(0.25 0.025 250);
-  --ring: oklch(0.65 0.2 265);
+  /* Charts — keep numeric ramp, remap to ops palette */
+  --chart-1: var(--ops-amber);
+  --chart-2: var(--ops-info);
+  --chart-3: var(--ops-agent-scholar);
+  --chart-4: var(--ops-agent-forge);
+  --chart-5: var(--ops-agent-lens);
 
-  /* Chart colors — vibrant on dark */
-  --chart-1: oklch(0.65 0.2 265);
-  --chart-2: oklch(0.7 0.17 162);
-  --chart-3: oklch(0.75 0.18 80);
-  --chart-4: oklch(0.65 0.22 310);
-  --chart-5: oklch(0.65 0.22 25);
+  /* Sidebar shadcn semantic */
+  --sidebar-background: var(--ops-bg-deep);
+  --sidebar-foreground: var(--ops-fg-mute);
+  --sidebar-primary: var(--ops-amber);
+  --sidebar-primary-foreground: var(--ops-bg-void);
+  --sidebar-accent: var(--ops-bg-elevated);
+  --sidebar-accent-foreground: var(--ops-fg);
+  --sidebar-border: var(--ops-line);
+  --sidebar-ring: var(--ops-amber);
 
-  /* Sidebar — deeper navy for visual hierarchy */
-  --sidebar-background: oklch(0.14 0.040 250);
-  --sidebar-foreground: oklch(0.70 0.020 250);
-  --sidebar-primary: oklch(0.65 0.2 265);
-  --sidebar-primary-foreground: oklch(0.98 0 0);
-  --sidebar-accent: oklch(0.21 0.035 250);
-  --sidebar-accent-foreground: oklch(0.93 0.008 250);
-  --sidebar-border: oklch(0.23 0.025 250);
-  --sidebar-ring: oklch(0.65 0.2 265);
+  /* Eisenhower quadrants */
+  --quadrant-do: var(--ops-crit);
+  --quadrant-schedule: var(--ops-info);
+  --quadrant-delegate: var(--ops-amber);
+  --quadrant-eliminate: var(--ops-fg-faint);
 
-  /* Eisenhower quadrant accent colors */
-  --quadrant-do: oklch(0.55 0.18 25);
-  --quadrant-schedule: oklch(0.55 0.18 265);
-  --quadrant-delegate: oklch(0.6 0.16 80);
-  --quadrant-eliminate: oklch(0.4 0.025 250);
+  /* Status semantic (kanban etc.) */
+  --status-not-started: var(--ops-fg-dim);
+  --status-in-progress: var(--ops-info);
+  --status-done: var(--ops-ok);
+  --success: var(--ops-ok);
+  --warning: var(--ops-warn);
+  --info: var(--ops-info);
 
-  /* Status colors */
-  --status-not-started: oklch(0.5 0.025 250);
-  --status-in-progress: oklch(0.6 0.18 265);
-  --status-done: oklch(0.6 0.17 155);
-
-  /* Success / Warning / Info */
-  --success: oklch(0.6 0.17 155);
-  --warning: oklch(0.7 0.18 80);
-  --info: oklch(0.65 0.2 265);
-
-  /* ─── Pipeline swimlane (Atlas) — dark mode ───────────────────────────── */
-  /* Higher chroma + lightness vs light mode so states pop on navy. */
-  --pipeline-stage-pending: oklch(0.50 0.020 250);     /* dim slate           */
-  --pipeline-stage-running: oklch(0.68 0.20 265);      /* bright indigo       */
-  --pipeline-stage-done:    oklch(0.65 0.18 155);      /* mint green          */
-  --pipeline-stage-blocked: oklch(0.72 0.18 80);       /* warm amber          */
-  --pipeline-stage-error:   oklch(0.68 0.22 25);       /* hot red             */
-
-  /* Lane chrome — sit just above --card so lanes feel "etched" into surface */
-  --pipeline-lane-bg:        oklch(0.21 0.030 250);    /* lane surface        */
-  --pipeline-lane-bg-alt:    oklch(0.19 0.030 250);    /* zebra striping      */
-  --pipeline-lane-divider:   oklch(0.30 0.025 250);    /* sharp 1px rule      */
-  --pipeline-lane-header-bg: oklch(0.16 0.040 250);    /* deeper than lane    */
-
-  /* Live event motion (same timings cross-theme; brutalism = no easing drift) */
+  /* Pipeline swimlane (Atlas) */
+  --pipeline-stage-pending: var(--ops-fg-faint);
+  --pipeline-stage-running: var(--ops-info);
+  --pipeline-stage-done: var(--ops-ok);
+  --pipeline-stage-blocked: var(--ops-amber);
+  --pipeline-stage-error: var(--ops-crit);
+  --pipeline-lane-bg: var(--ops-bg-panel);
+  --pipeline-lane-bg-alt: var(--ops-bg-deep);
+  --pipeline-lane-divider: var(--ops-line);
+  --pipeline-lane-header-bg: var(--ops-bg-elevated);
   --pipeline-event-pulse-duration: 1100ms;
   --pipeline-event-dwell-ms: 600ms;
 
-  /* Charts */
-  --chart-axis: oklch(0.65 0.020 250);
-  --chart-grid: oklch(0.28 0.025 250);
-  --chart-tooltip-bg: oklch(0.95 0.005 250);
-  --chart-tooltip-fg: oklch(0.18 0.030 250);
+  /* Chart chrome */
+  --chart-axis: var(--ops-fg-dim);
+  --chart-grid: var(--ops-line);
+  --chart-tooltip-bg: var(--ops-bg-elevated);
+  --chart-tooltip-fg: var(--ops-fg);
+  --chart-bar-tempo:    var(--ops-agent-tempo);
+  --chart-bar-scholar:  var(--ops-agent-scholar);
+  --chart-bar-lens:     var(--ops-agent-lens);
+  --chart-bar-forge:    var(--ops-agent-forge);
+  --chart-bar-atlas:    var(--ops-agent-atlas);
+  --chart-bar-jarvis:   var(--ops-amber);
+  --chart-bar-sentinel: var(--ops-agent-sentinel);
+}
 
-  /* Per-agent bar tones — vibrant on navy */
-  --chart-bar-tempo:   oklch(0.72 0.17 200);
-  --chart-bar-scholar: oklch(0.68 0.20 290);
-  --chart-bar-lens:    oklch(0.75 0.18 80);
-  --chart-bar-forge:   oklch(0.68 0.22 25);
-  --chart-bar-atlas:   oklch(0.68 0.18 155);
-  --chart-bar-jarvis:  oklch(0.72 0.020 250);
-  --chart-bar-sentinel: oklch(0.50 0.020 250);
+/* Dark mode is the canonical Ops Black presentation. The .dark class
+   simply re-asserts the same values (operator can still toggle, but
+   the look is consistent). */
+.dark {
+  --background: var(--ops-bg-void);
+  --foreground: var(--ops-fg);
+  --card: var(--ops-bg-panel);
+  --card-foreground: var(--ops-fg);
+  --popover: var(--ops-bg-elevated);
+  --popover-foreground: var(--ops-fg);
+  --primary: var(--ops-amber);
+  --primary-foreground: var(--ops-bg-void);
+  --secondary: var(--ops-bg-elevated);
+  --secondary-foreground: var(--ops-fg-mute);
+  --muted: var(--ops-bg-panel);
+  --muted-foreground: var(--ops-fg-dim);
+  --accent: var(--ops-bg-elevated);
+  --accent-foreground: var(--ops-fg);
+  --destructive: var(--ops-crit);
+  --destructive-foreground: var(--ops-fg);
+  --border: var(--ops-line);
+  --input: var(--ops-bg-input);
+  --ring: var(--ops-amber);
+  --sidebar-background: var(--ops-bg-deep);
+  --sidebar-foreground: var(--ops-fg-mute);
+  --sidebar-primary: var(--ops-amber);
+  --sidebar-primary-foreground: var(--ops-bg-void);
+  --sidebar-accent: var(--ops-bg-elevated);
+  --sidebar-accent-foreground: var(--ops-fg);
+  --sidebar-border: var(--ops-line);
+  --sidebar-ring: var(--ops-amber);
 }
 
 @theme inline {
+  /* shadcn semantic */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -219,7 +215,8 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
-  /* Semantic colors */
+
+  /* Semantic helpers */
   --color-quadrant-do: var(--quadrant-do);
   --color-quadrant-schedule: var(--quadrant-schedule);
   --color-quadrant-delegate: var(--quadrant-delegate);
@@ -230,6 +227,7 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
+
   /* Pipeline swimlane */
   --color-pipeline-stage-pending: var(--pipeline-stage-pending);
   --color-pipeline-stage-running: var(--pipeline-stage-running);
@@ -240,6 +238,7 @@
   --color-pipeline-lane-bg-alt: var(--pipeline-lane-bg-alt);
   --color-pipeline-lane-divider: var(--pipeline-lane-divider);
   --color-pipeline-lane-header-bg: var(--pipeline-lane-header-bg);
+
   /* Charts */
   --color-chart-axis: var(--chart-axis);
   --color-chart-grid: var(--chart-grid);
@@ -252,107 +251,653 @@
   --color-chart-bar-atlas: var(--chart-bar-atlas);
   --color-chart-bar-jarvis: var(--chart-bar-jarvis);
   --color-chart-bar-sentinel: var(--chart-bar-sentinel);
-  /* Radii */
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+
+  /* ─── Operations Black raw tokens — exposed as Tailwind utils ── */
+  --color-ops-void: var(--ops-bg-void);
+  --color-ops-deep: var(--ops-bg-deep);
+  --color-ops-panel: var(--ops-bg-panel);
+  --color-ops-elevated: var(--ops-bg-elevated);
+  --color-ops-input-bg: var(--ops-bg-input);
+  --color-ops-hover: var(--ops-bg-hover);
+  --color-ops-line: var(--ops-line);
+  --color-ops-line-faint: var(--ops-line-faint);
+  --color-ops-line-strong: var(--ops-line-strong);
+  --color-ops-line-bright: var(--ops-line-bright);
+  --color-ops-fg: var(--ops-fg);
+  --color-ops-fg-mute: var(--ops-fg-mute);
+  --color-ops-fg-dim: var(--ops-fg-dim);
+  --color-ops-fg-faint: var(--ops-fg-faint);
+  --color-ops-amber: var(--ops-amber);
+  --color-ops-amber-bright: var(--ops-amber-bright);
+  --color-ops-ok: var(--ops-ok);
+  --color-ops-warn: var(--ops-warn);
+  --color-ops-crit: var(--ops-crit);
+  --color-ops-info: var(--ops-info);
+  --color-agent-tempo: var(--ops-agent-tempo);
+  --color-agent-scholar: var(--ops-agent-scholar);
+  --color-agent-lens: var(--ops-agent-lens);
+  --color-agent-forge: var(--ops-agent-forge);
+  --color-agent-atlas: var(--ops-agent-atlas);
+  --color-agent-sentinel: var(--ops-agent-sentinel);
+
+  /* Typography */
+  --font-sans: var(--ops-sans);
+  --font-mono: var(--ops-mono);
+
+  /* Radii — sharp/technical (2px hairline) */
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 4px;
 }
 
+/* ───────── Base layer ───────── */
 @layer base {
-  * {
-    @apply border-border;
+  * { box-sizing: border-box; }
+
+  *, *::before, *::after {
+    border-color: var(--border);
   }
+
+  html, body {
+    background: var(--ops-bg-void);
+    color: var(--ops-fg);
+    font-family: var(--ops-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    font-feature-settings: 'tnum', 'ss01', 'ss02';
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Dot-grid backdrop — 24px radial dots @ 2.5% opacity */
   body {
-    @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at center, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: 0 0;
   }
+
+  /* Headers default to Space Grotesk + uppercase tracked */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--ops-sans);
+    letter-spacing: 0.04em;
+    font-weight: 500;
+  }
+
+  /* Tabular numerics by default everywhere */
+  .tabular-nums,
+  [class*="tabular-nums"] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  button { font-family: inherit; color: inherit; cursor: pointer; }
+  input, textarea, select { font-family: inherit; color: inherit; }
 }
 
-/* Smooth transitions for interactive elements */
+/* ───────── Operations Black scrollbars ───────── */
 @layer base {
-  a, button, input, textarea, select {
-    @apply transition-colors duration-150;
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--ops-line-strong);
+    border-radius: 3px;
   }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ops-line-bright); }
+  * { scrollbar-color: var(--ops-line-strong) transparent; scrollbar-width: thin; }
 }
 
-/* Enhanced focus visibility for accessibility */
+/* ───────── Focus visibility ───────── */
 @layer base {
   :focus-visible {
-    outline: 2px solid var(--ring);
+    outline: 1px solid var(--ops-amber);
     outline-offset: 2px;
-    border-radius: 4px;
   }
 }
 
-/* Skip to content link for keyboard navigation */
+/* ───────── Skip-to-content ───────── */
 .skip-to-content {
   position: absolute;
   left: -9999px;
   top: 0;
   z-index: 9999;
   padding: 0.5rem 1rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 0.875rem;
+  background: var(--ops-amber);
+  color: var(--ops-bg-void);
+  font-size: 11px;
+  font-family: var(--ops-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.skip-to-content:focus { left: 0; }
+
+/* ═══════════════════════════════════════════════════════════════
+   OPERATIONS BLACK PRIMITIVES
+   Class hooks consumed by web/src/components/ops/* primitives.
+   Keep these tight: tokens only, no hard-coded hex.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Panel ─── */
+.ops-panel {
+  background: var(--ops-bg-panel);
+  border: 1px solid var(--ops-line);
+  border-radius: 2px;
+  display: flex;
+  flex-direction: column;
+}
+.ops-panel-header {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--ops-line);
+  gap: 10px;
+}
+.ops-panel-title {
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ops-fg-mute);
+  font-weight: 600;
+}
+.ops-panel-body {
+  padding: 14px;
+  flex: 1;
+  overflow: auto;
+}
+
+/* ─── Buttons ─── */
+.ops-btn {
+  background: transparent;
+  border: 1px solid var(--ops-line-strong);
+  color: var(--ops-fg-mute);
+  padding: 5px 10px;
+  font-family: var(--ops-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+.ops-btn:hover {
+  border-color: var(--ops-line-bright);
+  color: var(--ops-fg);
+  background: var(--ops-bg-hover);
+}
+.ops-btn:focus-visible {
+  outline: 1px solid var(--ops-amber);
+  outline-offset: 2px;
+}
+.ops-btn-primary {
+  border-color: var(--ops-amber);
+  color: var(--ops-amber);
+  background: var(--ops-amber-glow);
+}
+.ops-btn-primary:hover {
+  background: rgba(242, 160, 61, 0.14);
+  color: var(--ops-amber-bright);
+}
+.ops-btn-danger {
+  border-color: var(--ops-crit);
+  color: var(--ops-crit);
+}
+.ops-btn-icon { padding: 5px 7px; }
+
+/* ─── Tag chip ─── */
+.ops-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--ops-line-strong);
+  border-radius: 2px;
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ops-fg-mute);
+  line-height: 1.4;
+}
+.ops-tag-amber { border-color: var(--ops-amber); color: var(--ops-amber); background: var(--ops-amber-glow); }
+.ops-tag-ok { border-color: var(--ops-ok); color: var(--ops-ok); }
+.ops-tag-crit { border-color: var(--ops-crit); color: var(--ops-crit); }
+.ops-tag-info { border-color: var(--ops-info); color: var(--ops-info); }
+.ops-tag-solid { background: var(--ops-bg-elevated); }
+
+/* ─── Status dot ─── */
+.ops-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  background: var(--ops-fg-faint);
+  flex-shrink: 0;
+}
+.ops-dot-ok { background: var(--ops-ok); box-shadow: 0 0 6px var(--ops-ok); }
+.ops-dot-warn { background: var(--ops-warn); box-shadow: 0 0 6px var(--ops-warn); }
+.ops-dot-crit { background: var(--ops-crit); box-shadow: 0 0 6px var(--ops-crit); }
+.ops-dot-info { background: var(--ops-info); box-shadow: 0 0 6px var(--ops-info); }
+.ops-dot-idle { background: var(--ops-fg-faint); }
+.ops-dot-pulse { animation: ops-pulse-dot 1.4s infinite; }
+
+@keyframes ops-pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes ops-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes ops-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+/* ─── Field ─── */
+.ops-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ops-field label {
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ops-fg-dim);
+}
+.ops-field input,
+.ops-field select,
+.ops-field textarea {
+  background: var(--ops-bg-input);
+  border: 1px solid var(--ops-line);
+  padding: 6px 8px;
+  font-family: var(--ops-mono);
+  font-size: 12px;
+  border-radius: 2px;
+  outline: none;
+  width: 100%;
+  color: var(--ops-fg);
+}
+.ops-field input:focus,
+.ops-field select:focus,
+.ops-field textarea:focus {
+  border-color: var(--ops-amber);
+  background: var(--ops-bg-deep);
+}
+.ops-field textarea { resize: vertical; min-height: 80px; }
+
+/* ─── Section sub-header (rule on the right) ─── */
+.ops-sub-h {
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ops-fg-dim);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Rule fills the gap between the label and (optional) trailing slot.
+   order: 1 puts it between the label (order: 0 default) and the
+   trailing span which is forced to order: 2 via .ops-sub-h-trailing. */
+.ops-sub-h::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--ops-line-strong), transparent);
+  order: 1;
+}
+/* Applied to the trailing slot element by SubH component */
+.ops-sub-h-trailing {
+  order: 2;
+  flex-shrink: 0;
+}
+
+/* ─── Keyboard chip ─── */
+.ops-kbd {
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  background: var(--ops-bg-input);
+  border: 1px solid var(--ops-line-strong);
+  padding: 1px 5px;
+  border-radius: 2px;
+  color: var(--ops-fg-mute);
+}
+
+/* ─── Hatched placeholder ─── */
+.ops-hatch {
+  background:
+    repeating-linear-gradient(
+      45deg,
+      rgba(255, 255, 255, 0.025) 0 6px,
+      transparent 6px 12px
+    );
+  border: 1px dashed var(--ops-line-strong);
+}
+
+/* ─── Scanline overlay ─── */
+.ops-scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0,
+    transparent 2px,
+    rgba(255, 255, 255, 0.012) 2px,
+    rgba(255, 255, 255, 0.012) 3px
+  );
+  z-index: 1;
+}
+
+/* ─── Cross-tick decoration (mission-control corners) ─── */
+.ops-cross-tick {
+  position: relative;
+}
+.ops-cross-tick::before,
+.ops-cross-tick::after {
+  content: '+';
+  position: absolute;
+  color: var(--ops-line-bright);
+  font-size: 10px;
+  width: 8px;
+  height: 8px;
+  display: grid;
+  place-items: center;
+}
+.ops-cross-tick::before { top: -4px; left: -4px; }
+.ops-cross-tick::after { bottom: -4px; right: -4px; }
+
+/* ─── Mini bars (sparkline) ─── */
+.ops-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  height: 18px;
+}
+.ops-bars > span {
+  flex: 1;
+  background: var(--ops-fg-faint);
+  min-width: 2px;
+  opacity: 0.7;
+}
+
+/* ─── Brand mark (rotated square + amber dot) ─── */
+.ops-brand-mark {
+  width: 22px;
+  height: 22px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.ops-brand-mark::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--ops-amber);
+  transform: rotate(45deg);
+}
+.ops-brand-mark::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background: var(--ops-amber);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--ops-amber);
+}
+
+/* ─── Live dot (status) ─── */
+.ops-live-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--ops-ok);
+  border-radius: 50%;
+  margin-right: 6px;
+  box-shadow: 0 0 6px var(--ops-ok);
+  animation: ops-pulse-dot 2s infinite;
+}
+
+/* ─── App layout grid ─── */
+.ops-app {
+  display: grid;
+  grid-template-columns: var(--ops-sidebar-w) 1fr;
+  grid-template-rows: var(--ops-topbar-h) 1fr var(--ops-statusbar-h);
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main"
+    "statusbar statusbar";
+  height: 100vh;
+  width: 100vw;
+}
+.ops-topbar {
+  grid-area: topbar;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--ops-line);
+  background: var(--ops-bg-deep);
+  padding: 0 16px;
+  gap: 16px;
+  position: relative;
+}
+.ops-topbar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(242, 160, 61, 0.04) 0%, transparent 100%);
+}
+.ops-sidebar {
+  grid-area: sidebar;
+  background: var(--ops-bg-deep);
+  border-right: 1px solid var(--ops-line);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.ops-main {
+  grid-area: main;
+  overflow: auto;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.ops-statusbar {
+  grid-area: statusbar;
+  border-top: 1px solid var(--ops-line);
+  background: var(--ops-bg-deep);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  color: var(--ops-fg-dim);
+  letter-spacing: 0.05em;
+  gap: 20px;
+}
+
+/* ─── Sidebar nav items ─── */
+.ops-nav-section { padding: 14px 12px 6px; }
+.ops-nav-label {
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--ops-fg-faint);
+  text-transform: uppercase;
+  padding: 0 6px 6px;
+  display: flex;
+  justify-content: space-between;
+}
+.ops-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: var(--ops-mono);
+  font-size: 12px;
+  color: var(--ops-fg-mute);
+  border-left: 2px solid transparent;
+  transition: background 80ms, color 80ms;
+  text-decoration: none;
+}
+.ops-nav-item:hover {
+  background: var(--ops-bg-hover);
+  color: var(--ops-fg);
+}
+.ops-nav-item-active {
+  background: var(--ops-bg-elevated);
+  color: var(--ops-fg);
+  border-left-color: var(--ops-amber);
+}
+.ops-nav-glyph {
+  width: 14px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: -0.04em;
+  flex-shrink: 0;
+}
+.ops-nav-meta {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--ops-fg-faint);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ops-nav-item-agent .ops-nav-glyph {
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--agent-color, var(--ops-fg-mute));
+}
+
+/* ─── View header ─── */
+.ops-view-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--ops-line);
+  gap: 16px;
+  background: var(--ops-bg-deep);
+  min-height: 52px;
+}
+.ops-view-title {
+  font-family: var(--ops-sans);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   font-weight: 500;
-  border-radius: 0 0 0.5rem 0;
+  color: var(--ops-fg);
+}
+.ops-view-subtitle {
+  font-family: var(--ops-mono);
+  color: var(--ops-fg-dim);
+  font-size: 11px;
+}
+.ops-view-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+}
+.ops-view-body {
+  flex: 1;
+  overflow: auto;
+  position: relative;
 }
 
-.skip-to-content:focus {
-  left: 0;
+/* ─── Utilities ─── */
+.ops-up {
+  font-family: var(--ops-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ops-faint { color: var(--ops-fg-faint); }
+.ops-muted { color: var(--ops-fg-dim); }
+.ops-mono-num { font-variant-numeric: tabular-nums; font-family: var(--ops-mono); }
+
+/* ─── Mobile layout ─── */
+@media (max-width: 767px) {
+  .ops-app {
+    grid-template-columns: 1fr;
+    grid-template-rows: var(--ops-topbar-h) 1fr var(--ops-statusbar-h);
+    grid-template-areas:
+      "topbar"
+      "main"
+      "statusbar";
+  }
+  /* On mobile the sidebar is a position:fixed overlay; remove it from grid flow */
+  .ops-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100%;
+    width: var(--ops-sidebar-w);
+    z-index: 50;
+  }
 }
 
-/* Shimmer animation for active progress bars */
+@media (max-width: 639px) {
+  .ops-statusbar { display: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   LEGACY ANIMATIONS (kept — used by pipeline + cards)
+   ═══════════════════════════════════════════════════════════════ */
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-
 .animate-shimmer {
   background-size: 200% 100%;
   animation: shimmer 2s ease-in-out infinite;
 }
 
-/* Card entrance animation */
 @keyframes fade-in-up {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
 }
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out both; }
 
-.animate-fade-in-up {
-  animation: fade-in-up 0.3s ease-out both;
-}
-
-/* Pipeline event arrival pulse — opacity + outline only (compositor-safe) */
 @keyframes pipeline-event-pulse {
   0%   { opacity: 0; transform: translateY(2px); }
   18%  { opacity: 1; transform: translateY(0); }
   100% { opacity: 1; transform: translateY(0); }
 }
-
 .animate-pipeline-event {
   animation: pipeline-event-pulse var(--pipeline-event-pulse-duration) cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Running-stage breathing dot — purely opacity, sits inside lane header */
 @keyframes pipeline-stage-breathe {
   0%, 100% { opacity: 0.55; }
   50%      { opacity: 1; }
 }
-
 .animate-stage-breathe {
   animation: pipeline-stage-breathe 1.6s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .animate-pipeline-event,
-  .animate-stage-breathe {
+  .animate-stage-breathe,
+  .ops-dot-pulse,
+  .ops-live-dot {
     animation: none;
   }
 }
@@ -361,40 +906,4 @@
 [data-next-mark],
 nextjs-portal {
   display: none !important;
-}
-
-/* Custom scrollbar — light mode */
-@layer base {
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: oklch(0.8 0.01 260);
-    border-radius: 4px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.7 0.015 260);
-  }
-}
-
-/* Custom scrollbar — dark theme override */
-@layer base {
-  .dark ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  .dark ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  .dark ::-webkit-scrollbar-thumb {
-    background: oklch(0.32 0.02 250);
-    border-radius: 4px;
-  }
-  .dark ::-webkit-scrollbar-thumb:hover {
-    background: oklch(0.40 0.025 250);
-  }
 }

@@ -128,7 +128,7 @@ export default function BrainDumpPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Brain Dump" }]} />
         <div className="space-y-2">
           <EntryRowSkeleton />
@@ -141,7 +141,7 @@ export default function BrainDumpPage() {
 
   if (dumpError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Brain Dump" }]} />
         <ErrorState message={dumpError} onRetry={refetch} />
       </div>
@@ -149,7 +149,7 @@ export default function BrainDumpPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Brain Dump" }]} />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold flex items-center gap-2">

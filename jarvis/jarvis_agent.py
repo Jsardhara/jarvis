@@ -27,6 +27,7 @@ layer turns into SSE frames:
 """
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -66,6 +67,39 @@ SOUL_LITE = "jarvis_soul_lite.md"
 _RECAP_TURN_PAIRS = 3
 _RECAP_MAX_CHARS = 800
 _TURN_LOG_MAX = 12  # 6 user + 6 assistant
+_TURN_LOG_PATH = Path("state/jarvis_turn_log.json")
+
+
+# ---------- Turn-log persistence ----------
+
+
+def _load_turn_log() -> list[dict[str, str]]:
+    """Restore prior conversation turns from disk so memory survives restarts."""
+    if not _TURN_LOG_PATH.exists():
+        return []
+    try:
+        raw = json.loads(_TURN_LOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("turn-log read failed (%s); starting empty", exc)
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for entry in raw[-_TURN_LOG_MAX:]:
+        if isinstance(entry, dict) and isinstance(entry.get("role"), str) and isinstance(entry.get("text"), str):
+            out.append({"role": entry["role"], "text": entry["text"]})
+    return out
+
+
+def _save_turn_log(turns: list[dict[str, str]]) -> None:
+    """Persist the rolling turn log to disk (atomic write)."""
+    try:
+        _TURN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _TURN_LOG_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(turns, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(_TURN_LOG_PATH)
+    except OSError as exc:
+        logger.warning("turn-log write failed: %s", exc)
 
 
 # ---------- Soul loader ----------
@@ -87,8 +121,8 @@ def load_soul(variant: str = "full") -> str:
 
 _AGENT_DESCRIPTIONS = {
     "tempo": (
-        "Outlook + iCloud calendar + reminders + Gmail/Drexel mail. Actions: "
-        "triage, draft_reply, send_mail, today, find_free, schedule, cancel, "
+        "Gmail (+optional Drexel) for mail, iCloud for calendar + reminders + tasks. "
+        "Actions: triage, draft_reply, send_mail, today, find_free, schedule, cancel, "
         "add, list_open, complete."
     ),
     "scholar": (
@@ -200,7 +234,7 @@ class JarvisChat:
         self._clients: dict[str, ClaudeSDKClient] = {}
         self._connected: set[str] = set()
         self._last_lane: str | None = None
-        self._turn_log: list[dict[str, str]] = []
+        self._turn_log: list[dict[str, str]] = _load_turn_log()
 
     # ----- routing -----
 
@@ -273,6 +307,7 @@ class JarvisChat:
         self._turn_log.append({"role": role, "text": text})
         if len(self._turn_log) > _TURN_LOG_MAX:
             self._turn_log = self._turn_log[-_TURN_LOG_MAX:]
+        _save_turn_log(self._turn_log)
 
     # ----- public API -----
 

@@ -89,7 +89,7 @@ export default function SkillsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Skills Library" }]} />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <SkillCardSkeleton />
@@ -102,7 +102,7 @@ export default function SkillsPage() {
 
   if (skillsError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Skills Library" }]} />
         <ErrorState message={skillsError} onRetry={refetch} />
       </div>
@@ -110,7 +110,7 @@ export default function SkillsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Skills Library" }]} />
 
       <div className="flex items-center justify-between">

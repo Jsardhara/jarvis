@@ -91,7 +91,7 @@ export default function EisenhowerPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Priority Matrix" }]} />
         <EisenhowerSkeleton />
       </div>
@@ -100,7 +100,7 @@ export default function EisenhowerPage() {
 
   if (tasksError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Priority Matrix" }]} />
         <ErrorState message={tasksError} onRetry={refetch} />
       </div>
@@ -108,7 +108,7 @@ export default function EisenhowerPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-5">
       <BreadcrumbNav items={[{ label: "Priority Matrix" }]} />
 
       <div className="flex items-center justify-between flex-wrap gap-2">

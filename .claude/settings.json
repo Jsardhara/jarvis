@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "Jarvis project settings. Phase 0 scaffold — MCP enable list, hook stubs. Daemon hooks land in Phase 3.",
+  "_comment": "Jarvis project — six runtime agents (jarvis+tempo+scholar+lens+forge+atlas) + dev-side team (jarvis-*). Multiple agents may run in parallel via Task tool.",
 
   "enabledMcpjsonServers": [
     "github",
@@ -12,10 +12,8 @@
     "claude-mem"
   ],
 
-  "_pending_mcp_oauth": [
-    "Gmail",
-    "Google Calendar",
-    "Google Drive"
+  "_pending_oauth": [
+    "Outlook (MS Graph via MSAL device-code, not MCP)"
   ],
 
   "permissions": {
@@ -23,17 +21,77 @@
       "Read",
       "Glob",
       "Grep",
+      "Edit",
+      "Write",
+      "Agent",
+      "TaskCreate",
+      "TaskList",
+      "TaskUpdate",
+      "TaskGet",
+      "TaskOutput",
+      "TaskStop",
+      "Skill",
+      "WebFetch",
+      "WebSearch",
+
       "Bash(pytest *)",
-      "Bash(ruff *)",
+      "Bash(python -m pytest *)",
       "Bash(python -m jarvis.*)",
+      "Bash(python -c *)",
+      "Bash(ruff *)",
+      "Bash(mypy *)",
+      "Bash(pip install *)",
+      "Bash(uvicorn *)",
+
+      "Bash(bun *)",
+      "Bash(npm *)",
+      "Bash(npx *)",
+      "Bash(node *)",
+
       "Bash(git status)",
+      "Bash(git status -s)",
       "Bash(git diff *)",
       "Bash(git log *)",
-      "Bash(gh *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push)",
+      "Bash(git push origin *)",
+      "Bash(git checkout *)",
+      "Bash(git branch *)",
+      "Bash(git worktree *)",
+
+      "Bash(gh *)",
+
+      "Bash(curl http://127.0.0.1:*)",
+      "Bash(curl http://localhost:*)",
+      "Bash(curl -s http://127.0.0.1:*)",
+      "Bash(curl -s http://localhost:*)",
+
+      "Bash(ls *)",
+      "Bash(cat state/*)",
+      "Bash(tail *)",
+      "Bash(head *)",
+      "Bash(netstat *)",
+      "Bash(tasklist *)",
+
+      "Bash(taskkill *)",
+      "Bash(rm -f *)",
+
+      "mcp__plugin_ecc_github__*",
+      "mcp__plugin_ecc_exa__*",
+      "mcp__plugin_ecc_context7__*",
+      "mcp__plugin_ecc_memory__*",
+      "mcp__plugin_ecc_sequential-thinking__*",
+      "mcp__plugin_ecc_playwright__*"
     ],
     "deny": [
       "Bash(rm -rf *)",
-      "Bash(git push --force *)"
+      "Bash(rm -rf /*)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard origin/*)",
+      "Edit(C:\\Users\\jyot2\\atlas\\**)",
+      "Write(C:\\Users\\jyot2\\atlas\\**)"
     ]
   },
 
@@ -51,12 +109,13 @@
     ],
     "PostToolUse": [
       {
-        "_comment": "Phase 1: lint Python edits"
-      }
-    ],
-    "Stop": [
-      {
-        "_comment": "Phase 1: append session digest to state/inbox.jsonl"
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruff check --fix --quiet jarvis/ tests/ 2>/dev/null || true"
+          }
+        ]
       }
     ]
   },
@@ -64,6 +123,42 @@
   "env": {
     "JARVIS_PROJECT_ROOT": "C:\\Users\\jyot2\\jarvis",
     "JARVIS_STATE_DIR": "C:\\Users\\jyot2\\jarvis\\state",
-    "JARVIS_ATLAS_API": "http://localhost:8000"
+    "JARVIS_ATLAS_API": "http://localhost:8000",
+    "PYTHONIOENCODING": "utf-8",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+
+  "teammateMode": "in-process",
+
+  "_agent_team": {
+    "_comment": "Dev-side agents the operator spawns via Task tool to parallelize work on Jarvis itself. Runtime subsystem agents (tempo/scholar/lens/forge/atlas) are different — those are dispatched by jarvis orchestrator at runtime.",
+    "runtime_agents": [
+      "jarvis",
+      "tempo",
+      "scholar",
+      "lens",
+      "forge",
+      "atlas"
+    ],
+    "dev_team": [
+      "jarvis-backend-dev",
+      "jarvis-frontend-dev",
+      "jarvis-test-runner",
+      "jarvis-dashboard-designer",
+      "jarvis-outlook-integrator"
+    ],
+    "parallel_safe_combinations": [
+      ["jarvis-backend-dev", "jarvis-frontend-dev"],
+      ["jarvis-backend-dev", "jarvis-frontend-dev", "jarvis-test-runner"],
+      ["jarvis-dashboard-designer", "jarvis-backend-dev"],
+      ["jarvis-outlook-integrator", "jarvis-frontend-dev", "jarvis-test-runner"]
+    ],
+    "scope_boundaries": {
+      "jarvis-backend-dev": "jarvis/ + tests/ (read-only on web/, atlas/)",
+      "jarvis-frontend-dev": "web/src/ (read-only on jarvis/)",
+      "jarvis-test-runner": "tests/ + minimal jarvis/ for genuine bugs",
+      "jarvis-dashboard-designer": "web/src/app/globals.css + component proposals",
+      "jarvis-outlook-integrator": "jarvis/subsystems/outlook_provider.py + integration points"
+    }
   }
 }

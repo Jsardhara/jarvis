@@ -1,111 +1,85 @@
 "use client";
 
-import { useState } from "react";
+import { CSSProperties, useState } from "react";
 import { useParams } from "next/navigation";
 import {
-  User, Search, Code, Megaphone, BarChart3, Send, Bot,
-  Save, Plus, X, Zap, Shield, Wrench, BookOpen, Globe, Brain, Palette, HeartPulse,
-} from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/empty-state";
-import { Badge } from "@/components/ui/badge";
-import { BreadcrumbNav } from "@/components/breadcrumb-nav";
-import { TaskCard } from "@/components/task-card";
-import { TaskDetailPanel } from "@/components/task-detail-panel";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { useTasks, useGoals, useProjects, useInbox, useActivityLog, useAgents, useSkills, useDecisions } from "@/hooks/use-data";
+  Panel,
+  AgentGlyph,
+  Bars,
+  Hatch,
+  KV,
+  OpsButton,
+  SubH,
+  Tag,
+  Dot,
+  getAgentIdentity,
+} from "@/components/ops";
+import { useTasks, useActivityLog } from "@/hooks/use-data";
 import { useActiveRunsContext as useActiveRuns } from "@/providers/active-runs-provider";
 import { useFastTaskPoll } from "@/hooks/use-fast-task-poll";
-import { TaskCardSkeleton } from "@/components/skeletons";
-import { ErrorState } from "@/components/error-state";
+import { TaskDetailPanel } from "@/components/task-detail-panel";
+import { useGoals, useProjects, useAgents } from "@/hooks/use-data";
 import type { Task } from "@/lib/types";
 import type { TaskFormData } from "@/components/task-form";
 
-const iconMap: Record<string, typeof User> = {
-  User, Search, Code, Megaphone, BarChart3, Bot, Zap,
-  Shield, Wrench, BookOpen, Globe, Brain, Palette, HeartPulse,
-};
+// ─── Tabs ─────────────────────────────────────────────────────────────────────
 
-function getAgentIcon(iconName: string) {
-  return iconMap[iconName] ?? Bot;
-}
+const TABS = [
+  { id: "workspace", label: "WORKSPACE" },
+  { id: "config", label: "CONFIG" },
+  { id: "memory", label: "MEMORY" },
+  { id: "logs", label: "LOGS" },
+] as const;
+type TabId = (typeof TABS)[number]["id"];
 
-export default function TeamMemberPage() {
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function AgentDetailPage() {
   const params = useParams();
   const roleId = params.role as string;
-  const { tasks, loading, update: updateTask, remove: deleteTask, refetch: refetchTasks } = useTasks();
+
+  const identity = getAgentIdentity(roleId);
+
+  const { tasks, loading, update: updateTask, remove: deleteTask, refetch } = useTasks();
   const { goals } = useGoals();
   const { projects } = useProjects();
-  const { messages } = useInbox();
+  const { agents } = useAgents();
   const { events } = useActivityLog();
-  const { agents, update: updateAgent, error: agentsError, refetch } = useAgents();
-  const { skills: allSkills } = useSkills();
-  const { decisions } = useDecisions();
-  const { runningTaskIds, isTaskRunning, runTask } = useActiveRuns();
-  useFastTaskPoll(runningTaskIds.size > 0, refetchTasks);
-  const pendingDecisionTaskIds = new Set(
-    decisions.filter((d) => d.status === "pending" && d.taskId).map((d) => d.taskId as string)
-  );
+  const { runningTaskIds } = useActiveRuns();
+  useFastTaskPoll(runningTaskIds.size > 0, refetch);
+
+  const [tab, setTab] = useState<TabId>("workspace");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
-  // Profile editing state
-  const [editingInstructions, setEditingInstructions] = useState(false);
-  const [instructionsText, setInstructionsText] = useState("");
-  const [editingDescription, setEditingDescription] = useState(false);
-  const [descriptionText, setDescriptionText] = useState("");
-  const [capInput, setCapInput] = useState("");
-  const [savingProfile, setSavingProfile] = useState(false);
-
-  const agent = agents.find((a) => a.id === roleId);
-
-  if (loading) {
+  // Unknown agent
+  if (!identity) {
     return (
-      <div className="space-y-6">
-        <BreadcrumbNav items={[{ label: "Crew", href: "/crew" }, { label: roleId }]} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <TaskCardSkeleton />
-          <TaskCardSkeleton />
-          <TaskCardSkeleton />
-        </div>
+      <div style={{ padding: 24 } as CSSProperties}>
+        <Hatch label={`AGENT "${roleId.toUpperCase()}" NOT FOUND`} height={120} />
       </div>
     );
   }
 
-  if (agentsError) {
-    return (
-      <div className="space-y-6">
-        <BreadcrumbNav items={[{ label: "Crew", href: "/crew" }, { label: roleId }]} />
-        <ErrorState message={agentsError} onRetry={refetch} />
-      </div>
-    );
-  }
-
-  if (!agent) {
-    return (
-      <div className="space-y-6">
-        <BreadcrumbNav items={[{ label: "Crew", href: "/crew" }, { label: "Not Found" }]} />
-        <p className="text-muted-foreground">Agent &ldquo;{roleId}&rdquo; not found.</p>
-      </div>
-    );
-  }
-
-  const Icon = getAgentIcon(agent.icon);
-  const agentTasks = tasks.filter((t) => t.assignedTo === agent.id || t.collaborators?.includes(agent.id));
+  const agentTasks = tasks.filter(
+    (t) => t.assignedTo === identity.id,
+  );
   const inProgress = agentTasks.filter((t) => t.kanban === "in-progress");
   const todo = agentTasks.filter((t) => t.kanban === "not-started");
   const completed = agentTasks.filter((t) => t.kanban === "done");
-  const agentMessages = messages.filter((m) => m.from === agent.id || m.to === agent.id).slice(0, 5);
-  const agentEvents = events.filter((e) => e.actor === agent.id).slice(0, 5);
-  const linkedSkills = allSkills.filter((s) => agent.skillIds.includes(s.id));
+  const agentEvents = events.filter((e) => e.actor === identity.id).slice(0, 20);
+
+  // Find the registered agent definition (if any)
+  const agentDef = agents.find((a) => a.id === identity.id);
 
   const handleUpdateTask = async (data: TaskFormData) => {
     if (!selectedTask) return;
     await updateTask(selectedTask.id, {
       ...data,
       tags: data.tags.split(",").map((t) => t.trim()).filter(Boolean),
-      acceptanceCriteria: data.acceptanceCriteria.split("\n").map((s) => s.trim()).filter(Boolean),
+      acceptanceCriteria: data.acceptanceCriteria
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
     });
     setSelectedTask(null);
   };
@@ -116,329 +90,161 @@ export default function TeamMemberPage() {
     setSelectedTask(null);
   };
 
-  const getProject = (id: string | null) => projects.find((p) => p.id === id) ?? null;
-
-  const handleSaveInstructions = async () => {
-    setSavingProfile(true);
-    try {
-      await updateAgent(agent.id, { instructions: instructionsText });
-      setEditingInstructions(false);
-    } finally {
-      setSavingProfile(false);
-    }
-  };
-
-  const handleSaveDescription = async () => {
-    setSavingProfile(true);
-    try {
-      await updateAgent(agent.id, { description: descriptionText });
-      setEditingDescription(false);
-    } finally {
-      setSavingProfile(false);
-    }
-  };
-
-  const addCapability = async (cap: string) => {
-    if (!cap.trim() || agent.capabilities.includes(cap.trim())) return;
-    await updateAgent(agent.id, { capabilities: [...agent.capabilities, cap.trim()] });
-    setCapInput("");
-  };
-
-  const removeCapability = async (cap: string) => {
-    await updateAgent(agent.id, { capabilities: agent.capabilities.filter((c) => c !== cap) });
-  };
-
-  const addSkill = async (skillId: string) => {
-    if (agent.skillIds.includes(skillId)) return;
-    await updateAgent(agent.id, { skillIds: [...agent.skillIds, skillId] });
-  };
-
-  const removeSkill = async (skillId: string) => {
-    await updateAgent(agent.id, { skillIds: agent.skillIds.filter((s) => s !== skillId) });
-  };
+  const bars = Array.from({ length: 36 }, () => 5 + Math.random() * 32);
 
   return (
-    <div className="space-y-6">
-      <BreadcrumbNav items={[{ label: "Crew", href: "/crew" }, { label: agent.name }]} />
-
-      {/* Agent Profile Header */}
-      <div className="flex items-start gap-4">
-        <div className="h-14 w-14 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
-          <Icon className="h-7 w-7 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold">{agent.name}</h1>
-            <Badge variant={agent.status === "active" ? "default" : "secondary"} className="text-xs">
-              {agent.status}
-            </Badge>
-          </div>
-          {editingDescription ? (
-            <div className="flex items-center gap-2 mt-1">
-              <Input
-                value={descriptionText}
-                onChange={(e) => setDescriptionText(e.target.value)}
-                className="text-sm h-8"
-                autoFocus
-              />
-              <Button size="sm" variant="ghost" onClick={handleSaveDescription} disabled={savingProfile}>
-                <Save className="h-3.5 w-3.5" />
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setEditingDescription(false)}>
-                <X className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ) : (
-            <p
-              className="text-sm text-muted-foreground cursor-pointer hover:text-foreground transition-colors mt-0.5"
-              onClick={() => { setDescriptionText(agent.description); setEditingDescription(true); }}
-              title="Click to edit"
-            >
-              {agent.description || "Click to add a description..."}
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card className="bg-card/50">
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold tabular-nums">{agentTasks.length}</p>
-            <p className="text-xs text-muted-foreground">Total Tasks</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold tabular-nums text-status-in-progress">{inProgress.length}</p>
-            <p className="text-xs text-muted-foreground">In Progress</p>
-          </CardContent>
-        </Card>
-        <Card className="bg-card/50">
-          <CardContent className="p-4 text-center">
-            <p className="text-2xl font-bold tabular-nums text-status-done">{completed.length}</p>
-            <p className="text-xs text-muted-foreground">Completed</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Instructions Section */}
-      <section className="rounded-xl border bg-card/50 p-4 space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">Instructions (System Prompt)</h2>
-          {!editingInstructions && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs"
-              onClick={() => { setInstructionsText(agent.instructions); setEditingInstructions(true); }}
-            >
-              Edit
-            </Button>
-          )}
-        </div>
-        {editingInstructions ? (
-          <div className="space-y-2">
-            <Textarea
-              value={instructionsText}
-              onChange={(e) => setInstructionsText(e.target.value)}
-              rows={12}
-              className="font-mono text-sm"
-            />
-            <div className="flex items-center justify-between">
-              <p className="text-xs text-muted-foreground">
-                {instructionsText.length.toLocaleString()} characters
-              </p>
-              <div className="flex gap-2">
-                <Button size="sm" variant="ghost" onClick={() => setEditingInstructions(false)}>
-                  Cancel
-                </Button>
-                <Button size="sm" onClick={handleSaveInstructions} disabled={savingProfile} className="gap-1">
-                  <Save className="h-3.5 w-3.5" /> Save
-                </Button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono bg-muted rounded-lg p-3 max-h-48 overflow-y-auto">
-            {agent.instructions || "No instructions set. Click Edit to add a system prompt."}
-          </pre>
-        )}
-      </section>
-
-      {/* Capabilities Section */}
-      <section className="rounded-xl border bg-card/50 p-4 space-y-3">
-        <h2 className="text-sm font-semibold">Capabilities</h2>
-        <div className="flex flex-wrap gap-1.5">
-          {agent.capabilities.map((cap) => (
-            <Badge key={cap} variant="secondary" className="gap-1 pr-1">
-              {cap}
-              <button
-                onClick={() => removeCapability(cap)}
-                className="rounded-full hover:bg-muted-foreground/20 p-0.5"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </Badge>
-          ))}
-          {agent.capabilities.length === 0 && (
-            <p className="text-xs text-muted-foreground">No capabilities defined.</p>
-          )}
-        </div>
-        <div className="flex gap-2">
-          <Input
-            placeholder="Add capability..."
-            value={capInput}
-            onChange={(e) => setCapInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); addCapability(capInput); }
-            }}
-            className="h-8 text-sm"
-          />
-          <Button size="sm" variant="outline" onClick={() => addCapability(capInput)}>
-            <Plus className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </section>
-
-      {/* Skills Section */}
-      <section className="rounded-xl border bg-card/50 p-4 space-y-3">
-        <h2 className="text-sm font-semibold">Assigned Skills</h2>
-        {linkedSkills.length > 0 ? (
-          <div className="space-y-2">
-            {linkedSkills.map((skill) => (
-              <div key={skill.id} className="flex items-center justify-between rounded-lg border p-2.5">
-                <div>
-                  <p className="text-sm font-medium">{skill.name}</p>
-                  <p className="text-xs text-muted-foreground">{skill.description}</p>
-                </div>
-                <Button size="sm" variant="ghost" onClick={() => removeSkill(skill.id)}>
-                  <X className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-muted-foreground">No skills assigned.</p>
-        )}
-        {/* Available skills to add */}
-        {allSkills.filter((s) => !agent.skillIds.includes(s.id)).length > 0 && (
-          <div className="pt-2 border-t space-y-1">
-            <p className="text-xs text-muted-foreground">Available skills:</p>
-            <div className="flex flex-wrap gap-1.5">
-              {allSkills.filter((s) => !agent.skillIds.includes(s.id)).map((skill) => (
-                <button
-                  key={skill.id}
-                  onClick={() => addSkill(skill.id)}
-                  className="inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs hover:bg-primary/10 hover:border-primary/30 transition-colors"
-                >
-                  <Plus className="h-3 w-3" />
-                  {skill.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Task Sections */}
-      {inProgress.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-status-in-progress" />
-            In Progress ({inProgress.length})
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {inProgress.map((task) => (
-              <TaskCard key={task.id} task={task} project={getProject(task.projectId)} onClick={() => setSelectedTask(task)} isRunning={isTaskRunning(task.id)} onRun={runTask} allTasks={tasks} pendingDecisionTaskIds={pendingDecisionTaskIds} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {todo.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-status-not-started" />
-            To Do ({todo.length})
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {todo.map((task) => (
-              <TaskCard key={task.id} task={task} project={getProject(task.projectId)} onClick={() => setSelectedTask(task)} isRunning={isTaskRunning(task.id)} onRun={runTask} allTasks={tasks} pendingDecisionTaskIds={pendingDecisionTaskIds} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {completed.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
-            <div className="h-2 w-2 rounded-full bg-status-done" />
-            Completed ({completed.length})
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {completed.map((task) => (
-              <TaskCard key={task.id} task={task} project={getProject(task.projectId)} onClick={() => setSelectedTask(task)} className="opacity-60" isRunning={isTaskRunning(task.id)} onRun={runTask} allTasks={tasks} pendingDecisionTaskIds={pendingDecisionTaskIds} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {agentTasks.length === 0 && (
-        <EmptyState
-          icon={Bot}
-          title="No tasks assigned"
-          description={`Assign tasks to ${agent.name} from the Eisenhower or Kanban views.`}
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        minHeight: 0,
+      } as CSSProperties}
+    >
+      {/* ── Header strip ───────────────────────────────────────────────────── */}
+      <div
+        style={{
+          background: "var(--ops-bg-deep)",
+          borderBottom: "1px solid var(--ops-line)",
+          padding: "12px 18px 12px 21px",
+          display: "grid",
+          gridTemplateColumns: "auto 1fr auto auto auto auto",
+          gap: 20,
+          alignItems: "center",
+          position: "relative",
+        } as CSSProperties}
+      >
+        {/* left accent rail */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            height: "100%",
+            width: 3,
+            background: identity.colorHex,
+            boxShadow: `0 0 12px ${identity.colorHex}55`,
+          } as CSSProperties}
         />
-      )}
 
-      {/* Recent Messages */}
-      {agentMessages.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <Send className="h-3.5 w-3.5" />
-            Recent Messages
-          </h2>
-          <div className="space-y-2">
-            {agentMessages.map((msg) => (
-              <Card key={msg.id} className="bg-card/50">
-                <CardContent className="p-3 flex items-center gap-3">
-                  <Badge variant={msg.status === "unread" ? "default" : "secondary"} className="text-xs shrink-0">
-                    {msg.type}
-                  </Badge>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate">{msg.subject}</p>
-                    <p className="text-xs text-muted-foreground">{msg.from} → {msg.to}</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground shrink-0">
-                    {new Date(msg.createdAt).toLocaleDateString()}
-                  </p>
-                </CardContent>
-              </Card>
-            ))}
+        {/* glyph + name */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          } as CSSProperties}
+        >
+          <AgentGlyph agent={identity} size={42} />
+          <div>
+            <div
+              style={{
+                fontFamily: "var(--ops-sans)",
+                fontSize: 20,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                color: identity.colorHex,
+              } as CSSProperties}
+            >
+              {identity.name}
+            </div>
+            <div
+              style={{
+                fontSize: 9,
+                letterSpacing: "0.2em",
+                color: "var(--ops-fg-dim)",
+                fontFamily: "var(--ops-mono)",
+              } as CSSProperties}
+            >
+              {identity.role} · {identity.tagline}
+            </div>
           </div>
-        </section>
-      )}
+        </div>
 
-      {/* Recent Activity */}
-      {agentEvents.length > 0 && (
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            Recent Activity
-          </h2>
-          <div className="space-y-1">
-            {agentEvents.map((evt) => (
-              <div key={evt.id} className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs text-muted-foreground">
-                <div className="h-1.5 w-1.5 rounded-full bg-primary/50 shrink-0" />
-                <span className="flex-1">{evt.summary}</span>
-                <span className="text-xs shrink-0">{new Date(evt.timestamp).toLocaleDateString()}</span>
-              </div>
-            ))}
+        {/* activity sparkline */}
+        <div style={{ width: 180 } as CSSProperties}>
+          <Bars values={bars} color={identity.colorHex} height={28} />
+          <div
+            style={{
+              fontSize: 8,
+              color: "var(--ops-fg-faint)",
+              letterSpacing: "0.1em",
+              marginTop: 2,
+              fontFamily: "var(--ops-mono)",
+            } as CSSProperties}
+          >
+            ACTIVITY · LAST 36s
           </div>
-        </section>
-      )}
+        </div>
 
-      {/* Task Detail Panel */}
+        {/* stats */}
+        <HeaderStat label="ACTIVE" value={String(inProgress.length)} />
+        <HeaderStat label="QUEUE" value={String(todo.length)} />
+        <HeaderStat label="DONE" value={String(completed.length)} accent="var(--ops-ok)" />
+
+        {/* controls */}
+        <div style={{ display: "flex", gap: 6 } as CSSProperties}>
+          <OpsButton variant="primary">▶ START</OpsButton>
+          <OpsButton variant="danger">◼ PAUSE</OpsButton>
+        </div>
+      </div>
+
+      {/* ── Tab bar ─────────────────────────────────────────────────────────── */}
+      <div
+        style={{
+          display: "flex",
+          borderBottom: "1px solid var(--ops-line)",
+          background: "var(--ops-bg-deep)",
+          padding: "0 18px",
+          gap: 0,
+        } as CSSProperties}
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: "9px 14px",
+              fontSize: 10,
+              letterSpacing: "0.16em",
+              color: tab === t.id ? identity.colorHex : "var(--ops-fg-dim)",
+              borderBottom: `2px solid ${tab === t.id ? identity.colorHex : "transparent"}`,
+              fontFamily: "var(--ops-mono)",
+              cursor: "pointer",
+              marginBottom: -1,
+            } as CSSProperties}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Tab content ──────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflow: "auto", minHeight: 0 } as CSSProperties}>
+        {tab === "workspace" && (
+          <WorkspaceTab
+            identity={identity}
+            inProgress={inProgress}
+            todo={todo}
+            completed={completed}
+            loading={loading}
+            onTaskClick={setSelectedTask}
+          />
+        )}
+        {tab === "config" && (
+          <ConfigTab identity={identity} agentDef={agentDef} />
+        )}
+        {tab === "memory" && (
+          <MemoryTab identity={identity} />
+        )}
+        {tab === "logs" && (
+          <LogsTab identity={identity} events={agentEvents} />
+        )}
+      </div>
+
+      {/* Task detail panel */}
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
@@ -450,6 +256,377 @@ export default function TeamMemberPage() {
           onClose={() => setSelectedTask(null)}
         />
       )}
+    </div>
+  );
+}
+
+// ─── Header stat ──────────────────────────────────────────────────────────────
+
+function HeaderStat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 8,
+          letterSpacing: "0.16em",
+          color: "var(--ops-fg-dim)",
+          fontFamily: "var(--ops-mono)",
+          marginBottom: 2,
+        } as CSSProperties}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 18,
+          fontFamily: "var(--ops-mono)",
+          fontVariantNumeric: "tabular-nums",
+          color: accent ?? "var(--ops-fg)",
+        } as CSSProperties}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+// ─── Workspace tab ────────────────────────────────────────────────────────────
+
+interface WorkspaceTabProps {
+  identity: NonNullable<ReturnType<typeof getAgentIdentity>>;
+  inProgress: Task[];
+  todo: Task[];
+  completed: Task[];
+  loading: boolean;
+  onTaskClick: (t: Task) => void;
+}
+
+function WorkspaceTab({ identity, inProgress, todo, completed, loading, onTaskClick }: WorkspaceTabProps) {
+  if (loading) {
+    return (
+      <div
+        style={{
+          padding: 20,
+          color: "var(--ops-fg-dim)",
+          fontFamily: "var(--ops-mono)",
+          fontSize: 11,
+        } as CSSProperties}
+      >
+        Loading…
+      </div>
+    );
+  }
+
+  if (inProgress.length === 0 && todo.length === 0 && completed.length === 0) {
+    return <Hatch label="NO TASKS ASSIGNED" height={120} className="m-5" />;
+  }
+
+  return (
+    <div
+      style={{
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+      } as CSSProperties}
+    >
+      {inProgress.length > 0 && (
+        <div>
+          <SubH trailing={<Dot kind="ok" pulse />}>IN PROGRESS · {inProgress.length}</SubH>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 8,
+            } as CSSProperties}
+          >
+            {inProgress.map((t) => (
+              <MiniTaskCard key={t.id} task={t} identity={identity} onClick={() => onTaskClick(t)} />
+            ))}
+          </div>
+        </div>
+      )}
+      {todo.length > 0 && (
+        <div>
+          <SubH>QUEUED · {todo.length}</SubH>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 8,
+            } as CSSProperties}
+          >
+            {todo.map((t) => (
+              <MiniTaskCard key={t.id} task={t} identity={identity} onClick={() => onTaskClick(t)} />
+            ))}
+          </div>
+        </div>
+      )}
+      {completed.length > 0 && (
+        <div>
+          <SubH>COMPLETED · {completed.length}</SubH>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+              gap: 8,
+              opacity: 0.55,
+            } as CSSProperties}
+          >
+            {completed.slice(0, 12).map((t) => (
+              <MiniTaskCard key={t.id} task={t} identity={identity} onClick={() => onTaskClick(t)} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniTaskCard({
+  task,
+  identity,
+  onClick,
+}: {
+  task: Task;
+  identity: NonNullable<ReturnType<typeof getAgentIdentity>>;
+  onClick: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: "var(--ops-bg-elevated)",
+        border: "1px solid var(--ops-line)",
+        borderLeft: `2px solid ${identity.colorHex}`,
+        padding: "8px 10px",
+        cursor: "pointer",
+        borderRadius: 2,
+      } as CSSProperties}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--ops-fg)",
+          lineHeight: 1.4,
+          fontFamily: "var(--ops-sans)",
+          marginBottom: 4,
+        } as CSSProperties}
+      >
+        {task.title}
+      </div>
+      <div
+        style={{
+          fontSize: 9,
+          color: "var(--ops-fg-faint)",
+          fontFamily: "var(--ops-mono)",
+          letterSpacing: "0.08em",
+        } as CSSProperties}
+      >
+        {task.kanban.toUpperCase()}
+        {task.dueDate && (
+          <span style={{ marginLeft: 8 } as CSSProperties}>
+            DUE {new Date(task.dueDate).toLocaleDateString([], { month: "short", day: "numeric" })}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Config tab ───────────────────────────────────────────────────────────────
+
+function ConfigTab({
+  identity,
+  agentDef,
+}: {
+  identity: NonNullable<ReturnType<typeof getAgentIdentity>>;
+  agentDef: { instructions?: string; capabilities?: string[] } | undefined;
+}) {
+  return (
+    <div
+      style={{
+        padding: 16,
+        display: "grid",
+        gridTemplateColumns: "1fr 300px",
+        gap: 14,
+        height: "100%",
+        overflow: "auto",
+      } as CSSProperties}
+    >
+      <Panel title="AGENT CONFIG · JSON">
+        <pre
+          style={{
+            fontFamily: "var(--ops-mono)",
+            fontSize: 10,
+            color: "var(--ops-fg-mute)",
+            lineHeight: 1.7,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          } as CSSProperties}
+        >
+          {JSON.stringify(
+            {
+              id: identity.id,
+              name: identity.name,
+              role: identity.role,
+              model: identity.model,
+              tagline: identity.tagline,
+              ...(agentDef
+                ? {
+                    capabilities: agentDef.capabilities ?? [],
+                    instructions: agentDef.instructions ?? "",
+                  }
+                : {}),
+            },
+            null,
+            2,
+          )}
+        </pre>
+      </Panel>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 } as CSSProperties}>
+        <Panel title="MODEL">
+          <KV label="ASSIGNED">{identity.model}</KV>
+          <KV label="ROUTING">
+            {identity.model.includes("opus")
+              ? "complex / risky"
+              : identity.model.includes("sonnet")
+              ? "default subsystem"
+              : "high-frequency utility"}
+          </KV>
+        </Panel>
+        <Panel title="CAPABILITIES">
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 4,
+            } as CSSProperties}
+          >
+            {(agentDef?.capabilities ?? []).length > 0 ? (
+              (agentDef?.capabilities ?? []).map((cap) => (
+                <Tag key={cap}>{cap}</Tag>
+              ))
+            ) : (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "var(--ops-fg-faint)",
+                  fontFamily: "var(--ops-mono)",
+                } as CSSProperties}
+              >
+                — none defined —
+              </span>
+            )}
+          </div>
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+// ─── Memory tab ───────────────────────────────────────────────────────────────
+
+function MemoryTab({ identity }: { identity: NonNullable<ReturnType<typeof getAgentIdentity>> }) {
+  return (
+    <div style={{ padding: 16 } as CSSProperties}>
+      <Hatch
+        label={`MEMORY · ${identity.name.toUpperCase()} · NO ENTRIES`}
+        height={160}
+      />
+      <div
+        style={{
+          marginTop: 8,
+          fontSize: 9,
+          color: "var(--ops-fg-faint)",
+          fontFamily: "var(--ops-mono)",
+          letterSpacing: "0.12em",
+          textAlign: "center",
+        } as CSSProperties}
+      >
+        MEMORY API NOT AVAILABLE · WIRE TO /api/memory WHEN READY
+      </div>
+    </div>
+  );
+}
+
+// ─── Logs tab ─────────────────────────────────────────────────────────────────
+
+interface LogEntry {
+  id: string;
+  actor: string;
+  summary: string;
+  timestamp: string;
+}
+
+function LogsTab({
+  identity,
+  events,
+}: {
+  identity: NonNullable<ReturnType<typeof getAgentIdentity>>;
+  events: LogEntry[];
+}) {
+  if (events.length === 0) {
+    return (
+      <div style={{ padding: 16 } as CSSProperties}>
+        <Hatch label={`NO LOG ENTRIES · ${identity.name}`} height={120} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: 14 } as CSSProperties}>
+      <Panel
+        title={`LOGS · ${identity.name}`}
+        leading={<Dot kind="ok" pulse />}
+        trailing={
+          <span
+            style={{
+              fontSize: 9,
+              color: "var(--ops-fg-dim)",
+              fontFamily: "var(--ops-mono)",
+              letterSpacing: "0.1em",
+            } as CSSProperties}
+          >
+            TAIL={events.length}
+          </span>
+        }
+        flushBody
+      >
+        <div
+          style={{
+            padding: "6px 14px",
+            fontFamily: "var(--ops-mono)",
+            fontSize: 11,
+            lineHeight: 1.7,
+          } as CSSProperties}
+        >
+          {events.map((evt, i) => (
+            <div
+              key={evt.id}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "80px 1fr",
+                gap: 10,
+                padding: "2px 0",
+                borderBottom: "1px dashed var(--ops-line-faint)",
+                opacity: 1 - i * 0.015,
+              } as CSSProperties}
+            >
+              <span style={{ color: "var(--ops-fg-faint)" } as CSSProperties}>
+                {new Date(evt.timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                })}
+              </span>
+              <span style={{ color: "var(--ops-fg-mute)" } as CSSProperties}>
+                {evt.summary}
+              </span>
+            </div>
+          ))}
+        </div>
+      </Panel>
     </div>
   );
 }

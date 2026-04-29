@@ -334,7 +334,7 @@ export default function InboxPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Inbox" }]} />
         <div className="space-y-2">
           <MessageRowSkeleton />
@@ -348,7 +348,7 @@ export default function InboxPage() {
 
   if (inboxError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Inbox" }]} />
         <ErrorState message={inboxError} onRetry={refetch} />
       </div>
@@ -356,7 +356,7 @@ export default function InboxPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Inbox" }]} />
 
       <div className="flex items-center justify-between">

@@ -1,0 +1,587 @@
+"""Scholar — academics and study planning.
+
+Owns: course tracking, assignment planning, study sessions, paper/notes
+summarization, exam prep schedules. Pulls due dates from local task store
+(Tempo writes them) but plans the WORK around them.
+
+Scholar does NOT manage the calendar — that's Tempo. Scholar produces
+study plans which Tempo then schedules.
+
+Study Companion integration lives in ``StudyService`` (scholar_study.py).
+Scholar wraps it here and returns ``AgentResponse`` envelopes.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import logging
+import os
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+from ..config import get_settings
+from ..contract import AgentResponse, Task
+from ..state import add_task, load_tasks
+
+log = logging.getLogger(__name__)
+
+_MODEL = "claude-sonnet-4-6"
+
+_SOLVE_SYSTEM = (
+    "You are a step-by-step problem solver. Given a problem, work through it carefully "
+    "and return ONLY valid JSON with this exact shape: "
+    '{"steps": ["step1", "step2", ...], "final_answer": "...", '
+    '"concepts_used": ["concept1", ...], "weak_topic_candidates": []}. '
+    "No markdown fences, no extra keys."
+)
+
+
+def _query_claude(system: str, user: str) -> str:
+    """One-shot Claude query via claude-agent-sdk (no ANTHROPIC_API_KEY needed).
+
+    Uses Claude Code's OAuth, same path as JarvisChat. Returns the assembled
+    text response. Strips any leading/trailing markdown fences for safety.
+    """
+    import asyncio
+    import threading
+
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        TextBlock,
+        query,
+    )
+
+    async def _run() -> str:
+        opts = ClaudeAgentOptions(
+            model=_MODEL,
+            system_prompt=system,
+            permission_mode="bypassPermissions",
+        )
+        chunks: list[str] = []
+        async for msg in query(prompt=user, options=opts):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and block.text:
+                        chunks.append(block.text)
+        return "".join(chunks)
+
+    # Always run in a fresh thread so this works whether called from sync or
+    # async context (FastAPI handler already holds an event loop).
+    box: dict[str, Any] = {}
+
+    def runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            box["result"] = loop.run_until_complete(_run())
+        except Exception as exc:  # surface to caller
+            box["error"] = exc
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(timeout=120)
+    if "error" in box:
+        raise box["error"]
+    raw = str(box.get("result", "")).strip()
+    # Tolerate code fences if Claude adds them despite the system prompt
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+        if raw.endswith("```"):
+            raw = raw[: raw.rfind("```")]
+    return raw.strip()
+
+
+def _problems_path() -> Path:
+    return get_settings().state_dir / "scholar_problems.jsonl"
+
+
+def _weak_topics_path() -> Path:
+    return get_settings().state_dir / "scholar_weak_topics.json"
+
+
+def _exams_path() -> Path:
+    return get_settings().state_dir / "scholar_exams.jsonl"
+
+
+def _seeds_dir() -> Path:
+    return Path(__file__).resolve().parents[2] / "state" / "scholar_seeds"
+
+
+def _read_problems() -> list[dict[str, Any]]:
+    path = _problems_path()
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    with path.open() as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                records.append(json.loads(line))
+    return records
+
+
+def _write_problem(record: dict[str, Any]) -> None:
+    with _problems_path().open("a") as fh:
+        fh.write(json.dumps(record) + "\n")
+
+
+def _update_problem(problem_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
+    path = _problems_path()
+    records = _read_problems()
+    found: dict[str, Any] | None = None
+    updated: list[dict[str, Any]] = []
+    for r in records:
+        if r["id"] == problem_id:
+            r = {**r, **updates}
+            found = r
+        updated.append(r)
+    if found is None:
+        return None
+    with path.open("w") as fh:
+        for r in updated:
+            fh.write(json.dumps(r) + "\n")
+    return found
+
+
+def _load_weak_topics() -> dict[str, Any]:
+    path = _weak_topics_path()
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+
+def _save_weak_topics(data: dict[str, Any]) -> None:
+    _weak_topics_path().write_text(json.dumps(data, indent=2))
+
+
+def _top_weak_topics(data: dict[str, Any], top_n: int) -> list[dict[str, Any]]:
+    """Return top N entries sorted by miss_count desc."""
+    items = sorted(data.items(), key=lambda kv: kv[1].get("miss_count", 0), reverse=True)
+    return [
+        {
+            "concept": concept,
+            "miss_count": entry.get("miss_count", 0),
+            "last_seen": entry.get("last_seen", ""),
+            "sample_problem_ids": entry.get("sample_problem_ids", [])[:5],
+        }
+        for concept, entry in items[:top_n]
+    ]
+
+
+@dataclass
+class StudyBlock:
+    title: str
+    minutes: int
+    due_iso: str | None = None
+    course: str | None = None
+    tags: list[str] = field(default_factory=list)
+
+
+class Scholar:
+    """Local-only. No external provider yet — courses and notes live in state."""
+
+    _study_svc: Any = None  # lazy StudyService instance
+
+    # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _svc(self):
+        """Lazily instantiate StudyService on first study action."""
+        if self._study_svc is None:
+            from .scholar_study import StudyService
+
+            self._study_svc = StudyService()
+        return self._study_svc
+
+    def _api_key(self) -> str:
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY not set")
+        return key
+
+    # ── Assignments ──────────────────────────────────────────────────────────
+
+    def list_assignments(self) -> AgentResponse:
+        """Return open tasks tagged 'school' or 'course:*'."""
+        tasks = [
+            t
+            for t in load_tasks()
+            if t.status == "open"
+            and any(
+                tag.startswith("school") or tag.startswith("course:") for tag in t.tags
+            )
+        ]
+        return AgentResponse(
+            agent="scholar",
+            intent="list_assignments",
+            action="listed",
+            result={"assignments": [t.model_dump() for t in tasks], "count": len(tasks)},
+            confidence=1.0,
+        )
+
+    def add_assignment(
+        self, title: str, course: str, due: str | None = None, due_iso: str | None = None
+    ) -> AgentResponse:
+        """Create a school task.  Accepts ``due`` or ``due_iso`` for the date."""
+        effective_due = due or due_iso
+        tags = ["school", f"course:{course}"]
+        t = Task(title=title, due=effective_due, tags=tags)
+        add_task(t)
+        return AgentResponse(
+            agent="scholar",
+            intent="add_assignment",
+            action="created",
+            result={"assignment": t.model_dump()},
+            confidence=1.0,
+        )
+
+    def plan_week(self, hours_per_day: float = 3.0) -> AgentResponse:
+        """Break open assignments into study blocks across the next 7 days."""
+        assignments = [
+            t
+            for t in load_tasks()
+            if t.status == "open"
+            and any(
+                tag.startswith("school") or tag.startswith("course:") for tag in t.tags
+            )
+        ]
+        plan: list[dict] = []
+        now = datetime.now(UTC)
+        per_assignment_min = max(30, int((hours_per_day * 60) // max(1, len(assignments))))
+        for i, a in enumerate(assignments):
+            day_offset = i % 7
+            slot_start = (now + timedelta(days=day_offset)).replace(
+                hour=18, minute=0, second=0, microsecond=0
+            )
+            block = StudyBlock(
+                title=a.title,
+                minutes=per_assignment_min,
+                due_iso=a.due,
+                course=next(
+                    (t.split(":", 1)[1] for t in a.tags if t.startswith("course:")), None
+                ),
+                tags=a.tags,
+            )
+            plan.append(
+                {
+                    "block": block.__dict__,
+                    "proposed_start_iso": slot_start.isoformat(),
+                }
+            )
+        return AgentResponse(
+            agent="scholar",
+            intent="plan_week",
+            action="proposed",
+            result={"plan": plan, "count": len(plan), "hours_per_day": hours_per_day},
+            follow_ups=["confirm to schedule blocks via Tempo"] if plan else [],
+            needs_confirm=bool(plan),
+            confidence=0.8,
+        )
+
+    def summarize(self, title: str, content: str) -> AgentResponse:
+        """Stub: real summarization happens in the CC agent prompt with LLM."""
+        first_lines = content.strip().splitlines()[:10]
+        synopsis = " ".join(first_lines)[:500]
+        return AgentResponse(
+            agent="scholar",
+            intent="summarize",
+            action="summarized",
+            result={"title": title, "synopsis": synopsis, "length_chars": len(content)},
+            confidence=0.5,
+        )
+
+    # ── Study Companion wrappers ─────────────────────────────────────────────
+
+    def upload_doc(self, filename: str, content_b64: str) -> AgentResponse:
+        """Decode base64 bytes, store document, return document dict."""
+        content_bytes = base64.b64decode(content_b64)
+        doc = self._svc().upload_document(filename, content_bytes)
+        return AgentResponse(
+            agent="scholar",
+            intent="upload_doc",
+            action="stored",
+            result={"document": doc},
+            confidence=1.0,
+        )
+
+    def list_docs(self) -> AgentResponse:
+        docs = self._svc().list_documents()
+        return AgentResponse(
+            agent="scholar",
+            intent="list_docs",
+            action="listed",
+            result={"documents": docs, "count": len(docs)},
+            confidence=1.0,
+        )
+
+    def get_doc_summary(self, doc_id: str) -> AgentResponse:
+        summary = self._svc().get_summary(doc_id, self._api_key())
+        return AgentResponse(
+            agent="scholar",
+            intent="get_doc_summary",
+            action="summarized",
+            result={"summary": summary},
+            confidence=1.0,
+        )
+
+    def get_doc_flashcards(self, doc_id: str) -> AgentResponse:
+        cards = self._svc().get_flashcards(doc_id)
+        return AgentResponse(
+            agent="scholar",
+            intent="get_doc_flashcards",
+            action="listed",
+            result={"flashcards": cards, "count": len(cards)},
+            confidence=1.0,
+        )
+
+    def generate_doc_flashcards(self, doc_id: str) -> AgentResponse:
+        cards = self._svc().generate_flashcards(doc_id, self._api_key())
+        return AgentResponse(
+            agent="scholar",
+            intent="generate_doc_flashcards",
+            action="generated",
+            result={"flashcards": cards, "count": len(cards)},
+            confidence=1.0,
+        )
+
+    def rate_flashcard(self, card_id: str, rating: int) -> AgentResponse:
+        card = self._svc().rate_card(card_id, rating)
+        return AgentResponse(
+            agent="scholar",
+            intent="rate_flashcard",
+            action="rated",
+            result={"card": card},
+            confidence=1.0,
+        )
+
+    def due_flashcards(self) -> AgentResponse:
+        cards = self._svc().due_cards()
+        return AgentResponse(
+            agent="scholar",
+            intent="due_flashcards",
+            action="listed",
+            result={"flashcards": cards, "count": len(cards)},
+            confidence=1.0,
+        )
+
+    # ── Problem solver ───────────────────────────────────────────────────────
+
+    def solve_problem(
+        self, problem: str, course: str | None = None
+    ) -> AgentResponse:
+        """Walk a problem step-by-step via Claude and persist to state."""
+        user_msg = (
+            f"Course: {course}\n\nProblem: {problem}" if course else problem
+        )
+        raw = _query_claude(_SOLVE_SYSTEM, user_msg) or "{}"
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning("solve_problem: non-JSON response, wrapping as steps: %r", raw[:200])
+            data = {
+                "steps": [raw] if raw else [],
+                "final_answer": "",
+                "concepts_used": [],
+                "weak_topic_candidates": [],
+            }
+
+        problem_id = uuid4().hex[:12]
+        record: dict[str, Any] = {
+            "id": problem_id,
+            "ts": datetime.now(UTC).isoformat(),
+            "course": course,
+            "problem": problem,
+            "response": data,
+            "rated_correct": None,
+        }
+        _write_problem(record)
+
+        return AgentResponse(
+            agent="scholar",
+            intent="solve_problem",
+            action="solved",
+            result={
+                "id": problem_id,
+                "steps": data.get("steps", []),
+                "final_answer": data.get("final_answer", ""),
+                "concepts_used": data.get("concepts_used", []),
+                "weak_topic_candidates": data.get("weak_topic_candidates", []),
+            },
+            confidence=0.9,
+        )
+
+    def rate_problem(self, problem_id: str, correct: bool) -> AgentResponse:
+        """Record whether the operator got a problem right; update weak topics."""
+        updated = _update_problem(problem_id, {"rated_correct": correct})
+        if updated is None:
+            raise ValueError(f"problem {problem_id!r} not found")
+
+        topics = _load_weak_topics()
+        if not correct:
+            concepts: list[str] = updated.get("response", {}).get("concepts_used", [])
+            now_iso = datetime.now(UTC).isoformat()
+            for concept in concepts:
+                entry = topics.get(concept, {"miss_count": 0, "last_seen": "", "sample_problem_ids": []})
+                sample_ids: list[str] = list(entry.get("sample_problem_ids", []))
+                if problem_id not in sample_ids:
+                    sample_ids.append(problem_id)
+                topics[concept] = {
+                    "miss_count": entry.get("miss_count", 0) + 1,
+                    "last_seen": now_iso,
+                    "sample_problem_ids": sample_ids[-10:],
+                }
+            _save_weak_topics(topics)
+
+        return AgentResponse(
+            agent="scholar",
+            intent="rate_problem",
+            action="rated",
+            result={
+                "problem_id": problem_id,
+                "correct": correct,
+                "weak_topics_after": _top_weak_topics(topics, 8),
+            },
+            confidence=1.0,
+        )
+
+    def weak_topics(self, top_n: int = 8) -> AgentResponse:
+        """Return top N concepts by miss count."""
+        topics = _load_weak_topics()
+        return AgentResponse(
+            agent="scholar",
+            intent="weak_topics",
+            action="listed",
+            result={"weak_topics": _top_weak_topics(topics, top_n)},
+            confidence=1.0,
+        )
+
+    def exam_session(
+        self,
+        course: str,
+        duration_min: int = 60,
+        problem_count: int = 5,
+    ) -> AgentResponse:
+        """Generate a timed practice exam session."""
+
+        session_id = uuid4().hex[:12]
+        now = datetime.now(UTC)
+        ends = now + timedelta(minutes=duration_min)
+
+        # Try pulling from flashcard deck first
+        cards = self._svc().due_cards()
+        course_cards = [c for c in cards if course.lower() in json.dumps(c.get("tags", [])).lower()]
+        problems: list[dict[str, Any]] = []
+
+        if course_cards:
+            for card in course_cards[:problem_count]:
+                problems.append({
+                    "id": uuid4().hex[:12],
+                    "prompt": card["front"],
+                    "expected_concepts": card.get("tags", []),
+                })
+
+        # Fill remainder with Claude-generated problems
+        remaining = problem_count - len(problems)
+        if remaining > 0:
+            system = (
+                "You are an exam question generator. Return ONLY a JSON array of "
+                f"{remaining} exam problems for the course below. "
+                'Each element: {"prompt": "...", "expected_concepts": ["..."]}. '
+                "No markdown fences."
+            )
+            raw = _query_claude(system, f"Course: {course}") or "[]"
+            try:
+                generated = json.loads(raw)
+            except json.JSONDecodeError:
+                log.warning("exam_session: non-JSON, skipping fill: %r", raw[:200])
+                generated = []
+            if not isinstance(generated, list):
+                generated = []
+            for item in generated[:remaining]:
+                if not isinstance(item, dict):
+                    continue
+                problems.append({
+                    "id": uuid4().hex[:12],
+                    "prompt": str(item.get("prompt", "")),
+                    "expected_concepts": list(item.get("expected_concepts", [])),
+                })
+
+        session: dict[str, Any] = {
+            "session_id": session_id,
+            "started_iso": now.isoformat(),
+            "ends_iso": ends.isoformat(),
+            "course": course,
+            "duration_min": duration_min,
+            "problems": problems,
+        }
+        with _exams_path().open("a") as fh:
+            fh.write(json.dumps(session) + "\n")
+
+        return AgentResponse(
+            agent="scholar",
+            intent="exam_session",
+            action="created",
+            result=session,
+            confidence=1.0,
+        )
+
+    # ── Seed import ──────────────────────────────────────────────────────────
+
+    def import_seed(self, seed_name: str) -> AgentResponse:
+        """Load a seed JSON file into StudyService as flashcards."""
+        seed_file = _seeds_dir() / f"{seed_name}.json"
+        if not seed_file.exists():
+            raise ValueError(f"seed {seed_name!r} not found at {seed_file}")
+
+        raw_cards: list[dict[str, Any]] = json.loads(seed_file.read_text(encoding="utf-8"))
+        svc = self._svc()
+
+        # Create a virtual document to attach cards to
+        doc = svc.upload_document(
+            f"{seed_name}.txt",
+            f"Seed deck: {seed_name}".encode(),
+        )
+        doc_id: str = doc["id"]
+
+        from datetime import date as _date
+
+        from .study_db import StudyFlashcard, _now, get_session
+
+        today = _date.today().isoformat()
+        now = _now()
+        saved: list[dict[str, Any]] = []
+
+        with get_session() as session:
+            for item in raw_cards:
+                card = StudyFlashcard(
+                    id=uuid4().hex,
+                    doc_id=doc_id,
+                    front=str(item.get("front", "")),
+                    back=str(item.get("back", "")),
+                    source_page=None,
+                    tags=json.dumps(item.get("concept_tags", [])),
+                    ease_factor=2.5,
+                    interval=1,
+                    repetitions=0,
+                    due_date=today,
+                    created_at=now,
+                )
+                session.add(card)
+                saved.append({
+                    "id": card.id,
+                    "front": card.front,
+                    "back": card.back,
+                    "tags": item.get("concept_tags", []),
+                })
+
+        return AgentResponse(
+            agent="scholar",
+            intent="import_seed",
+            action="imported",
+            result={"seed_name": seed_name, "doc_id": doc_id, "cards_imported": len(saved), "cards": saved},
+            confidence=1.0,
+        )

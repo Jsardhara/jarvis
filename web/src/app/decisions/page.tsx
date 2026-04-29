@@ -51,7 +51,7 @@ export default function DecisionsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Decisions" }]} />
         <div className="space-y-3">
           <DecisionCardSkeleton />
@@ -63,7 +63,7 @@ export default function DecisionsPage() {
 
   if (decisionsError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Decisions" }]} />
         <ErrorState message={decisionsError} onRetry={refetch} />
       </div>
@@ -71,7 +71,7 @@ export default function DecisionsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Decisions" }]} />
 
       <h1 className="text-xl font-bold flex items-center gap-2">

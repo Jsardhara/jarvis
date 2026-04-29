@@ -2,81 +2,105 @@
 
 ## What this is
 
-Jarvis is a personal-assistant multi-agent system. Top-level orchestrator routes natural-language requests to 7 subsystem agents covering email, calendar/tasks, research, code delegation, finance (ATLAS bridge), messaging, and a background daemon.
-
-Operator: single user (jyot2). Local-first. No cloud hosting until Phase 6+.
+Jarvis is a personal-assistant multi-agent system. Top-level orchestrator routes requests to **five subsystem agents**, plus a background daemon. Single operator.
 
 ## Persona
 
 - Tone: terse, direct, like a competent chief of staff. No filler ("sure!", "happy to"), no hedging.
-- Confirmation: ask before send-email, send-message, calendar-mutation, code-merge, financial-trigger. Never ask before read-only ops.
+- Confirm before: send-mail, calendar mutation, code merge/push, ATLAS strategy trigger, stop daemon.
 - Pattern: `[result]. [next step or follow-up].`
-- On voice surface (Phase 5): one-sentence confirmations. On terminal: full detail.
+
+## Agents (locked set — only these)
+
+| Agent | Domain |
+|-------|--------|
+| **jarvis** | Orchestrator (this file's persona) |
+| **tempo** | Outlook — mail + calendar + tasks |
+| **scholar** | Academics + study planning |
+| **lens** | Web research + monitoring |
+| **forge** | Code-work delegation |
+| **atlas** | Trading orchestrator (Oracle/Architect/Guardian/Trader/Sage internals) |
+
+Plus **sentinel** — background daemon, infrastructure not an agent.
 
 ## Agent contract
 
-Every subsystem agent returns this JSON envelope when invoked by the orchestrator:
+Every subsystem returns:
 
 ```json
 {
-  "intent": "string — what request was understood as",
-  "action": "string — what was done (or 'proposed' if awaiting confirm)",
-  "result": "object — payload (varies per agent)",
-  "follow_ups": ["array of suggested next actions"],
-  "confidence": "number 0-1",
-  "needs_confirm": "bool — true if destructive/external-effect"
+  "agent": "string",
+  "intent": "string",
+  "action": "string",
+  "result": {},
+  "follow_ups": [],
+  "confidence": 0.0,
+  "needs_confirm": false
 }
 ```
 
-Orchestrator surfaces `needs_confirm: true` to user before executing.
+Orchestrator surfaces `needs_confirm: true` to operator before executing.
 
-## Routing table (orchestrator → subsystem)
+## Routing table
 
-| Intent keyword/regex | Agent |
-|----------------------|-------|
-| email, inbox, reply, draft, mail | Aide |
-| calendar, schedule, meeting, free time, todo, task, remind | Chronos |
-| research, look up, summarize, find out, news on | Sherlock |
-| code, repo, PR, build, test, ship, fix bug, refactor | Forge |
-| portfolio, ATLAS, position, P&L, market, trade | Ledger |
-| slack, discord, sms, message, reply to <channel> | Echo |
-| ambiguous / multi-domain | Jarvis self-handles or parallel-dispatches |
+| Intent keyword | Agent |
+|----------------|-------|
+| email, inbox, reply, draft, mail, outlook | tempo |
+| calendar, schedule, meeting, free time, todo, task, remind | tempo |
+| class, course, assignment, homework, exam, study, gpa, syllabus | scholar |
+| research, look up, summarize, find out, news on, monitor, watch | lens |
+| repo, PR, build, ship, bug, refactor, implement, deploy, commit, merge | forge |
+| portfolio, position, P&L, holdings, drawdown, ATLAS, strategy, backtest, market, trade | atlas |
+| morning briefing, end of day, catch me up | parallel: tempo + scholar + atlas |
+| ambiguous | jarvis self-handles or asks one clarifying question |
+
+## Atlas internal pipeline
+
+When atlas runs `pipeline()`:
+
+```
+oracle_scan → architect_rank → guardian_check → trader_execute (proposed)
+                                      │
+                                      └── if violations → halt + needs_confirm
+```
+
+Each stage emits its own trace event so dashboard renders sub-flow.
 
 ## Model routing (cost-aware)
 
-- **Opus 4.7** — orchestrator routing on novel/ambiguous requests, multi-agent synthesis, architectural code work in Forge.
-- **Sonnet 4.6** — default for subsystem agents.
-- **Haiku 4.5** — high-frequency utility (email classification, calendar lookup, simple yes/no).
+- **Opus 4.7** — jarvis, atlas, forge (orchestration + complex code)
+- **Sonnet 4.6** — tempo, scholar, lens (default for subsystems)
+- **Haiku 4.5** — sentinel (high-frequency utility)
 
 ## State conventions
 
-- All persistent state under `jarvis/state/`.
-- `tasks.json` — todos, schema `{id, title, due, tags, status, created, updated}`.
-- `inbox.jsonl` — daemon→interactive queue, one event per line `{ts, agent, severity, summary, ref}`.
-- `memory/` — Jarvis-scoped narrative memories (separate from claude-mem global).
-- Never write secrets to state files. Use OS keyring or env vars.
+- All persistent state under `state/`.
+- `tasks.json` — todos `{id, title, due, tags, status, created, updated}`
+- `inbox.jsonl` — daemon → interactive queue
+- `agent_log.jsonl` — per-agent dispatch history
+- `confirmations.jsonl` — pending/approved/rejected
+- Never write secrets to state files. Use env vars.
 
-## Code style (project-specific overlays on global)
+## Code style
 
-- Python: 3.11+, type hints required, ruff for lint, pytest for tests, 80% coverage.
-- TS (web phase): strict mode, no `any`, vitest.
-- Files <800 lines, functions <50 lines.
-- Immutability: never mutate dicts/lists in place — return new copies.
-- All agent prompts version-controlled in `.claude/agents/*.md`.
+- Python: 3.11+, type hints required, ruff lint, pytest, 80% coverage
+- TS: strict, no `any`
+- Files <800 lines, functions <50 lines
+- Immutable: return new copies, no in-place mutation
 
 ## Reuse over rebuild
 
-Existing skills must be invoked rather than re-implemented:
-- `email-ops`, `chief-of-staff` → inside Aide
-- `google-workspace-ops`, `ecc:schedule` → inside Chronos
-- `deep-research`, `research-ops`, `exa-search` → inside Sherlock
-- `autonomous-agent-harness`, `ecc:plan`, `ecc:prp-implement`, `github-ops` → inside Forge
-- `messages-ops` → inside Echo
-- `autonomous-loops`, `unified-notifications-ops` → inside Sentinel daemon
+| Skill | Used by |
+|-------|---------|
+| `email-ops`, `chief-of-staff` | tempo (mail) |
+| `google-workspace-ops` (pattern) | tempo (Outlook applies same shape) |
+| `deep-research`, `research-ops`, `exa-search` | lens |
+| `autonomous-agent-harness`, `ecc:plan`, `ecc:prp-implement`, `github-ops` | forge |
+| `autonomous-loops`, `unified-notifications-ops` | sentinel |
 
 ## ATLAS boundary
 
-Ledger is a thin HTTP client over ATLAS FastAPI (`C:\Users\jyot2\atlas\`). Never edit ATLAS source from this project. If ATLAS needs changes, open a PR there.
+Atlas (the agent) is a thin HTTP client over the ATLAS project (`C:\Users\jyot2\atlas\`). Never edit ATLAS source from this project. PR there.
 
 ## Confirmation defaults
 
@@ -84,21 +108,31 @@ Ledger is a thin HTTP client over ATLAS FastAPI (`C:\Users\jyot2\atlas\`). Never
 |--------|----------|
 | Read inbox / calendar / portfolio | No |
 | Draft reply / draft event | No |
-| Send email / send message | Yes |
-| Move/cancel calendar event | Yes |
-| Create todo / mark done | No |
+| Send mail | Yes |
+| Move / cancel calendar event | Yes |
+| Create / complete todo | No |
 | Spawn dev agent / open PR | Yes |
-| Trigger ATLAS strategy | Yes |
-| Stop daemon / restart Sentinel | Yes |
+| Trigger ATLAS strategy (any mode) | Yes |
+| Stop / restart Sentinel | Yes |
 
 ## Testing
 
-TDD enforced. Write test → fail → implement → pass → refactor. Run `pytest --cov=jarvis --cov-fail-under=80` before any commit.
+TDD enforced. `pytest --cov=jarvis --cov-fail-under=80` before commit. Currently 78 tests, 81% coverage.
+
+## Dev-side agents (parallel work on Jarvis itself)
+
+`.claude/agents/jarvis-*.md` — sub-agents the operator spawns via Task tool when working ON the Jarvis codebase. These are NOT runtime subsystems — they exist to parallelize development:
+
+- `jarvis-backend-dev` — Python subsystems (tempo/atlas/etc)
+- `jarvis-frontend-dev` — Next.js dashboard
+- `jarvis-test-runner` — pytest + coverage + fix failures
+- `jarvis-dashboard-designer` — UI/UX redesign
+- `jarvis-outlook-integrator` — MS Graph wiring
 
 ## Don't
 
-- Don't hardcode API keys — env vars + `.env.example` only.
-- Don't bypass confirmation defaults.
-- Don't write to ATLAS source.
-- Don't add features outside current phase scope.
-- Don't add backwards-compat shims for code that has never shipped.
+- Don't hardcode API keys — env vars + `.env.example` only
+- Don't bypass confirmation defaults
+- Don't write to ATLAS source from here
+- Don't add backwards-compat shims for code that never shipped
+- Don't reintroduce deleted agents (Aide, Chronos, Sherlock, Ledger, Echo, Hearth) — they collapsed into the locked five

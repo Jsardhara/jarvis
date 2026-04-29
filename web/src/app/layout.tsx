@@ -1,28 +1,44 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { LayoutShell } from "@/components/layout-shell";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "sonner";
 
-const inter = Inter({ subsets: ["latin"] });
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space-grotesk",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
-  title: "Mission Control",
-  description: "The command center for humans supervising AI agents — Eisenhower matrix, Kanban, objectives, and agent deployment",
+  title: "JARVIS // OPS",
+  description: "Mission control — orchestrator + agent fleet",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} antialiased`}>
+    <html lang="en" suppressHydrationWarning className={`dark ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}>
+      <body className="antialiased">
         <ThemeProvider>
           <LayoutShell>{children}</LayoutShell>
           <Toaster
-            theme="system"
+            theme="dark"
             position="bottom-right"
             toastOptions={{
-              className: "border-border bg-card text-card-foreground",
+              className: "border-ops-line bg-ops-elevated text-ops-fg",
+              style: {
+                fontFamily: "var(--ops-mono)",
+                fontSize: "11px",
+                letterSpacing: "0.04em",
+              },
             }}
           />
         </ThemeProvider>

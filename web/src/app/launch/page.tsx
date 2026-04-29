@@ -155,7 +155,7 @@ export default function LaunchPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Launch" }]} />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -169,7 +169,7 @@ export default function LaunchPage() {
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Launch" }]} />
         <ErrorState message={error} onRetry={() => window.location.reload()} />
       </div>
@@ -181,7 +181,7 @@ export default function LaunchPage() {
     : 0;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Launch" }]} />
 
       {/* Status Bar */}
