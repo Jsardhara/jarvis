@@ -37,3 +37,4 @@ Thumbs.db
 # Daemon runtime
 *.pid
 *.log
+.forge-worktrees/

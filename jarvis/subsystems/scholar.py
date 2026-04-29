@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -40,60 +41,13 @@ _SOLVE_SYSTEM = (
 
 
 def _query_claude(system: str, user: str) -> str:
-    """One-shot Claude query via claude-agent-sdk (no ANTHROPIC_API_KEY needed).
+    """One-shot Claude query — delegates to the shared llm.query_claude_sync helper.
 
-    Uses Claude Code's OAuth, same path as JarvisChat. Returns the assembled
-    text response. Strips any leading/trailing markdown fences for safety.
+    Preserved for back-compat: all scholar code calls this function directly.
     """
-    import asyncio
-    import threading
+    from ..llm import query_claude_sync
 
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        TextBlock,
-        query,
-    )
-
-    async def _run() -> str:
-        opts = ClaudeAgentOptions(
-            model=_MODEL,
-            system_prompt=system,
-            permission_mode="bypassPermissions",
-        )
-        chunks: list[str] = []
-        async for msg in query(prompt=user, options=opts):
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        chunks.append(block.text)
-        return "".join(chunks)
-
-    # Always run in a fresh thread so this works whether called from sync or
-    # async context (FastAPI handler already holds an event loop).
-    box: dict[str, Any] = {}
-
-    def runner() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            box["result"] = loop.run_until_complete(_run())
-        except Exception as exc:  # surface to caller
-            box["error"] = exc
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join(timeout=120)
-    if "error" in box:
-        raise box["error"]
-    raw = str(box.get("result", "")).strip()
-    # Tolerate code fences if Claude adds them despite the system prompt
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[: raw.rfind("```")]
-    return raw.strip()
+    return query_claude_sync(system, user, model=_MODEL)
 
 
 def _problems_path() -> Path:
@@ -217,6 +171,27 @@ def _top_weak_topics(
     ]
 
 
+_SYLLABUS_SYSTEM = (
+    "You are a syllabus parser. Extract a structured study plan from the syllabus text. "
+    "Return ONLY valid JSON with this exact shape: "
+    '{"course_title": "...", "exam_date_iso": "YYYY-MM-DD" | null, '
+    '"exam_window_min": 60 | null, '
+    '"topics": [{"name": "...", "week": 1, "concept_tags": ["..."]}], '
+    '"weekly_plan": [{"week": 1, "focus": "...", "study_minutes_per_day": 45}], '
+    '"key_dates": [{"label": "...", "date_iso": "YYYY-MM-DD"}]} '
+    "No markdown fences, no extra keys."
+)
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitize a course name into a filesystem-safe filename component."""
+    return re.sub(r"[^a-zA-Z0-9_-]+", "_", name).strip("_") or "untitled"
+
+
+def _syllabi_dir() -> Path:
+    return get_settings().state_dir / "scholar_syllabi"
+
+
 @dataclass
 class StudyBlock:
     title: str
@@ -230,6 +205,9 @@ class Scholar:
     """Local-only. No external provider yet — courses and notes live in state."""
 
     _study_svc: Any = None  # lazy StudyService instance
+
+    def __init__(self, tempo: Any = None) -> None:
+        self._tempo = tempo
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
@@ -668,4 +646,150 @@ class Scholar:
                 "cards": saved,
             },
             confidence=1.0,
+        )
+
+    # ── Syllabus ingest ──────────────────────────────────────────────────────
+
+    def ingest_syllabus(
+        self,
+        filename: str,
+        content_b64: str,
+        course: str,
+        tempo: Any | None = None,
+    ) -> AgentResponse:
+        """Parse a syllabus, persist plan, generate flashcards, push tasks."""
+        from datetime import date as _date
+
+        from ..contract import InboxEvent
+        from ..state import append_inbox
+        from .scholar_study import _extract_text
+        from .study_db import StudyFlashcard, _now, get_session
+
+        content = base64.b64decode(content_b64)
+        text, _pages = _extract_text(filename, content)
+
+        system_prompt = (
+            "You are a syllabus parser. Extract a structured study plan from the "
+            "syllabus text. Return ONLY valid JSON with this exact shape: "
+            '{"course_title": "...", "exam_date_iso": "YYYY-MM-DD" | null, '
+            '"exam_window_min": 60-180 | null, '
+            '"topics": [{"name": "...", "week": 1, "concept_tags": ["..."]}], '
+            '"weekly_plan": [{"week": 1, "focus": "...", "study_minutes_per_day": 45}], '
+            '"key_dates": [{"label": "Midterm 1", "date_iso": "YYYY-MM-DD"}]}. '
+            "No markdown fences, no extra keys."
+        )
+        raw = (_query_claude(system_prompt, text) or "{}").strip()
+        # Tolerate ```json fences if Claude added them despite the prompt
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[: raw.rfind("```")]
+        raw = raw.strip()
+        try:
+            plan: dict[str, Any] = json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning("ingest_syllabus: non-JSON response: %r", raw[:200])
+            plan = {}
+
+        course_name = course.strip() or "Untitled"
+        course_tag = f"course:{course_name}"
+        topics = list(plan.get("topics") or [])
+        weekly_plan = list(plan.get("weekly_plan") or [])
+        key_dates = list(plan.get("key_dates") or [])
+
+        # Persist plan
+        syllabi_dir = _syllabi_dir()
+        syllabi_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = syllabi_dir / f"{_safe_filename(course_name)}.json"
+        plan_path.write_text(
+            json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+        # Create virtual document for cards
+        svc = self._svc()
+        doc = svc.upload_document(
+            f"syllabus_{_safe_filename(course_name)}.txt",
+            f"Syllabus deck: {course_name}".encode(),
+        )
+        doc_id: str = doc["id"]
+
+        # Auto-generate flashcards from topics
+        today = _date.today().isoformat()
+        now = _now()
+        cards_imported = 0
+        with get_session() as session:
+            for item in topics:
+                concept_tags = list(item.get("concept_tags") or [])
+                if course_tag not in concept_tags:
+                    concept_tags.append(course_tag)
+                name = str(item.get("name", "")).strip()
+                if not name:
+                    continue
+                card = StudyFlashcard(
+                    id=uuid4().hex,
+                    doc_id=doc_id,
+                    front=f"Define {name}.",
+                    back="[generated]",
+                    source_page=None,
+                    tags=json.dumps(concept_tags),
+                    ease_factor=2.5,
+                    interval=1,
+                    repetitions=0,
+                    due_date=today,
+                    created_at=now,
+                )
+                session.add(card)
+                cards_imported += 1
+
+        # Auto-schedule study blocks via tempo
+        tasks_created = 0
+        if tempo is not None:
+            for entry in weekly_plan:
+                focus = str(entry.get("focus", "")).strip()
+                if not focus:
+                    continue
+                try:
+                    tempo.add(
+                        title=f"Study: {focus}",
+                        due=None,
+                        tags=[course_tag, "scholar"],
+                    )
+                    tasks_created += 1
+                except Exception as exc:  # don't break ingest on tempo failures
+                    log.warning("tempo.add failed in ingest_syllabus: %s", exc)
+
+        # Surface key dates as inbox events
+        for kd in key_dates:
+            label = str(kd.get("label", "")).strip()
+            date_iso = str(kd.get("date_iso", "")).strip()
+            if not label or not date_iso:
+                continue
+            try:
+                append_inbox(
+                    InboxEvent(
+                        agent="scholar",
+                        severity="info",
+                        summary=f"Upcoming: {label} on {date_iso}",
+                        payload={"course": course_name, "date_iso": date_iso, "label": label},
+                    )
+                )
+            except Exception as exc:
+                log.warning("append_inbox failed in ingest_syllabus: %s", exc)
+
+        return AgentResponse(
+            agent="scholar",
+            intent="ingest_syllabus",
+            action="ingested",
+            result={
+                "course": course_name,
+                "course_title": str(plan.get("course_title", "")),
+                "exam_date_iso": plan.get("exam_date_iso"),
+                "topics_count": len(topics),
+                "weekly_plan_weeks": len(weekly_plan),
+                "key_dates": key_dates,
+                "deck_doc_id": doc_id,
+                "cards_imported": cards_imported,
+                "tasks_created": tasks_created,
+            },
+            confidence=0.85,
         )

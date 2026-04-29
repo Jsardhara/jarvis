@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useMemo, useState } from "react";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Panel,
@@ -305,6 +305,9 @@ export default function CommandCenterPage() {
           )}
         </div>
       )}
+
+      {/* ── Morning briefing ─────────────────────────────────────────────── */}
+      <BriefingTile />
 
       {/* ── Agent fleet ─────────────────────────────────────────────────────── */}
       <AgentFleet tasks={tasks} recentEvents={recentEvents} />
@@ -768,5 +771,111 @@ function PreservedSections({ tasks, projects, pendingDecisions, unreadMessages }
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Morning Briefing tile ────────────────────────────────────────────────────
+
+interface BriefingData {
+  markdown: string;
+  sections: {
+    tempo?: { unread_action: number; top: { subject: string; from?: string }[]; due_today: number; overdue: number };
+    scholar?: { next_exam?: { course: string; in_hours: number } | null; weak_top3?: string[]; review_depth?: number };
+    atlas?: { pnl_today_usd: number; positions: number; mock?: boolean };
+    system?: { dead_letters_24h: number; dispatches_24h: number; cost_today: number };
+  };
+  metadata: { generated_iso: string; duration_ms: number };
+}
+
+function BriefingTile() {
+  const [data, setData] = useState<BriefingData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const base = process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
+        const res = await fetch(`${base}/api/briefing`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body: { data: BriefingData; error: string | null } = await res.json();
+        if (!cancelled) {
+          if (body.error) setError(body.error);
+          else setData(body.data);
+        }
+      } catch (e: unknown) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "fetch failed");
+      }
+    };
+    load();
+    const id = setInterval(load, 5 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  if (error) return null;
+  if (!data) {
+    return (
+      <Panel title="MORNING BRIEFING" leading={<Dot kind="info" pulse />}>
+        <span style={{ fontSize: 10, color: "var(--ops-fg-dim)" } as CSSProperties}>LOADING…</span>
+      </Panel>
+    );
+  }
+
+  const lines = data.markdown.split("\n");
+  const glanceLine = lines.find((l) => l.includes("Today at a glance:"));
+  const glance = glanceLine?.replace(/\*\*Today at a glance:\*\*\s*/, "") ?? "";
+
+  return (
+    <Panel
+      title="MORNING BRIEFING"
+      leading={<Dot kind="ok" pulse />}
+      trailing={
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            fontSize: 10,
+            color: "var(--ops-amber)",
+            background: "transparent",
+            border: "1px solid var(--ops-line-strong)",
+            padding: "2px 8px",
+            borderRadius: 2,
+            letterSpacing: "0.1em",
+            cursor: "pointer",
+          } as CSSProperties}
+        >
+          {expanded ? "COLLAPSE" : "EXPAND"}
+        </button>
+      }
+    >
+      <div
+        style={{
+          fontSize: 13,
+          color: "var(--ops-amber)",
+          letterSpacing: "0.04em",
+          marginBottom: expanded ? 12 : 0,
+        } as CSSProperties}
+      >
+        {glance || "no signal"}
+      </div>
+      {expanded && (
+        <pre
+          style={{
+            fontFamily: "var(--ops-mono)",
+            fontSize: 11,
+            color: "var(--ops-fg-mute)",
+            whiteSpace: "pre-wrap",
+            margin: 0,
+            maxHeight: 400,
+            overflow: "auto",
+          } as CSSProperties}
+        >
+          {data.markdown}
+        </pre>
+      )}
+    </Panel>
   );
 }

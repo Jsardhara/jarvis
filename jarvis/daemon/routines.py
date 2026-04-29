@@ -98,29 +98,21 @@ def scholar_tick(scholar: Scholar, notifier: Notifier) -> dict[str, Any]:
     return {"count": count, "severity": severity}
 
 
-def morning_digest(tempo: Tempo, atlas: AtlasOrchestrator, scholar: Scholar,
-                   notifier: Notifier) -> dict[str, Any]:
-    em = tempo.triage()
-    cal = tempo.today()
-    pnl = atlas.pnl()
-    sch = scholar.list_assignments()
-    health = _verification_health(hours=24)
-    parts = [
-        f"Inbox: {em.result['counts'].get(TIER_ACTION, 0)} action",
-        f"Calendar: {cal.result['count']} events",
-        f"School: {sch.result['count']} open",
-        f"PnL 1d: {pnl.result['pnl'].get('pnl_pct', 0):.2%}",
-        (
-            f"Verification: {health['verified']:.0%} verified"
-            f" | {health['inference']:.0%} inference"
-            f" | {health['unknown']:.0%} unknown"
-        ),
-    ]
-    body = " | ".join(parts)
-    append_inbox(InboxEvent(agent="sentinel", severity="info", summary="morning digest",
-                            ref={"body": body, "verification_health": health}))
-    notifier.push("Morning briefing", body, priority=0)
-    return {"body": body}
+def morning_digest(reg: dict[str, Any], notifier: Notifier) -> dict[str, Any]:
+    """Build and push the smart morning briefing, replacing the old static stub."""
+    from ..briefing import build_briefing
+
+    brief = build_briefing(reg)
+    notifier.push("Morning Briefing", brief["markdown"][:300] + "...", priority=1)
+    append_inbox(
+        InboxEvent(
+            agent="sentinel",
+            severity="info",
+            summary="Morning briefing fired",
+            ref={"sections": brief["sections"]},
+        )
+    )
+    return {"sections": brief["sections"]}
 
 
 def heartbeat_tick(sched: BaseScheduler, notifier: Notifier) -> dict[str, Any]:

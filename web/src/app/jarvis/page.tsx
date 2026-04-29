@@ -16,6 +16,7 @@ import {
   Bars,
   BrandMark,
   Dot,
+  Hatch,
   KV,
   Tag,
   OpsButton,
@@ -26,6 +27,16 @@ import {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const JARVIS_API = process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
+
+// ─── Recall types ─────────────────────────────────────────────────────────────
+
+interface RecallHit {
+  score: number;
+  role: string;
+  text: string;
+  ts: string;
+  lane: string | null;
+}
 
 const QUICK_PROMPTS = [
   "morning briefing",
@@ -194,6 +205,37 @@ export default function JarvisPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const restoredRef = useRef(false);
+
+  // Recall state
+  const [recallQuery, setRecallQuery] = useState("");
+  const [recallBusy, setRecallBusy] = useState(false);
+  const [recallHits, setRecallHits] = useState<RecallHit[] | null>(null);
+  const [recallError, setRecallError] = useState<string | null>(null);
+
+  const runRecall = useCallback(async () => {
+    const q = recallQuery.trim();
+    if (!q || recallBusy) return;
+    setRecallBusy(true);
+    setRecallHits(null);
+    setRecallError(null);
+    try {
+      const res = await fetch(`${JARVIS_API}/api/jarvis/recall`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: q, top_k: 5 }),
+      });
+      const body = (await res.json()) as { data?: RecallHit[]; error?: string | null };
+      if (!res.ok || body.error) {
+        setRecallError(body.error ?? `HTTP ${res.status}`);
+      } else {
+        setRecallHits(body.data ?? []);
+      }
+    } catch (err) {
+      setRecallError(err instanceof Error ? err.message : "request failed");
+    } finally {
+      setRecallBusy(false);
+    }
+  }, [recallQuery, recallBusy]);
 
   // Restore saved chat history on mount (client-only)
   useEffect(() => {
@@ -615,6 +657,168 @@ export default function JarvisPage() {
             </div>
           ))}
         </Panel>
+
+        {/* Semantic recall */}
+        <RecallPanel
+          query={recallQuery}
+          onQueryChange={setRecallQuery}
+          onSearch={runRecall}
+          busy={recallBusy}
+          hits={recallHits}
+          error={recallError}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ─── Recall panel ────────────────────────────────────────────────────────────
+
+interface RecallPanelProps {
+  query: string;
+  onQueryChange: (v: string) => void;
+  onSearch: () => void;
+  busy: boolean;
+  hits: RecallHit[] | null;
+  error: string | null;
+}
+
+function RecallPanel({ query, onQueryChange, onSearch, busy, hits, error }: RecallPanelProps) {
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") onSearch();
+    },
+    [onSearch],
+  );
+
+  return (
+    <Panel title="RECALL">
+      {/* Search row */}
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          marginBottom: 8,
+        } as CSSProperties}
+      >
+        <input
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="search past turns…"
+          disabled={busy}
+          style={{
+            flex: 1,
+            background: "var(--ops-bg-input)",
+            border: "1px solid var(--ops-line)",
+            color: "var(--ops-fg)",
+            padding: "5px 8px",
+            fontFamily: "var(--ops-mono)",
+            fontSize: 11,
+            borderRadius: 2,
+            outline: "none",
+          } as CSSProperties}
+        />
+        <OpsButton
+          variant="default"
+          onClick={onSearch}
+          disabled={busy || !query.trim()}
+          style={{ padding: "5px 10px", fontSize: 10 } as CSSProperties}
+        >
+          {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : "GO"}
+        </OpsButton>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div
+          style={{
+            fontSize: 10,
+            color: "var(--ops-crit)",
+            fontFamily: "var(--ops-mono)",
+            marginBottom: 6,
+          } as CSSProperties}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* No results yet */}
+      {hits === null && !error && <Hatch label="NO MATCHES" height={52} />}
+
+      {/* Empty results */}
+      {hits !== null && hits.length === 0 && <Hatch label="NO MATCHES" height={52} />}
+
+      {/* Results */}
+      {hits !== null && hits.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 } as CSSProperties}>
+          {hits.map((hit, i) => (
+            <RecallHitRow key={i} hit={hit} />
+          ))}
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function RecallHitRow({ hit }: { hit: RecallHit }) {
+  const shortTs = hit.ts ? hit.ts.slice(0, 16).replace("T", " ") : "—";
+  const snippet = hit.text.length > 140 ? hit.text.slice(0, 140) + "…" : hit.text;
+  return (
+    <div
+      style={{
+        padding: "5px 8px",
+        border: "1px solid var(--ops-line)",
+        borderLeft: `2px solid ${hit.role === "user" ? "var(--ops-amber)" : "var(--ops-ok)"}`,
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+      } as CSSProperties}
+    >
+      {/* Top row: score + role badge */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 9,
+          fontFamily: "var(--ops-mono)",
+        } as CSSProperties}
+      >
+        <span
+          style={{
+            color: "var(--ops-fg-dim)",
+            fontVariantNumeric: "tabular-nums",
+            minWidth: 38,
+          } as CSSProperties}
+        >
+          {hit.score.toFixed(3)}
+        </span>
+        <Tag kind={hit.role === "user" ? "amber" : "ok"}>
+          {hit.role.toUpperCase()}
+        </Tag>
+        <span
+          style={{
+            color: "var(--ops-fg-faint)",
+            fontFamily: "var(--ops-mono)",
+            fontSize: 9,
+            marginLeft: "auto",
+          } as CSSProperties}
+        >
+          {shortTs}
+        </span>
+      </div>
+      {/* Snippet */}
+      <div
+        style={{
+          fontSize: 10,
+          fontFamily: "var(--ops-sans)",
+          color: "var(--ops-fg-mute)",
+          lineHeight: 1.4,
+          wordBreak: "break-word",
+        } as CSSProperties}
+      >
+        {snippet}
       </div>
     </div>
   );

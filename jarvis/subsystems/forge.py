@@ -160,15 +160,15 @@ class WorktreeRunner:
             }
 
     def _cleanup(self, worktree_path: str) -> None:
-        try:
+        import contextlib
+
+        with contextlib.suppress(Exception):
             subprocess.run(
                 ["git", "-C", self.repo_path, "worktree", "remove", "--force", worktree_path],
                 check=False,
                 capture_output=True,
                 text=True,
             )
-        except Exception:  # noqa: BLE001 — cleanup is best-effort
-            pass
 
 
 class Forge:
@@ -232,6 +232,40 @@ class Forge:
             follow_ups=follow_ups,
             needs_confirm=needs_confirm,
             confidence=0.85,
+        )
+
+    def list_runs(self, limit: int = 50) -> AgentResponse:
+        """Proxy to runner.list_runs() when supported; return empty list otherwise."""
+        runs: list[dict] = []
+        if hasattr(self.runner, "list_runs"):
+            raw = self.runner.list_runs(limit=limit)
+            runs = [r if isinstance(r, dict) else vars(r) for r in raw]
+        return AgentResponse(
+            agent="forge",
+            intent="list_runs",
+            action="listed",
+            result={"runs": runs, "count": len(runs)},
+        )
+
+    def get_run(self, run_id: str) -> AgentResponse:
+        """Proxy to runner.get_run() when supported; return not_found otherwise."""
+        run: dict | None = None
+        if hasattr(self.runner, "get_run"):
+            raw = self.runner.get_run(run_id)
+            if raw is not None:
+                run = raw if isinstance(raw, dict) else vars(raw)
+        if run is None:
+            return AgentResponse(
+                agent="forge",
+                intent="get_run",
+                action="not_found",
+                result={"run_id": run_id},
+            )
+        return AgentResponse(
+            agent="forge",
+            intent="get_run",
+            action="found",
+            result={"run": run},
         )
 
     @staticmethod

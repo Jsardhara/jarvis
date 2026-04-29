@@ -13,7 +13,8 @@ import logging
 import re
 import time
 from dataclasses import asdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -266,6 +267,14 @@ def make_app(
     async def atlas_snapshot() -> dict[str, Any]:
         """Combine portfolio + pnl + positions; set degraded=True when ATLAS is offline."""
         return _atlas_snapshot_data(reg)
+
+    @app.get("/api/dead-letter")
+    async def dead_letter(limit: int = 50) -> dict[str, Any]:
+        """Recent dead-letter records from the failure supervisor."""
+        from ..supervisor import read_dead_letter
+
+        records = read_dead_letter(limit=limit)
+        return {"data": [r.model_dump() for r in records], "error": None}
 
     @app.get("/api/tasks")
     async def tasks() -> dict[str, Any]:
@@ -543,6 +552,20 @@ def make_app(
         save_watchlist(items)
         return {"items": load_watchlist()}
 
+    # ─── Morning briefing ─────────────────────────────────────────────────────
+
+    @app.get("/api/briefing")
+    async def morning_briefing() -> dict[str, Any]:
+        """Aggregate real state from every subsystem and return a smart briefing."""
+        from ..briefing import build_briefing
+
+        try:
+            brief = build_briefing(reg)
+        except Exception as exc:
+            log.warning("briefing failed: %s", exc, exc_info=True)
+            return {"data": None, "error": str(exc)}
+        return {"data": brief, "error": None}
+
     # ─── Cost telemetry ───────────────────────────────────────────────────────
 
     @app.get("/api/cost/rollup")
@@ -557,6 +580,50 @@ def make_app(
                     status_code=422, detail="date must be YYYY-MM-DD"
                 ) from None
         return daily_rollup(target)
+
+    # ─── Digest exports ──────────────────────────────────────────────────────
+
+    @app.get("/api/exports/daily")
+    async def exports_daily(date_str: str | None = None) -> dict[str, Any]:
+        """Return a markdown daily digest. Query param date_str=YYYY-MM-DD optional."""
+        from ..exports import daily_digest
+
+        target: date | None = None
+        if date_str is not None:
+            try:
+                target = date.fromisoformat(date_str)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="date_str must be YYYY-MM-DD"
+                ) from None
+        resolved = target or datetime.now(UTC).date()
+        md = daily_digest(resolved)
+        return {"data": {"markdown": md, "date": resolved.isoformat()}, "error": None}
+
+    @app.get("/api/exports/weekly")
+    async def exports_weekly(end_date: str | None = None) -> dict[str, Any]:
+        """Return a markdown weekly digest. Query param end_date=YYYY-MM-DD optional."""
+        from ..exports import weekly_digest
+
+        end: date | None = None
+        if end_date is not None:
+            try:
+                end = date.fromisoformat(end_date)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="end_date must be YYYY-MM-DD"
+                ) from None
+        resolved_end = end or datetime.now(UTC).date()
+        resolved_start = resolved_end - timedelta(days=6)
+        md = weekly_digest(resolved_end)
+        return {
+            "data": {
+                "markdown": md,
+                "start": resolved_start.isoformat(),
+                "end": resolved_end.isoformat(),
+            },
+            "error": None,
+        }
 
     # ─── Operator preferences ─────────────────────────────────────────────────
 
@@ -574,6 +641,35 @@ def make_app(
         data = asdict(prefs)
         data["important_senders"] = list(data["important_senders"])
         return data
+
+    # ─── Tempo smart-triage ───────────────────────────────────────────────────
+
+    @app.get("/api/tempo/triage-smart")
+    async def tempo_triage_smart() -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        resp = supervise_call(reg, "tempo", "triage_smart")
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/tempo/snooze")
+    async def tempo_snooze(payload: dict[str, Any]) -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        msg_id = str(payload.get("msg_id", "")).strip()
+        until_iso = str(payload.get("until_iso", "")).strip()
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="msg_id required")
+        if not until_iso:
+            raise HTTPException(status_code=400, detail="until_iso required")
+        resp = supervise_call(reg, "tempo", "snooze_mail", {"msg_id": msg_id, "until_iso": until_iso})
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/tempo/triage-status")
+    async def tempo_triage_status() -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        resp = supervise_call(reg, "tempo", "triage_status")
+        return {"data": resp.result, "error": None}
 
     # ─── Scholar ingest — file upload → summary + auto-assignment ────────────
 
@@ -822,6 +918,95 @@ def make_app(
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         return {"data": resp.result, "error": None}
 
+    @app.post("/api/scholar/ingest-syllabus")
+    async def scholar_ingest_syllabus(payload: dict[str, Any]) -> dict[str, Any]:
+        filename = str(payload.get("filename", "")).strip()
+        content_b64 = str(payload.get("content_b64", "")).strip()
+        course = str(payload.get("course", "")).strip()
+        if not filename or not content_b64 or not course:
+            raise HTTPException(
+                status_code=400,
+                detail="filename, content_b64, and course are required",
+            )
+        try:
+            tempo_inst = reg["tempo"].instance
+            resp = reg["scholar"].instance.ingest_syllabus(
+                filename=filename,
+                content_b64=content_b64,
+                course=course,
+                tempo=tempo_inst,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    # ─── Forge runs ──────────────────────────────────────────────────────────
+
+    @app.post("/api/forge/execute")
+    async def forge_execute(payload: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch a forge task and return the run record."""
+        repo = str(payload.get("repo", "")).strip()
+        task = str(payload.get("task", "")).strip()
+        if not task:
+            raise HTTPException(status_code=400, detail="task required")
+        push = bool(payload.get("push", False))
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        try:
+            resp = forge_desc.call("execute", {"repo": repo, "task": task, "push": push})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/forge/runs")
+    async def forge_list_runs(limit: int = 50) -> dict[str, Any]:
+        """List recent forge runs."""
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        try:
+            resp = forge_desc.call("list_runs", {"limit": limit})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/forge/runs/{run_id}")
+    async def forge_get_run(run_id: str) -> dict[str, Any]:
+        """Fetch a single forge run by ID."""
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        try:
+            resp = forge_desc.call("get_run", {"run_id": run_id})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if resp.action == "not_found":
+            raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/forge/runs/{run_id}/log")
+    async def forge_run_log(run_id: str) -> Any:
+        """Return the raw log for a forge run as plain text."""
+        from fastapi.responses import PlainTextResponse
+
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        resp = forge_desc.call("get_run", {"run_id": run_id})
+        if resp.action == "not_found":
+            raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+        log_path = resp.result.get("run", {}).get("log_path", "")
+        if not log_path:
+            raise HTTPException(status_code=404, detail="log_path not set on run")
+        try:
+            text = Path(log_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="log file not found") from None
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return PlainTextResponse(text)
+
     # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ────────────────────
 
     _jarvis_chat: dict[str, Any] = {"instance": None}
@@ -858,6 +1043,95 @@ def make_app(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @app.post("/api/jarvis/recall")
+    async def jarvis_recall(payload: dict[str, Any]) -> dict[str, Any]:
+        """Semantic search over long-term chat history.
+
+        Body: {query: str, top_k?: int}
+        Response: {data: [{score, role, text, ts, lane}], error: null | str}
+        """
+        query = str(payload.get("query", "")).strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="query required")
+        top_k = int(payload.get("top_k", 5))
+        if top_k < 1 or top_k > 50:
+            raise HTTPException(status_code=422, detail="top_k must be 1-50")
+        chat = _get_jarvis()
+        try:
+            results = chat.semantic_search(query, top_k=top_k)
+        except Exception as exc:
+            log.warning("recall failed: %s", exc)
+            return {"data": [], "error": str(exc)}
+        return {"data": results, "error": None}
+
+    # ─── Cross-agent triggers ─────────────────────────────────────────────────
+
+    # ─── Global search ────────────────────────────────────────────────────────
+
+    @app.get("/api/search")
+    async def global_search(q: str = "", limit_per_kind: int = 5) -> dict[str, Any]:
+        """Keyword + semantic search across inbox, tasks, decisions, logs, chat.
+
+        Query params:
+          q              — search query string
+          limit_per_kind — max results per source (default 5)
+        """
+        from dataclasses import asdict
+
+        from ..search import search_all
+
+        if limit_per_kind < 1 or limit_per_kind > 20:
+            raise HTTPException(status_code=422, detail="limit_per_kind must be 1-20")
+        try:
+            hits = search_all(q, limit_per_kind=limit_per_kind)
+        except Exception as exc:
+            log.warning("search_all failed: %s", exc)
+            return {"data": [], "error": str(exc)}
+        return {"data": [asdict(h) for h in hits], "error": None}
+
+    # Wire inbox listener so every append_inbox call fans out to trigger rules.
+    from ..triggers import fire_for_event as _fire_for_event
+    from ..triggers import list_recent_fires as _list_recent_fires
+
+    register_inbox_listener(lambda e: _fire_for_event(reg, e))
+
+    @app.get("/api/triggers/recent")
+    async def triggers_recent(limit: int = 50) -> dict[str, Any]:
+        """Return the most recent trigger fire records."""
+        return {"data": _list_recent_fires(limit=limit), "error": None}
+
+    @app.get("/api/triggers/rules")
+    async def triggers_rules() -> dict[str, Any]:
+        """Return static list of rule names and descriptions."""
+        rules = [
+            {
+                "name": "scholar_exam_scheduled",
+                "description": "scholar.exam_session success → tempo.add blocks exam as a task",
+                "trigger": "event-driven (after exam_session call)",
+            },
+            {
+                "name": "scholar_exam_imminent",
+                "description": "Exam starting within 24h → warn InboxEvent surfaced on /scholar",
+                "trigger": "periodic (every 30 min via sentinel)",
+            },
+            {
+                "name": "tempo_task_due_today",
+                "description": "Task with course: tag due today → info InboxEvent on /scholar",
+                "trigger": "periodic (every 30 min via sentinel)",
+            },
+            {
+                "name": "forge_run_failed",
+                "description": "Forge dead-letter record → crit InboxEvent on /inbox",
+                "trigger": "periodic (every 30 min via sentinel)",
+            },
+            {
+                "name": "atlas_guardian_violation",
+                "description": "Atlas guardian_check violation → crit InboxEvent (caller-driven)",
+                "trigger": "event-driven (atlas pipeline)",
+            },
+        ]
+        return {"data": rules, "error": None}
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):  # pragma: no cover - websocket runtime

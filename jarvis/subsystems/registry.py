@@ -89,8 +89,19 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
     lens_provider, lens_mode = _lens_provider()
     lens = Lens(lens_provider)
 
-    # Forge: always mock until Plan F1 lands
-    forge = Forge(MockRunner())
+    # Forge: live when claude CLI is on PATH, otherwise MockRunner
+    forge_mode: Literal["live", "mock"]
+    try:
+        from .forge_runner import WorktreeRunner as RealWorktreeRunner
+
+        forge_runner: Any = RealWorktreeRunner()
+        forge_mode = "live"
+        logger.info("forge: live mode (worktree runner)")
+    except (RuntimeError, FileNotFoundError) as exc:
+        logger.warning("forge: falling back to mock (%s)", exc)
+        forge_runner = MockRunner()
+        forge_mode = "mock"
+    forge = Forge(forge_runner)
 
     # Atlas: auto_mock_on_offline — health check decides live/mock per-call
     atlas_bridge = AtlasBridge()
@@ -107,6 +118,9 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             mode=tempo_mode,
             actions={
                 "triage": tempo.triage,
+                "triage_smart": tempo.triage_smart,
+                "snooze_mail": tempo.snooze_mail,
+                "triage_status": tempo.triage_status,
                 "draft_reply": tempo.draft_reply,
                 "send_mail": tempo.send_mail,
                 "today": tempo.today,
@@ -141,6 +155,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
                 "weak_topics": scholar.weak_topics,
                 "exam_session": scholar.exam_session,
                 "import_seed": scholar.import_seed,
+                "ingest_syllabus": scholar.ingest_syllabus,
             },
             default_for_text=lambda _text: scholar.list_assignments(),
         ),
@@ -160,8 +175,12 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="forge",
             instance=forge,
             description="Code-work delegation",
-            mode="mock",
-            actions={"execute": forge.execute},
+            mode=forge_mode,
+            actions={
+                "execute": forge.execute,
+                "list_runs": forge.list_runs,
+                "get_run": forge.get_run,
+            },
             default_for_text=lambda text: forge.execute(repo="?", task=text, push=False),
         ),
         "atlas": AgentDescriptor(

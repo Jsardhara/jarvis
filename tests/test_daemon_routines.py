@@ -96,10 +96,12 @@ def test_scholar_tick_records_count():
 
 
 def test_morning_digest_pushes_summary():
+    from jarvis.subsystems.registry import build_default_registry
+
     notifier = NoopNotifier()
-    atlas = AtlasOrchestrator(bridge=_silent_atlas(), allow_mock=True)
-    out = morning_digest(Tempo(MockOutlook()), atlas, Scholar(), notifier)
-    assert "body" in out
+    reg = build_default_registry()
+    out = morning_digest(reg, notifier)
+    assert "sections" in out
     assert len(notifier.calls) == 1
     assert "briefing" in notifier.calls[0][0].lower()
 
@@ -258,7 +260,10 @@ def test_verification_health_counts_statuses(tmp_path, monkeypatch):
 
 
 def test_morning_digest_includes_verification_health():
+    from jarvis.subsystems.registry import build_default_registry
+
     notifier = NoopNotifier()
-    atlas = AtlasOrchestrator(bridge=_silent_atlas(), allow_mock=True)
-    out = morning_digest(Tempo(MockOutlook()), atlas, Scholar(), notifier)
-    assert "Verification:" in out["body"]
+    reg = build_default_registry()
+    out = morning_digest(reg, notifier)
+    # New briefing surfaces a "system" section in place of the old verification block
+    assert "system" in out["sections"]

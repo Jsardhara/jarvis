@@ -17,10 +17,10 @@ from uuid import uuid4
 
 from .authority import AuthorityError, check_authority
 from .classify import classify_tier
-from .contract import AgentResponse, IntentClassification, TraceEvent
+from .contract import AgentResponse, InboxEvent, IntentClassification, TraceEvent
 from .memory import record_dispatch
 from .router import classify
-from .state import load_tasks, read_inbox
+from .state import append_inbox, load_tasks, read_inbox
 from .verify import verify_response
 
 SubsystemHandler = Callable[[str], Awaitable[AgentResponse]]
@@ -29,6 +29,14 @@ EventSink = Callable[[TraceEvent], Awaitable[None]]
 
 async def _noop_sink(_event: TraceEvent) -> None:
     return None
+
+
+def _push_crit_inbox(event: InboxEvent) -> None:
+    """Persist a crit inbox event from the supervisor directly to state."""
+    try:
+        append_inbox(event)
+    except Exception:  # pragma: no cover — belt-and-suspenders
+        pass
 
 
 class Orchestrator:

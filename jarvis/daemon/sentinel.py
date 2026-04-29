@@ -21,8 +21,10 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from ..subsystems.atlas import AtlasBridge, AtlasOrchestrator
 from ..subsystems.lens import Lens
 from ..subsystems.providers import MockOutlook, MockSearch
+from ..subsystems.registry import build_default_registry
 from ..subsystems.scholar import Scholar
 from ..subsystems.tempo import Tempo
+from ..triggers import scan_periodic
 from .mission_control_bridge import sync_tick as mission_control_sync_tick
 from .notifier import default_notifier
 from .routines import (
@@ -47,10 +49,21 @@ def _build_subsystems():
     return tempo, atlas, lens, scholar
 
 
+def _triggers_tick(reg: dict) -> None:
+    """Periodic job: run all polling-style trigger rules and emit InboxEvents."""
+    try:
+        fired = scan_periodic(reg)
+        if fired:
+            log.info("triggers_tick: %d trigger(s) fired", len(fired))
+    except Exception:
+        log.warning("triggers_tick failed", exc_info=True)
+
+
 def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingScheduler:
     tempo, atlas, lens, scholar = _build_subsystems()
     notifier = default_notifier()
     watchlist = [t.strip() for t in os.environ.get("JARVIS_WATCHLIST", "BTC,ETH").split(",") if t.strip()]
+    reg = build_default_registry()
 
     sched = scheduler or BlockingScheduler(timezone="UTC")
 
@@ -60,11 +73,12 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(news_tick, "interval", minutes=30, args=[lens, watchlist, notifier], id="news")
     sched.add_job(scholar_tick, "interval", hours=2, args=[scholar, notifier], id="scholar")
     sched.add_job(morning_digest, "cron", hour=8, minute=0,
-                  args=[tempo, atlas, scholar, notifier], id="morning")
+                  args=[reg, notifier], id="morning")
     sched.add_job(morning_digest, "cron", hour=18, minute=0,
-                  args=[tempo, atlas, scholar, notifier], id="evening")
+                  args=[reg, notifier], id="evening")
     sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
     sched.add_job(mission_control_sync_tick, "interval", seconds=30, id="mc_sync")
+    sched.add_job(_triggers_tick, "interval", minutes=30, args=[reg], id="triggers")
 
     return sched
 
