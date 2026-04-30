@@ -189,6 +189,75 @@ def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
     }
 
 
+def _fetch_atlas_cost_rollup(
+    reg: dict[str, AgentDescriptor], date_str: str
+) -> dict[str, Any] | None:
+    """Fetch Atlas /api/cost/rollup for date_str; return None on any failure."""
+    from ..subsystems.atlas import AtlasOrchestrator
+
+    atlas_desc = reg.get("atlas")
+    if atlas_desc is None:
+        return None
+    inst = atlas_desc.instance
+    if not isinstance(inst, AtlasOrchestrator):
+        return None
+    if inst.mode != "live":
+        return None
+    try:
+        return inst.bridge.cost_rollup(date_str)
+    except Exception as exc:
+        log.debug("atlas cost_rollup fetch failed: %s", exc)
+        return None
+
+
+def _merge_cost_rollups(
+    jarvis: dict[str, Any], atlas: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge Jarvis and Atlas daily_rollup dicts into one flat RawRollup.
+
+    Atlas by_agent values may be objects ``{cost_usd, calls, ...}`` or bare
+    floats. Both are normalised to bare floats before union.
+    Jarvis entries already use bare floats.
+    """
+    # Flatten Atlas by_agent: {agent: {cost_usd, ...}} → {agent: float}
+    atlas_by_agent_raw: dict[str, Any] = atlas.get("by_agent", {})
+    atlas_by_agent: dict[str, float] = {}
+    for agent, val in atlas_by_agent_raw.items():
+        if isinstance(val, dict):
+            atlas_by_agent[agent] = float(val.get("cost_usd", 0.0))
+        else:
+            atlas_by_agent[agent] = float(val)
+
+    atlas_by_model_raw: dict[str, Any] = atlas.get("by_model", {})
+    atlas_by_model: dict[str, float] = {}
+    for model, val in atlas_by_model_raw.items():
+        if isinstance(val, dict):
+            atlas_by_model[model] = float(val.get("cost_usd", 0.0))
+        else:
+            atlas_by_model[model] = float(val)
+
+    merged_by_agent = dict(jarvis.get("by_agent", {}))
+    for agent, cost in atlas_by_agent.items():
+        merged_by_agent[agent] = round(merged_by_agent.get(agent, 0.0) + cost, 8)
+
+    merged_by_model = dict(jarvis.get("by_model", {}))
+    for model, cost in atlas_by_model.items():
+        merged_by_model[model] = round(merged_by_model.get(model, 0.0) + cost, 8)
+
+    total = round(
+        float(jarvis.get("total_usd", 0.0)) + float(atlas.get("total_usd", 0.0)), 6
+    )
+    call_count = int(jarvis.get("call_count", 0)) + int(atlas.get("call_count", 0))
+
+    return {
+        "date": jarvis["date"],
+        "total_usd": total,
+        "by_agent": merged_by_agent,
+        "by_model": merged_by_model,
+        "call_count": call_count,
+    }
+
+
 def _validate_preferences_payload(payload: dict[str, Any]) -> OperatorPreferences:
     """Parse + validate PUT /api/preferences body; raise HTTPException on bad input."""
     senders_raw = payload.get("important_senders", ())
@@ -249,6 +318,12 @@ def make_app(
     @app.on_event("shutdown")
     async def _cleanup() -> None:
         unregister_inbox_listener(_push_inbox_event)
+
+    # ── Atlas proxy routes (must register before /api/atlas/snapshot so that
+    #    specific static paths like /trades/open beat param routes) ────────────
+    from .atlas_proxy import register_atlas_proxy
+
+    register_atlas_proxy(app, reg)
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -570,7 +645,13 @@ def make_app(
 
     @app.get("/api/cost/rollup")
     async def cost_rollup(date_str: str | None = None) -> dict[str, Any]:
-        """Return daily cost rollup.  Query param ``date`` accepts YYYY-MM-DD."""
+        """Return daily cost rollup merged with Atlas costs.
+
+        Query param ``date_str`` accepts YYYY-MM-DD.
+        Fetches Jarvis own LLM costs + Atlas costs and unions them.
+        Atlas ``by_agent`` nested objects are flattened to bare cost_usd numbers
+        to match ``useDailyCost.ts`` ``RawRollup`` shape.
+        """
         target: date | None = None
         if date_str is not None:
             try:
@@ -579,7 +660,15 @@ def make_app(
                 raise HTTPException(
                     status_code=422, detail="date must be YYYY-MM-DD"
                 ) from None
-        return daily_rollup(target)
+        jarvis_rollup = daily_rollup(target)
+        resolved_date_str = jarvis_rollup["date"]
+
+        # Attempt to fetch Atlas costs and merge; never fail if Atlas is down
+        atlas_rollup = _fetch_atlas_cost_rollup(reg, resolved_date_str)
+        if atlas_rollup is not None:
+            jarvis_rollup = _merge_cost_rollups(jarvis_rollup, atlas_rollup)
+
+        return jarvis_rollup
 
     # ─── Digest exports ──────────────────────────────────────────────────────
 
@@ -669,6 +758,27 @@ def make_app(
         from ..supervisor import supervise_call
 
         resp = supervise_call(reg, "tempo", "triage_status")
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/tempo/search")
+    async def tempo_search_mail(query: str, max_results: int = 25) -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        q = (query or "").strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="query required")
+        resp = supervise_call(
+            reg, "tempo", "search_mail", {"query": q, "max_results": max_results}
+        )
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/tempo/recent")
+    async def tempo_list_recent(max_results: int = 25) -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        resp = supervise_call(
+            reg, "tempo", "list_recent_mail", {"max_results": max_results}
+        )
         return {"data": resp.result, "error": None}
 
     # ─── Scholar ingest — file upload → summary + auto-assignment ────────────
@@ -1044,6 +1154,29 @@ def make_app(
             },
         )
 
+    @app.post("/api/jarvis/terminal")
+    async def jarvis_terminal_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        """Non-streaming chat endpoint for Atlas terminal reverse-path.
+
+        Atlas terminal.py POSTs unprefixed messages here with
+        ``{"message": str, "session_id": str}``. Returns
+        ``{"response": str, "session_id": str}``.
+        """
+        message = str(payload.get("message", "")).strip()
+        session_id = str(payload.get("session_id", ""))
+        if not message:
+            raise HTTPException(status_code=400, detail="message required")
+        chat = _get_jarvis()
+        chunks: list[str] = []
+        try:
+            async for ev in chat.stream(message):
+                if ev.type == "text":
+                    chunks.append(ev.payload.get("delta", ""))
+        except Exception as exc:
+            log.warning("jarvis terminal chat error: %s", exc)
+            return {"response": f"error: {exc}", "session_id": session_id}
+        return {"response": "".join(chunks), "session_id": session_id}
+
     @app.post("/api/jarvis/recall")
     async def jarvis_recall(payload: dict[str, Any]) -> dict[str, Any]:
         """Semantic search over long-term chat history.
@@ -1145,14 +1278,36 @@ def make_app(
         except WebSocketDisconnect:
             await bus.remove(websocket)
 
+    # Atlas WS client — started on startup when atlas mode is live
+    from ..subsystems.atlas_ws_client import AtlasWsClient as _AtlasWsClient
+
+    _atlas_ws: dict[str, Any] = {"client": None}
+
     @app.on_event("startup")
     async def _capture_loop() -> None:
         global _active_loop
         _active_loop = asyncio.get_running_loop()
+        atlas_desc = reg.get("atlas")
+        if atlas_desc is not None:
+            from ..subsystems.atlas import AtlasOrchestrator
+
+            orchestrator_inst = atlas_desc.instance
+            if isinstance(orchestrator_inst, AtlasOrchestrator) and orchestrator_inst.mode == "live":
+                ws_client = _AtlasWsClient(_make_event_sink(bus))
+                _atlas_ws["client"] = ws_client
+                await ws_client.start_ws()
+
+    @app.on_event("shutdown")
+    async def _ws_shutdown() -> None:
+        client = _atlas_ws.get("client")
+        if client is not None:
+            await client.stop()
 
     # Test helper: surface bus + registry as app.state so tests can inspect
     app.state.broadcaster = bus
     app.state.registry = reg
+    # Expose _jarvis_chat dict so tests can inject a mock chat instance
+    app.state.jarvis_chat = _jarvis_chat
     return app
 
 

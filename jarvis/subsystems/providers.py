@@ -15,6 +15,8 @@ from uuid import uuid4
 class OutlookProvider(Protocol):
     # Mail
     def list_unread(self, max_results: int = 25) -> list[dict]: ...
+    def list_recent(self, max_results: int = 25) -> list[dict]: ...
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]: ...
     def get_message(self, msg_id: str) -> dict: ...
     def draft_reply(self, msg_id: str, body: str) -> dict: ...
     def send(self, to: str, subject: str, body: str) -> dict: ...
@@ -57,6 +59,21 @@ class MockOutlook:
     def list_unread(self, max_results: int = 25) -> list[dict]:
         unread = [m for m in self._mail.values() if "UNREAD" in m.get("labels", [])]
         return unread[:max_results]
+
+    def list_recent(self, max_results: int = 25) -> list[dict]:
+        return list(self._mail.values())[:max_results]
+
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]:
+        q = query.lower().strip()
+        if not q:
+            return []
+        hits = [
+            m for m in self._mail.values()
+            if q in (m.get("subject") or "").lower()
+            or q in (m.get("snippet") or "").lower()
+            or q in (m.get("from") or "").lower()
+        ]
+        return hits[:max_results]
 
     def get_message(self, msg_id: str) -> dict:
         return self._mail[msg_id]

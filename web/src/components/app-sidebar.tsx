@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { usePathname } from "next/navigation";
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,22 @@ const CONTROL_LINKS: NavEntry[] = [
 const COMMS_LINKS: NavEntry[] = [
   { href: "/inbox",     label: "Inbox",     glyph: "□", badgeKey: "unreadInbox" },
   { href: "/decisions", label: "Decisions", glyph: "?", badgeKey: "pendingDecisions" },
+];
+
+// Atlas sub-agent nav entries with their accent CSS var
+interface AtlasAgentEntry {
+  href: string;
+  label: string;
+  accentVar: string;
+  fallbackColor: string;
+}
+
+const ATLAS_AGENT_ENTRIES: AtlasAgentEntry[] = [
+  { href: "/atlas/agents/oracle",    label: "Oracle",    accentVar: "--atlas-oracle",    fallbackColor: "#F2D06B" },
+  { href: "/atlas/agents/architect", label: "Architect", accentVar: "--atlas-architect", fallbackColor: "#7CB6E8" },
+  { href: "/atlas/agents/guardian",  label: "Guardian",  accentVar: "--atlas-guardian",  fallbackColor: "#6FCF7F" },
+  { href: "/atlas/agents/trader",    label: "Trader",    accentVar: "--atlas-trader",    fallbackColor: "#E0859E" },
+  { href: "/atlas/agents/sage",      label: "Sage",      accentVar: "--atlas-sage",      fallbackColor: "#B98CE0" },
 ];
 
 // ─── Component types ─────────────────────────────────────────────────────────
@@ -153,6 +170,126 @@ function AgentRow({ agentId, href, active, onClick }: AgentRowProps) {
   );
 }
 
+// ─── Atlas agent leaf item ────────────────────────────────────────────────────
+
+interface AtlasAgentItemProps {
+  entry: AtlasAgentEntry;
+  active: boolean;
+  onClick?: () => void;
+}
+
+function AtlasAgentItem({ entry, active, onClick }: AtlasAgentItemProps) {
+  return (
+    <Link
+      href={entry.href}
+      onClick={onClick}
+      className={cn("ops-nav-item ops-nav-item--indented", active && "ops-nav-item-active")}
+      data-testid={`atlas-agent-link-${entry.label.toLowerCase()}`}
+    >
+      {/* Accent dot using the per-agent CSS var */}
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: `var(${entry.accentVar}, ${entry.fallbackColor})`,
+          flexShrink: 0,
+          marginRight: 2,
+        }}
+      />
+      <span style={{ flex: 1 }}>{entry.label}</span>
+    </Link>
+  );
+}
+
+// ─── Atlas collapsible agents group ──────────────────────────────────────────
+
+interface AtlasAgentsGroupProps {
+  pathname: string;
+  onClick?: () => void;
+}
+
+function AtlasAgentsGroup({ pathname, onClick }: AtlasAgentsGroupProps) {
+  // Open by default when any agent sub-page is active
+  const anyAgentActive = ATLAS_AGENT_ENTRIES.some((e) => isActive(pathname, e.href));
+  const [open, setOpen] = useState(anyAgentActive);
+
+  const groupActive = anyAgentActive;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-testid="atlas-agents-group-toggle"
+        className={cn("ops-nav-item ops-nav-item--group-toggle", groupActive && "ops-nav-item-active")}
+        style={{ width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer" }}
+      >
+        <span className="ops-nav-glyph" aria-hidden>{open ? "▾" : "▸"}</span>
+        <span style={{ flex: 1 }}>Agents</span>
+      </button>
+
+      {open && (
+        <div data-testid="atlas-agents-group">
+          {ATLAS_AGENT_ENTRIES.map((entry) => (
+            <AtlasAgentItem
+              key={entry.href}
+              entry={entry}
+              active={isActive(pathname, entry.href)}
+              onClick={onClick}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Atlas section ────────────────────────────────────────────────────────────
+
+interface AtlasSectionProps {
+  pathname: string;
+  onClick?: () => void;
+}
+
+function AtlasSection({ pathname, onClick }: AtlasSectionProps) {
+  return (
+    <NavSection label="ATLAS">
+      <NavItem
+        href="/atlas"
+        label="Overview"
+        glyph="◈"
+        active={pathname === "/atlas"}
+        onClick={onClick}
+      />
+      <NavItem
+        href="/atlas/pipeline"
+        label="Pipeline"
+        glyph="⇢"
+        active={isActive(pathname, "/atlas/pipeline")}
+        onClick={onClick}
+      />
+      <NavItem
+        href="/atlas/network"
+        label="Network"
+        glyph="⬡"
+        active={isActive(pathname, "/atlas/network")}
+        onClick={onClick}
+      />
+      <NavItem
+        href="/atlas/trades"
+        label="Trades"
+        glyph="⇄"
+        active={isActive(pathname, "/atlas/trades")}
+        onClick={onClick}
+      />
+      <AtlasAgentsGroup pathname={pathname} onClick={onClick} />
+    </NavSection>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function AppSidebar({
@@ -218,6 +355,9 @@ export function AppSidebar({
           );
         })}
       </NavSection>
+
+      {/* ATLAS — dedicated nav section with sub-pages */}
+      <AtlasSection pathname={pathname} onClick={onClose} />
 
       {/* DAEMON */}
       <NavSection label="DAEMON">

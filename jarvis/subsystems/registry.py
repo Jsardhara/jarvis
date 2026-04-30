@@ -119,6 +119,8 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             actions={
                 "triage": tempo.triage,
                 "triage_smart": tempo.triage_smart,
+                "search_mail": tempo.search_mail,
+                "list_recent_mail": tempo.list_recent_mail,
                 "snooze_mail": tempo.snooze_mail,
                 "triage_status": tempo.triage_status,
                 "draft_reply": tempo.draft_reply,

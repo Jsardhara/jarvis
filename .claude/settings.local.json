@@ -48,7 +48,13 @@
       "Bash(pnpm build *)",
       "Bash(rm *)",
       "Bash(pkill -f \"uvicorn jarvis.web.api\")",
-      "Bash(awk '{print $5}')"
+      "Bash(awk '{print $5}')",
+      "Bash(grep -n 'unread\\\\|isRead\\\\|is_read\\\\|UNREAD\\\\|filter\\\\|$filter' C:/Users/jyot2/jarvis/jarvis/subsystems/tempo.py C:/Users/jyot2/jarvis/jarvis/subsystems/outlook_provider.py C:/Users/jyot2/jarvis/jarvis/subsystems/multi_mail_provider.py C:/Users/jyot2/jarvis/jarvis/subsystems/gmail_imap_provider.py C:/Users/jyot2/jarvis/jarvis/subsystems/providers.py)",
+      "Read(//c/Users/jyot2/atlas/agents/**)",
+      "Read(//c/Users/jyot2/atlas/**)",
+      "Bash(find C:\\\\\\\\Users\\\\\\\\jyot2\\\\\\\\jarvis -name \"CLAUDE.md\" -o -name \"README.md\")",
+      "Bash(awk '{print $2}')",
+      "Bash(docker exec *)"
     ]
   }
 }

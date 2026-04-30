@@ -296,6 +296,53 @@ class Tempo:
             confidence=0.9,
         )
 
+    def search_mail(self, query: str, max_results: int = 25) -> AgentResponse:
+        """Find messages matching ``query`` in subject/body/from across all mail (read + unread)."""
+        msgs = self.outlook.search_mail(query=query, max_results=max_results)
+        hits = [
+            {
+                "id": m["id"],
+                "from": m.get("from", ""),
+                "subject": m.get("subject", ""),
+                "snippet": m.get("snippet", ""),
+                "date": m.get("date", ""),
+                "is_unread": "UNREAD" in m.get("labels", []),
+            }
+            for m in msgs
+        ]
+        return AgentResponse(
+            agent="tempo",
+            intent="search_mail",
+            action="searched",
+            result={"query": query, "hits": hits, "count": len(hits)},
+            follow_ups=(
+                [f"open message {hits[0]['id']}"] if hits else []
+            ),
+            confidence=0.9,
+        )
+
+    def list_recent_mail(self, max_results: int = 25) -> AgentResponse:
+        """Return the most recent messages, read or unread."""
+        msgs = self.outlook.list_recent(max_results=max_results)
+        items = [
+            {
+                "id": m["id"],
+                "from": m.get("from", ""),
+                "subject": m.get("subject", ""),
+                "snippet": m.get("snippet", ""),
+                "date": m.get("date", ""),
+                "is_unread": "UNREAD" in m.get("labels", []),
+            }
+            for m in msgs
+        ]
+        return AgentResponse(
+            agent="tempo",
+            intent="list_recent_mail",
+            action="listed",
+            result={"messages": items, "count": len(items)},
+            confidence=0.95,
+        )
+
     def snooze_mail(self, msg_id: str, until_iso: str) -> AgentResponse:
         """Snooze a message until ``until_iso``. Filters it from triage_smart until then."""
         snoozes = _load_snoozes()

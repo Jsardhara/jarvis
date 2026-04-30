@@ -14,6 +14,8 @@ import { useCallback } from "react";
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
 import { PipelineSwimlane } from "@/components/PipelineSwimlane";
 import { usePipelineStream } from "@/hooks/usePipelineStream";
+import { MockModeBanner } from "@/components/atlas/MockModeBanner";
+import { AgentStatusRow } from "@/components/atlas/AgentStatusRow";
 
 // TODO(C2): The confirmation API contract may diverge once C2 lands.
 // Current assumption: separate endpoints /approve and /reject rather than a
@@ -49,12 +51,16 @@ export default function AtlasPipelinePage() {
 
   return (
     <div className="space-y-4">
+      <MockModeBanner />
+
       <BreadcrumbNav
         items={[
           { label: "Atlas", href: undefined },
           { label: "Pipeline" },
         ]}
       />
+
+      <AgentStatusRow />
 
       <div className="border border-[color:var(--pipeline-lane-divider)] bg-[color:var(--pipeline-lane-bg)] rounded-none overflow-hidden">
         <PipelineSwimlane

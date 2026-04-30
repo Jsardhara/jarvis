@@ -786,6 +786,16 @@
   font-weight: 700;
   color: var(--agent-color, var(--ops-fg-mute));
 }
+/* Atlas sub-nav: indented leaf items */
+.ops-nav-item--indented {
+  padding-left: 22px;
+  font-size: 11px;
+}
+/* Atlas sub-nav: collapsible group toggle button */
+.ops-nav-item--group-toggle {
+  font-family: var(--ops-mono);
+  font-size: 12px;
+}
 
 /* ─── View header ─── */
 .ops-view-header {
@@ -901,6 +911,155 @@
     animation: none;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ATLAS NETWORK GRAPH
+   Node/edge/message-kind tokens for AgentNetworkGraph.tsx.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Message kind colors */
+  --atlas-kind-signal:   var(--ops-agent-atlas);   /* gold  */
+  --atlas-kind-decision: var(--ops-info);           /* blue  */
+  --atlas-kind-order:    var(--ops-ok);             /* green */
+  --atlas-kind-insight:  var(--ops-agent-scholar);  /* violet */
+  --atlas-kind-status:   var(--ops-fg-dim);         /* grey  */
+  --atlas-kind-other:    var(--ops-fg-faint);       /* faint */
+
+  /* Agent node ring colors (sub-agents) */
+  --atlas-oracle:        #F2D06B;  /* gold-warm   */
+  --atlas-architect:     #7CB6E8;  /* sky blue    */
+  --atlas-guardian:      #6FCF7F;  /* emerald     */
+  --atlas-trader:        #E0859E;  /* rose        */
+  --atlas-sage:          #B98CE0;  /* violet      */
+  --atlas-orchestrator:  #F2A03D;  /* amber       */
+  --atlas-kraken:        #5FD3D3;  /* cyan        */
+  --atlas-postgres:      #A8A4FF;  /* lavender    */
+
+  /* Graph packet animation */
+  --atlas-packet-dur: 1.5s;
+  --atlas-packet-r: 5px;
+  --atlas-edge-opacity: 0.25;
+  --atlas-edge-active-opacity: 0.55;
+}
+
+/* Packet travel animation */
+@keyframes atlas-packet-fade {
+  0%   { opacity: 0; }
+  10%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Drawer slide-in from right */
+@keyframes atlas-drawer-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+@keyframes atlas-drawer-out {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
+}
+
+/* Network graph container */
+.atlas-network-graph {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ops-bg-void);
+  position: relative;
+}
+
+/* Inspector drawer */
+.atlas-inspector-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100%;
+  width: 400px;
+  background: var(--ops-bg-panel);
+  border-left: 1px solid var(--ops-line-strong);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  animation: atlas-drawer-in var(--duration-normal) var(--ease-out-expo) both;
+}
+.atlas-inspector-header {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ops-line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--ops-bg-deep);
+}
+.atlas-inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Toolbar */
+.atlas-network-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--ops-line);
+  background: var(--ops-bg-deep);
+  flex-wrap: wrap;
+}
+.atlas-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--ops-line-strong);
+  border-radius: 2px;
+  font-family: var(--ops-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ops-fg-dim);
+  cursor: pointer;
+  transition: border-color 100ms, color 100ms, background 100ms;
+  background: transparent;
+}
+.atlas-kind-chip:hover {
+  border-color: var(--ops-line-bright);
+  color: var(--ops-fg);
+}
+.atlas-kind-chip-active {
+  color: var(--ops-fg);
+  background: var(--ops-bg-elevated);
+  border-color: var(--ops-line-bright);
+}
+
+/* Activity event row */
+.atlas-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--ops-line-faint);
+  font-family: var(--ops-mono);
+  font-size: 11px;
+}
+.atlas-activity-row:last-child { border-bottom: none; }
+
+/* Memory KV row */
+.atlas-memory-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--ops-line-faint);
+  font-family: var(--ops-mono);
+  font-size: 11px;
+  align-items: start;
+}
+.atlas-memory-row:last-child { border-bottom: none; }
 
 /* Hide Next.js dev mode indicator */
 [data-next-mark],

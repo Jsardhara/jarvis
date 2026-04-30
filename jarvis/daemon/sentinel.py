@@ -59,6 +59,39 @@ def _triggers_tick(reg: dict) -> None:
         log.warning("triggers_tick failed", exc_info=True)
 
 
+# Module-level state for Atlas health tracking (last known status)
+_atlas_health_last: dict = {"healthy": None}
+
+
+def atlas_health_tick(atlas_api_url: str) -> dict:
+    """Check Atlas /system/health every 60s; push notification on 200↔503 transitions."""
+    import httpx
+
+    from ..contract import InboxEvent
+    from ..state import append_inbox
+
+    was_healthy = _atlas_health_last.get("healthy")
+    try:
+        resp = httpx.get(f"{atlas_api_url}/system/health", timeout=3.0)
+        is_healthy = resp.status_code == 200
+    except Exception:
+        is_healthy = False
+
+    transitioned = was_healthy is not None and was_healthy != is_healthy
+    if transitioned:
+        if not is_healthy:
+            summary = "Atlas degraded — check agents"
+            severity = "alert"
+        else:
+            summary = "Atlas recovered"
+            severity = "info"
+        append_inbox(InboxEvent(agent="sentinel", severity=severity, summary=summary))
+        log.warning("atlas_health_tick: %s", summary)
+
+    _atlas_health_last["healthy"] = is_healthy
+    return {"healthy": is_healthy, "transitioned": transitioned}
+
+
 def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingScheduler:
     tempo, atlas, lens, scholar = _build_subsystems()
     notifier = default_notifier()
@@ -79,6 +112,10 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
     sched.add_job(mission_control_sync_tick, "interval", seconds=30, id="mc_sync")
     sched.add_job(_triggers_tick, "interval", minutes=30, args=[reg], id="triggers")
+    atlas_api_url = os.environ.get("JARVIS_ATLAS_API", "http://localhost:8000")
+    sched.add_job(
+        atlas_health_tick, "interval", seconds=60, args=[atlas_api_url], id="atlas_health"
+    )
 
     return sched
 

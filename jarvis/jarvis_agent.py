@@ -125,8 +125,10 @@ def load_soul(variant: str = "full") -> str:
 _AGENT_DESCRIPTIONS = {
     "tempo": (
         "Gmail (+optional Drexel) for mail, iCloud for calendar + reminders + tasks. "
-        "Actions: triage, draft_reply, send_mail, today, find_free, schedule, cancel, "
-        "add, list_open, complete."
+        "Actions: triage (unread only), list_recent_mail (latest read+unread), "
+        "search_mail (args: query, max_results — searches subject/body/from across all mail, "
+        "use this when the user names a topic like 'email about exam change'), "
+        "draft_reply, send_mail, today, find_free, schedule, cancel, add, list_open, complete."
     ),
     "scholar": (
         "Academics + study planning. Actions: list_assignments, add_assignment, "

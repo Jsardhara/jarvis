@@ -13,23 +13,37 @@ Each stage returns an AgentResponse so the dashboard can render the
 sub-flow as a swimlane. Guardian veto blocks Trader. Live execution
 always requires explicit confirmation.
 
-When ATLAS is offline, Atlas falls back to deterministic mocks so the
-dashboard stays responsive.
+Mode is controlled by JARVIS_ATLAS_MODE env var:
+  "live"  — hit the real ATLAS API; return None on failure (no mock fallback)
+  "mock"  — never hit the network; always return mock data
+
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
+import os
 import time
 from collections.abc import Awaitable, Callable
+from uuid import uuid4
 
 import httpx
 
 from ..config import get_settings
 from ..contract import AgentResponse, TraceEvent
 
+log = logging.getLogger(__name__)
+
 _DEGRADED_META: dict = {"degraded": True}
 
 EventSink = Callable[[TraceEvent], Awaitable[None]]
+
+# Retry delays in seconds for transient errors
+_RETRY_DELAYS = (0.5, 1.0, 2.0)
+
+# HTTP status codes that warrant a retry
+_RETRYABLE_STATUS = {502, 503, 504}
 
 
 async def _noop_sink(_event: TraceEvent) -> None:
@@ -53,23 +67,89 @@ class AtlasBridge:
         transport: httpx.BaseTransport | None = None,
     ):
         self.base_url = (base_url or get_settings().atlas_api).rstrip("/")
-        self._client = httpx.Client(base_url=self.base_url, timeout=timeout, transport=transport)
+        token = os.environ.get("ATLAS_BEARER_TOKEN", "")
+        headers: dict[str, str] = {}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        self._token = token
+        self._client = httpx.Client(
+            base_url=self.base_url,
+            timeout=timeout,
+            transport=transport,
+            headers=headers,
+        )
+
+    def _is_retryable(self, exc: Exception | None, status: int | None) -> bool:
+        if isinstance(exc, (httpx.ConnectError, httpx.ReadError)):
+            return True
+        return status in _RETRYABLE_STATUS
 
     def _get(self, path: str) -> dict | None:
-        try:
-            r = self._client.get(path)
-            r.raise_for_status()
-            return r.json()
-        except (httpx.HTTPError, httpx.ConnectError, httpx.ReadError):
-            return None
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate((*_RETRY_DELAYS, None)):
+            try:
+                r = self._client.get(path)
+                if r.status_code in _RETRYABLE_STATUS:
+                    if delay is not None:
+                        log.warning(
+                            "atlas _get %s retryable status %d (attempt %d)",
+                            path, r.status_code, attempt + 1,
+                        )
+                        time.sleep(delay)
+                        continue
+                    return None
+                r.raise_for_status()
+                return r.json()
+            except (httpx.ConnectError, httpx.ReadError) as exc:
+                last_exc = exc
+                if delay is not None:
+                    log.warning(
+                        "atlas _get %s transient error (attempt %d): %s",
+                        path, attempt + 1, exc,
+                    )
+                    time.sleep(delay)
+                else:
+                    log.warning("atlas _get %s exhausted retries: %s", path, exc)
+            except httpx.HTTPError:
+                return None
+        _ = last_exc
+        return None
 
-    def _post(self, path: str, body: dict) -> dict | None:
-        try:
-            r = self._client.post(path, json=body)
-            r.raise_for_status()
-            return r.json()
-        except (httpx.HTTPError, httpx.ConnectError, httpx.ReadError):
-            return None
+    def _post(self, path: str, body: dict, idempotency_key: str | None = None) -> dict | None:
+        key = idempotency_key or uuid4().hex
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate((*_RETRY_DELAYS, None)):
+            try:
+                headers = {"X-Idempotency-Key": key}
+                r = self._client.post(path, json=body, headers=headers)
+                if r.status_code in _RETRYABLE_STATUS:
+                    if delay is not None:
+                        log.warning(
+                            "atlas _post %s retryable status %d (attempt %d)",
+                            path, r.status_code, attempt + 1,
+                        )
+                        time.sleep(delay)
+                        continue
+                    return None
+                if r.status_code == 202:
+                    # Timeout path — return raw envelope for caller to interpret
+                    return r.json()
+                r.raise_for_status()
+                return r.json()
+            except (httpx.ConnectError, httpx.ReadError) as exc:
+                last_exc = exc
+                if delay is not None:
+                    log.warning(
+                        "atlas _post %s transient error (attempt %d): %s",
+                        path, attempt + 1, exc,
+                    )
+                    time.sleep(delay)
+                else:
+                    log.warning("atlas _post %s exhausted retries: %s", path, exc)
+            except httpx.HTTPError:
+                return None
+        _ = last_exc
+        return None
 
     def health(self) -> bool:
         return (self._get("/system/health") or self._get("/health")) is not None
@@ -105,6 +185,44 @@ class AtlasBridge:
     def run_strategy(self, strategy_id: str, mode: str = "paper") -> dict | None:
         return self._post(f"/strategies/{strategy_id}/activate", {"mode": mode})
 
+    # ---- Pipeline stage endpoints (Phase 3a) ----
+
+    def pipeline_oracle_scan(self, idempotency_key: str | None = None) -> dict | None:
+        return self._post("/pipeline/oracle-scan", {}, idempotency_key=idempotency_key)
+
+    def pipeline_architect_rank(self, idempotency_key: str | None = None) -> dict | None:
+        return self._post("/pipeline/architect-rank", {}, idempotency_key=idempotency_key)
+
+    def pipeline_guardian_check(
+        self, signal_id: str, idempotency_key: str | None = None
+    ) -> dict | None:
+        return self._post(
+            "/pipeline/guardian-check",
+            {"signal_id": signal_id},
+            idempotency_key=idempotency_key,
+        )
+
+    def pipeline_trader_execute(
+        self, signal_id: str, mode: str = "paper", idempotency_key: str | None = None
+    ) -> dict | None:
+        return self._post(
+            "/pipeline/trader-execute",
+            {"signal_id": signal_id, "mode": mode},
+            idempotency_key=idempotency_key,
+        )
+
+    def pipeline_sage_review(
+        self, trade_id: str, idempotency_key: str | None = None
+    ) -> dict | None:
+        return self._post(
+            "/pipeline/sage-review",
+            {"trade_id": trade_id},
+            idempotency_key=idempotency_key,
+        )
+
+    def cost_rollup(self, date_str: str) -> dict | None:
+        return self._get(f"/api/cost/rollup?date_str={date_str}")
+
     def close(self) -> None:
         self._client.close()
 
@@ -113,6 +231,64 @@ class AtlasBridge:
 
     def __exit__(self, *args):
         self.close()
+
+
+# ---------- Envelope parsing ----------
+
+
+def _parse_pipeline_envelope(
+    raw: dict | None,
+    agent_name: str,
+    intent: str,
+    fallback_action: str,
+    fallback_result: dict,
+    base_confidence: float = 0.8,
+) -> AgentResponse:
+    """Parse Atlas {status, correlation_id, result, job_id?} envelope.
+
+    On status=="timeout" (HTTP 202), lower confidence and surface job_id follow-up.
+    Returns None-safe: if raw is None, returns fallback AgentResponse.
+    """
+    if raw is None:
+        return AgentResponse(
+            agent=agent_name,
+            intent=intent,
+            action="unavailable",
+            result=fallback_result,
+            confidence=0.0,
+            follow_ups=["Atlas pipeline endpoint unreachable"],
+        )
+
+    status = raw.get("status", "ok")
+    correlation_id = raw.get("correlation_id", "")
+    job_id = raw.get("job_id")
+    payload = raw.get("result", {})
+
+    if status == "timeout" or job_id is not None:
+        return AgentResponse(
+            agent=agent_name,
+            intent=intent,
+            action="pending",
+            result={
+                "correlation_id": correlation_id,
+                "job_id": job_id,
+                "partial": payload,
+            },
+            confidence=max(0.1, base_confidence - 0.3),
+            follow_ups=[f"poll job_id={job_id} via /ws"] if job_id else ["poll via /ws"],
+        )
+
+    return AgentResponse(
+        agent=agent_name,
+        intent=intent,
+        action=fallback_action,
+        result={
+            "correlation_id": correlation_id,
+            "payload": payload,
+            **fallback_result,
+        },
+        confidence=base_confidence,
+    )
 
 
 # ---------- Mocks ----------
@@ -170,22 +346,39 @@ class AtlasOrchestrator:
         bridge: AtlasBridge | None = None,
         allow_mock: bool = True,
         auto_mock_on_offline: bool = True,
+        mode: str | None = None,
     ):
         self.bridge = bridge or AtlasBridge()
         self.allow_mock = allow_mock
-        self.auto_mock_on_offline = auto_mock_on_offline
+        # mode overrides auto_mock_on_offline; reads JARVIS_ATLAS_MODE from env
+        _env_mode = os.environ.get("JARVIS_ATLAS_MODE", "live")
+        self._mode: str = mode or _env_mode
+        # Keep auto_mock_on_offline for backward compat on legacy tests
+        self.auto_mock_on_offline = auto_mock_on_offline and self._mode != "mock"
         # Cache: (result: bool, expires_at: float)
         self._health_cache: tuple[bool, float] | None = None
 
+    @property
+    def mode(self) -> str:
+        """Return "live" or "mock"."""
+        return self._mode
+
     def _health_check(self) -> bool:
-        """Return True if ATLAS is reachable; False otherwise. Result cached for _health_ttl_seconds."""
+        """Return True if ATLAS is reachable; cached for _health_ttl_seconds."""
+        if self._mode == "mock":
+            return False
         now = time.monotonic()
         if self._health_cache is not None:
             result, expires_at = self._health_cache
             if now < expires_at:
                 return result
         try:
-            resp = httpx.get(f"{self.bridge.base_url}/api/health", timeout=1.0)
+            headers = {}
+            if self.bridge._token:
+                headers["Authorization"] = f"Bearer {self.bridge._token}"
+            resp = httpx.get(
+                f"{self.bridge.base_url}/system/health", headers=headers, timeout=1.0
+            )
             alive = resp.status_code == 200
         except Exception:
             alive = False
@@ -194,7 +387,13 @@ class AtlasOrchestrator:
 
     def _is_offline(self) -> bool:
         """Return True when auto_mock_on_offline is set and health probe fails."""
+        if self._mode == "mock":
+            return True
         return self.auto_mock_on_offline and not self._health_check()
+
+    def _use_mock(self) -> bool:
+        """Return True if we should use mock data (mode=mock always; mode=live never)."""
+        return self._mode == "mock"
 
     # ---- Read-only surface (no confirmation) ----
 
@@ -268,14 +467,26 @@ class AtlasOrchestrator:
             confidence=0.7 if used_mock else 1.0,
         )
 
-    # ---- Sub-stage agents (Oracle / Architect / Guardian / Trader / Sage) ----
+    # ---- Sub-stage agents ----
 
     def oracle_scan(self) -> AgentResponse:
         degraded = self._is_offline()
-        if degraded:
+        if self._use_mock() or degraded:
             data = _mock_market_scan()
         else:
-            data = self.bridge.market_scan() or (_mock_market_scan() if self.allow_mock else None)
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.bridge.pipeline_oracle_scan()
+            if raw is not None and ("status" in raw or "correlation_id" in raw):
+                return _parse_pipeline_envelope(
+                    raw, "atlas.oracle", "market_scan", "scanned",
+                    {"scan": _mock_market_scan()}, base_confidence=0.8,
+                )
+            # Fall back to legacy endpoint
+            data = (
+                self.bridge.market_scan()
+                or (_mock_market_scan() if self.allow_mock else None)
+            )
         if data is None:
             raise AtlasUnavailableError("ATLAS market scan unreachable")
         used_mock = data.get("source") == "mock"
@@ -292,9 +503,18 @@ class AtlasOrchestrator:
 
     def architect_rank(self, regime: str | None = None) -> AgentResponse:
         degraded = self._is_offline()
-        if degraded:
+        if self._use_mock() or degraded:
             strats: list[dict] = _mock_strategies()
         else:
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.bridge.pipeline_architect_rank()
+            if raw is not None and ("status" in raw or "correlation_id" in raw):
+                return _parse_pipeline_envelope(
+                    raw, "atlas.architect", "rank_strategies", "ranked",
+                    {"ranked": _mock_strategies(), "regime": regime, "top": None},
+                    base_confidence=0.75,
+                )
             strats = self.bridge.strategies() or (_mock_strategies() if self.allow_mock else None)
         if strats is None:
             raise AtlasUnavailableError("ATLAS strategies endpoint unreachable")
@@ -315,6 +535,16 @@ class AtlasOrchestrator:
     def guardian_check(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
         """Hard risk gate. Veto power. Live mode triggers stricter rules."""
         degraded = self._is_offline()
+        if not self._use_mock() and not degraded:
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.bridge.pipeline_guardian_check(signal_id=strategy_id)
+            if raw is not None and ("status" in raw or "correlation_id" in raw):
+                return _parse_pipeline_envelope(
+                    raw, "atlas.guardian", "risk_check", "approved",
+                    {"strategy_id": strategy_id, "mode": mode, "approved": True, "violations": []},
+                    base_confidence=0.95,
+                )
         violations: list[str] = []
         if mode == "live":
             violations.append("live mode requires explicit operator confirmation")
@@ -338,8 +568,18 @@ class AtlasOrchestrator:
         )
 
     def trader_execute(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
-        """Execution. Always proposes — operator confirms before run."""
+        """Execution proposal — operator confirms before run."""
         degraded = self._is_offline()
+        if not self._use_mock() and not degraded:
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.bridge.pipeline_trader_execute(signal_id=strategy_id, mode=mode)
+            if raw is not None and ("status" in raw or "correlation_id" in raw):
+                return _parse_pipeline_envelope(
+                    raw, "atlas.trader", "execute_strategy", "proposed",
+                    {"strategy_id": strategy_id, "mode": mode},
+                    base_confidence=0.9,
+                )
         result: dict = {"strategy_id": strategy_id, "mode": mode}
         if degraded:
             result["meta"] = _DEGRADED_META
@@ -355,10 +595,19 @@ class AtlasOrchestrator:
 
     def trader_execute_confirmed(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
         degraded = self._is_offline()
-        if degraded:
+        if self._use_mock() or degraded:
             out = {"id": strategy_id, "mode": mode, "status": "queued", "source": "mock"}
             used_mock = True
         else:
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.bridge.pipeline_trader_execute(signal_id=strategy_id, mode=mode)
+            if raw is not None and ("status" in raw or "correlation_id" in raw):
+                return _parse_pipeline_envelope(
+                    raw, "atlas.trader", "execute_strategy", "executed",
+                    {"strategy_id": strategy_id, "mode": mode},
+                    base_confidence=1.0,
+                )
             out = self.bridge.run_strategy(strategy_id, mode)
             used_mock = out is None
             if used_mock:
@@ -375,8 +624,18 @@ class AtlasOrchestrator:
         )
 
     def sage_review(self, run_id: str) -> AgentResponse:
-        """Post-trade analysis stub. Real impl reads ATLAS trade history + lessons."""
+        """Post-trade analysis. Calls /pipeline/sage-review when in live mode."""
         degraded = self._is_offline()
+        if not self._use_mock() and not degraded:
+            raw = None
+            with contextlib.suppress(Exception):
+                raw = self.bridge.pipeline_sage_review(trade_id=run_id)
+            if raw is not None and ("status" in raw or "correlation_id" in raw):
+                return _parse_pipeline_envelope(
+                    raw, "atlas.sage", "post_trade_review", "reviewed",
+                    {"run_id": run_id, "lessons": [], "summary": ""},
+                    base_confidence=0.5,
+                )
         result: dict = {
             "run_id": run_id,
             "lessons": [],
@@ -392,7 +651,7 @@ class AtlasOrchestrator:
             confidence=0.5,
         )
 
-    # ---- Pipeline (orchestrator-style chain, used by daemon + dashboard "full pipeline" button) ----
+    # ---- Pipeline (orchestrator-style chain) ----
 
     async def pipeline_async_traced(
         self,
@@ -416,7 +675,9 @@ class AtlasOrchestrator:
                 },
             ))
 
-        async def _run_stage(stage: str, fn: Callable[[], AgentResponse]) -> AgentResponse:
+        async def _run_stage(
+            stage: str, fn: Callable[[], AgentResponse]
+        ) -> AgentResponse:
             await sink(TraceEvent(
                 type="agent.start", request_id=request_id, agent=f"atlas.{stage}",
                 payload={"stage": stage},

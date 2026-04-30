@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 class _MailBackend(Protocol):
     def list_unread(self, max_results: int = 25) -> list[dict]: ...
+    def list_recent(self, max_results: int = 25) -> list[dict]: ...
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]: ...
     def get_message(self, msg_id: str) -> dict: ...
     def draft_reply(self, msg_id: str, body: str) -> dict: ...
     def send(self, to: str, subject: str, body: str) -> dict: ...
@@ -90,18 +92,27 @@ class MultiMailProvider:
     # ---------- mail methods (Protocol subset) ----------
 
     def list_unread(self, max_results: int = 25) -> list[dict]:
+        return self._fan_out("list_unread", max_results, lambda be, n: be.list_unread(n))
+
+    def list_recent(self, max_results: int = 25) -> list[dict]:
+        return self._fan_out("list_recent", max_results, lambda be, n: be.list_recent(n))
+
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]:
+        return self._fan_out(
+            "search_mail", max_results, lambda be, n: be.search_mail(query, n)
+        )
+
+    def _fan_out(self, op_name: str, max_results: int, call) -> list[dict]:
         merged: list[dict] = []
         per_account = max(1, max_results // max(len(self._accounts), 1))
         for label, acc in self._accounts.items():
             try:
-                items = acc.backend.list_unread(per_account)
+                items = call(acc.backend, per_account)
             except Exception as exc:
-                logger.warning("list_unread failed for %s: %s", label, exc)
+                logger.warning("%s failed for %s: %s", op_name, label, exc)
                 continue
             for item in items:
                 merged.append({**item, "id": f"{label}:{item['id']}", "account": label})
-        # Sort newest-first by ISO-8601 date when present; missing dates sink
-        # to the bottom but order within the same backend is preserved.
         merged.sort(key=lambda m: m.get("date") or "", reverse=True)
         return merged[:max_results]
 
