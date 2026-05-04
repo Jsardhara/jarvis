@@ -156,10 +156,7 @@ def _apply_sm2(
     else:
         new_interval = round(interval * ease_factor)
 
-    if rating == _RATING_EASY:
-        new_ease = ease_factor + 0.15
-    else:
-        new_ease = ease_factor
+    new_ease = ease_factor + 0.15 if rating == _RATING_EASY else ease_factor
 
     return new_ease, new_interval, repetitions + 1
 

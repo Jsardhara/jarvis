@@ -17,10 +17,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 
 def _db_path() -> Path:
     state_dir = os.environ.get("JARVIS_STATE_DIR")
-    if state_dir:
-        p = Path(state_dir)
-    else:
-        p = Path(__file__).resolve().parents[2] / "state"
+    p = Path(state_dir) if state_dir else Path(__file__).resolve().parents[2] / "state"
     p.mkdir(parents=True, exist_ok=True)
     return p / "study.db"
 

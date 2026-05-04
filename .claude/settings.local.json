@@ -54,7 +54,10 @@
       "Read(//c/Users/jyot2/atlas/**)",
       "Bash(find C:\\\\\\\\Users\\\\\\\\jyot2\\\\\\\\jarvis -name \"CLAUDE.md\" -o -name \"README.md\")",
       "Bash(awk '{print $2}')",
-      "Bash(docker exec *)"
+      "Bash(docker exec *)",
+      "Bash(powershell -Command \"Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | Select-Object Name,Id\")",
+      "Bash(powershell -Command \"Start-Process 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe'\")",
+      "Bash(grep -vE \"AtlasWsClient disconnected|^$\")"
     ]
   }
 }

@@ -137,13 +137,12 @@ def _next_exam_within_days(
             continue
         if start_dt.tzinfo is None:
             start_dt = start_dt.replace(tzinfo=UTC)
-        if now <= start_dt <= cutoff:
-            if soonest_dt is None or start_dt < soonest_dt:
-                soonest_dt = start_dt
-                soonest = {
-                    "course": rec.get("course", "Unknown"),
-                    "in_hours": round((start_dt - now).total_seconds() / 3600, 1),
-                }
+        if now <= start_dt <= cutoff and (soonest_dt is None or start_dt < soonest_dt):
+            soonest_dt = start_dt
+            soonest = {
+                "course": rec.get("course", "Unknown"),
+                "in_hours": round((start_dt - now).total_seconds() / 3600, 1),
+            }
 
     return soonest
 
@@ -278,7 +277,7 @@ def _glance_line(
     tempo: dict[str, Any] | None,
     scholar: dict[str, Any] | None,
     atlas: dict[str, Any] | None,
-    now: datetime,
+    _now: datetime,
 ) -> str:
     parts: list[str] = []
     if tempo:

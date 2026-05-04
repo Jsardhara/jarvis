@@ -267,7 +267,6 @@ def rotate_inbox(state_dir: Path | None = None) -> int:
         return 0
 
     today = date.today()
-    cutoff_gz = today.replace(day=today.day)  # reference point
 
     lines = inbox.read_text(encoding="utf-8").splitlines()
     keep: list[str] = []

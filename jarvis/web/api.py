@@ -308,11 +308,24 @@ def make_app(
     register_inbox_listener(_push_inbox_event)
 
     app = FastAPI(title="Jarvis API", version="0.2.0")
+
+    # CORS — env-driven so tailnet / LAN origins can be allowed without code changes.
+    # JARVIS_CORS_ORIGINS: comma-separated explicit origins (overrides default).
+    # JARVIS_CORS_REGEX: regex for tailnet/LAN ranges (e.g. r"https?://.*\.ts\.net(:\d+)?").
+    import os as _os
+    _origins_env = _os.environ.get("JARVIS_CORS_ORIGINS", "")
+    _origins = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
+    _origin_regex = _os.environ.get("JARVIS_CORS_REGEX") or None
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://localhost:3001"],
+        allow_origins=_origins,
+        allow_origin_regex=_origin_regex,
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_credentials=True,
     )
 
     @app.on_event("shutdown")

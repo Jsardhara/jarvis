@@ -1,8 +1,10 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { LayoutShell } from "@/components/layout-shell";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ServiceWorkerRegister } from "@/components/sw-register";
+import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "sonner";
 
 const jetbrainsMono = JetBrains_Mono({
@@ -21,6 +23,22 @@ const spaceGrotesk = Space_Grotesk({
 export const metadata: Metadata = {
   title: "JARVIS // OPS",
   description: "Mission control — orchestrator + agent fleet",
+  manifest: "/manifest.webmanifest",
+  applicationName: "Jarvis",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Jarvis",
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0a0e14",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -28,7 +46,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" suppressHydrationWarning className={`dark ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}>
       <body className="antialiased">
         <ThemeProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <ServiceWorkerRegister />
+          <AuthGate>
+            <LayoutShell>{children}</LayoutShell>
+          </AuthGate>
           <Toaster
             theme="dark"
             position="bottom-right"

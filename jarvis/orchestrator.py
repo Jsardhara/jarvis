@@ -10,6 +10,7 @@ Atlas pipeline emits per-stage trace events for sub-flow swimlane rendering.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -33,10 +34,8 @@ async def _noop_sink(_event: TraceEvent) -> None:
 
 def _push_crit_inbox(event: InboxEvent) -> None:
     """Persist a crit inbox event from the supervisor directly to state."""
-    try:
+    with contextlib.suppress(Exception):  # pragma: no cover — belt-and-suspenders
         append_inbox(event)
-    except Exception:  # pragma: no cover — belt-and-suspenders
-        pass
 
 
 class Orchestrator:
@@ -190,4 +189,3 @@ class Orchestrator:
             tier=tier,
             verification_status=resp.verification.get("status"),
         )
-        return resp

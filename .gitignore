@@ -38,3 +38,6 @@ Thumbs.db
 *.pid
 *.log
 .forge-worktrees/
+
+# pnpm install temp leftovers
+_tmp_*
