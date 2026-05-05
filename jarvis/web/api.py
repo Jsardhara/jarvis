@@ -19,7 +19,15 @@ from typing import Any
 from uuid import uuid4
 
 try:
-    from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+    from fastapi import (
+        FastAPI,
+        File,
+        HTTPException,
+        Request,
+        UploadFile,
+        WebSocket,
+        WebSocketDisconnect,
+    )
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import StreamingResponse
 
@@ -28,6 +36,12 @@ except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
 from .. import config  # noqa: F401  side-effect: load_dotenv() so APPLE_ID/GMAIL_* reach subsystems
+from ..chat_turns import (
+    ChatTurnRecord,
+    append_turn,
+    read_recent,
+    user_id_from_token,
+)
 from ..contract import AgentLogEntry, Confirmation, InboxEvent, Task, TraceEvent
 from ..cost import daily_rollup
 from ..memory import OperatorPreferences, load_preferences, save_preferences
@@ -324,7 +338,6 @@ def make_app(
     )
 
     if _AUTH_TOKEN:
-        from fastapi import Request
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.responses import JSONResponse
 
@@ -1178,22 +1191,84 @@ def make_app(
             _jarvis_chat["instance"] = JarvisChat(registry=reg)
         return _jarvis_chat["instance"]
 
+    def _bearer_user_id(request: Request) -> str:
+        header = request.headers.get("authorization", "")
+        token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else ""
+        return user_id_from_token(token)
+
     @app.post("/api/jarvis/chat")
-    async def jarvis_chat(payload: dict[str, Any]) -> StreamingResponse:
+    async def jarvis_chat(payload: dict[str, Any], request: Request) -> StreamingResponse:
         message = str(payload.get("message", "")).strip()
         if not message:
             raise HTTPException(status_code=400, detail="message required")
         chat = _get_jarvis()
+        user_id = _bearer_user_id(request)
+        turn_id = uuid4().hex
 
         async def gen():
+            assistant_buf: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            tool_call_index: dict[str, int] = {}
+            model = ""
+            cost_usd = 0.0
+            duration_ms = 0
             try:
                 async for ev in chat.stream(message):
-                    line = json.dumps({"type": ev.type, **ev.payload}, default=str)
+                    if ev.type == "text":
+                        assistant_buf.append(str(ev.payload.get("delta", "")))
+                    elif ev.type == "model":
+                        model = str(ev.payload.get("model", ""))
+                    elif ev.type == "tool_use":
+                        tool_use_id = str(ev.payload.get("tool_use_id", ""))
+                        tool_call_index[tool_use_id] = len(tool_calls)
+                        tool_calls.append(
+                            {
+                                "tool_use_id": tool_use_id,
+                                "agent": str(ev.payload.get("agent", "")),
+                                "action": str(ev.payload.get("action", "")),
+                                "args": ev.payload.get("args") or {},
+                                "result": None,
+                            }
+                        )
+                    elif ev.type == "tool_result":
+                        tool_use_id = str(ev.payload.get("tool_use_id", ""))
+                        if tool_use_id in tool_call_index:
+                            tool_calls[tool_call_index[tool_use_id]]["result"] = {
+                                "text": str(ev.payload.get("text", "")),
+                                "is_error": bool(ev.payload.get("is_error", False)),
+                            }
+                    elif ev.type == "done":
+                        if isinstance(ev.payload.get("total_cost_usd"), (int, float)):
+                            cost_usd = float(ev.payload["total_cost_usd"])
+                        if isinstance(ev.payload.get("duration_ms"), (int, float)):
+                            duration_ms = int(ev.payload["duration_ms"])
+
+                    line = json.dumps(
+                        {"type": ev.type, "turn_id": turn_id, **ev.payload}, default=str
+                    )
                     yield f"data: {line}\n\n"
             except Exception as exc:  # pragma: no cover
                 log.exception("jarvis chat stream failed")
                 err = json.dumps({"type": "error", "message": str(exc)})
                 yield f"data: {err}\n\n"
+                return
+
+            try:
+                append_turn(
+                    ChatTurnRecord(
+                        user_id=user_id,
+                        turn_id=turn_id,
+                        user_text=message,
+                        assistant_text="".join(assistant_buf),
+                        tool_calls=tool_calls,
+                        model=model,
+                        cost_usd=cost_usd,
+                        duration_ms=duration_ms,
+                        ts=datetime.now(UTC).isoformat(),
+                    )
+                )
+            except Exception:
+                log.exception("failed to persist chat turn")
 
         return StreamingResponse(
             gen(),
@@ -1203,6 +1278,15 @@ def make_app(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @app.get("/api/jarvis/turns")
+    async def jarvis_turns(request: Request, limit: int = 50) -> dict[str, Any]:
+        """Recent chat turns for the bearer-derived user, oldest-first."""
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be 1-500")
+        user_id = _bearer_user_id(request)
+        records = read_recent(user_id, limit=limit)
+        return {"data": [asdict(r) for r in records], "error": None}
 
     @app.post("/api/jarvis/terminal")
     async def jarvis_terminal_chat(payload: dict[str, Any]) -> dict[str, Any]:

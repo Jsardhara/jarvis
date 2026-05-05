@@ -94,6 +94,61 @@ interface PendingConfirmation {
   turnId: string;
 }
 
+// ─── Server turn shape (from /api/jarvis/turns) ──────────────────────────────
+
+interface ServerToolCall {
+  tool_use_id: string;
+  agent: string;
+  action: string;
+  args: Record<string, unknown>;
+  result: { text: string; is_error: boolean } | null;
+}
+
+interface ServerTurn {
+  user_id: string;
+  turn_id: string;
+  user_text: string;
+  assistant_text: string;
+  tool_calls: ServerToolCall[];
+  model: string;
+  cost_usd: number;
+  duration_ms: number;
+  ts: string;
+}
+
+function serverTurnToTurn(s: ServerTurn): Turn {
+  const toolCalls: ToolCall[] = s.tool_calls.map((c) => {
+    let parsed: AgentResponse | undefined;
+    if (c.result?.text) {
+      try {
+        parsed = JSON.parse(c.result.text) as AgentResponse;
+      } catch {
+        parsed = undefined;
+      }
+    }
+    return {
+      toolUseId: c.tool_use_id,
+      agent: c.agent,
+      action: c.action,
+      args: c.args ?? {},
+      result: c.result
+        ? { text: c.result.text, isError: c.result.is_error, parsed }
+        : undefined,
+    };
+  });
+  return {
+    id: s.turn_id,
+    user: s.user_text,
+    text: s.assistant_text,
+    toolCalls,
+    status: "done",
+    thinking: "",
+    costUsd: s.cost_usd,
+    durationMs: s.duration_ms,
+    model: s.model || undefined,
+  };
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const SLASH_OVERRIDE = /^\s*\/(opus|sonnet)\s+/i;
@@ -237,22 +292,49 @@ export default function JarvisPage() {
     }
   }, [recallQuery, recallBusy]);
 
-  // Restore saved chat history on mount (client-only)
+  // Restore saved chat history on mount: prefer server (cross-device),
+  // fall back to localStorage when offline.
   useEffect(() => {
     if (typeof window === "undefined" || restoredRef.current) return;
     restoredRef.current = true;
-    try {
-      const raw = window.localStorage.getItem(TURNS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      const restored = parsed
-        .filter((t): t is Turn => typeof t === "object" && t !== null && "id" in t)
-        .map((t) => (t.status === "streaming" ? { ...t, status: "done" as const } : t));
-      if (restored.length > 0) setTurns(restored);
-    } catch {
-      // ignore — corrupt storage just starts fresh
-    }
+
+    const fromLocal = (): Turn[] => {
+      try {
+        const raw = window.localStorage.getItem(TURNS_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .filter((t): t is Turn => typeof t === "object" && t !== null && "id" in t)
+          .map((t) => (t.status === "streaming" ? { ...t, status: "done" as const } : t));
+      } catch {
+        return [];
+      }
+    };
+
+    const fetchServer = async () => {
+      try {
+        const res = await apiFetch(`/api/jarvis/turns?limit=${TURNS_PERSIST_MAX}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = (await res.json()) as { data?: ServerTurn[]; error?: string | null };
+        if (body.error || !Array.isArray(body.data)) throw new Error(body.error ?? "bad shape");
+        const mapped = body.data.map(serverTurnToTurn);
+        if (mapped.length > 0) {
+          setTurns(mapped);
+          return true;
+        }
+      } catch {
+        return false;
+      }
+      return false;
+    };
+
+    void fetchServer().then((ok) => {
+      if (!ok) {
+        const local = fromLocal();
+        if (local.length > 0) setTurns(local);
+      }
+    });
   }, []);
 
   // Persist chat history whenever it changes
