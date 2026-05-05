@@ -14,6 +14,7 @@
 
 import { CSSProperties, memo, useCallback, useMemo, useState } from "react";
 import { Tag } from "@/components/ops/Tag";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import type { Trade, TradeStatus } from "@/hooks/useTradeBlotter";
 import {
   TradeTableFilters,
@@ -51,21 +52,21 @@ function formatTime(iso: string | undefined): string {
   } as Intl.DateTimeFormatOptions);
 }
 
-function formatPrice(val: number | undefined): string {
-  if (val === undefined) return "—";
+function formatPrice(val: number | null | undefined): string {
+  if (val == null || !Number.isFinite(val)) return "—";
   if (val >= 1000)
     return `$${val.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
   return `$${val.toFixed(4)}`;
 }
 
-function formatPnl(val: number | undefined): string {
-  if (val === undefined) return "—";
+function formatPnl(val: number | null | undefined): string {
+  if (val == null || !Number.isFinite(val)) return "—";
   const sign = val >= 0 ? "+" : "";
   return `${sign}$${val.toFixed(2)}`;
 }
 
-function pnlColor(val: number | undefined): string {
-  if (val === undefined) return "var(--ops-fg-dim)";
+function pnlColor(val: number | null | undefined): string {
+  if (val == null || !Number.isFinite(val)) return "var(--ops-fg-dim)";
   if (val > 0) return "var(--ops-ok)";
   if (val < 0) return "var(--ops-crit)";
   return "var(--ops-fg)";
@@ -154,18 +155,82 @@ const TradeRow = memo(function TradeRow({ trade, onSelect }: RowProps) {
         </span>
       </td>
       <td style={{ ...cellStyle, textTransform: "uppercase", fontSize: "0.68rem" }}>{trade.side}</td>
-      <td style={{ ...cellStyle, textAlign: "right" }}>{trade.size.toFixed(4)}</td>
+      <td style={{ ...cellStyle, textAlign: "right" }}>
+        {Number.isFinite(trade.size) ? (trade.size as number).toFixed(4) : "—"}
+      </td>
       <td style={{ ...cellStyle, textAlign: "right", color: "var(--ops-fg-mute)" }}>
-        {trade.leverage !== undefined ? `${trade.leverage}x` : "—"}
+        {trade.leverage != null ? `${trade.leverage}x` : "—"}
       </td>
       <td style={{ ...cellStyle, textAlign: "right" }}>{formatPrice(trade.entry_price)}</td>
       <td style={{ ...cellStyle, textAlign: "right", color: "var(--ops-fg-mute)" }}>{formatPrice(trade.exit_price)}</td>
-      <td style={{ ...cellStyle, textAlign: "right", color: pnlColor(trade.pnl_usd), fontWeight: trade.pnl_usd !== undefined ? 600 : 400 }}>
+      <td style={{ ...cellStyle, textAlign: "right", color: pnlColor(trade.pnl_usd), fontWeight: trade.pnl_usd != null ? 600 : 400 }}>
         {formatPnl(trade.pnl_usd)}
       </td>
-      <td style={cellStyle}><Tag kind={STATUS_TAG[trade.status]}>{trade.status.toUpperCase()}</Tag></td>
+      <td style={cellStyle}>
+        <Tag kind={STATUS_TAG[trade.status] ?? "default"}>{String(trade.status ?? "").toUpperCase() || "—"}</Tag>
+      </td>
       <td style={cellStyle}><Tag kind={trade.is_paper ? "amber" : "ok"}>{trade.is_paper ? "PAPER" : "LIVE"}</Tag></td>
     </tr>
+  );
+});
+
+// ─── Mobile card row (memoized) ───────────────────────────────────────────────
+
+const MobileTradeCard = memo(function MobileTradeCard({ trade, onSelect }: RowProps) {
+  const direction = trade.direction ?? (trade.side === "buy" ? "LONG" : "SHORT");
+  const timeStr = formatTime(trade.closed_at ?? trade.opened_at ?? trade.created_at);
+  const dirBg = direction === "LONG"
+    ? "color-mix(in oklch, var(--ops-ok) 15%, transparent)"
+    : "color-mix(in oklch, var(--ops-crit) 15%, transparent)";
+  const dirFg = direction === "LONG" ? "var(--ops-ok)" : "var(--ops-crit)";
+
+  return (
+    <button
+      onClick={() => onSelect(trade)}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        padding: "0.75rem",
+        margin: 0,
+        border: 0,
+        borderBottom: "1px solid var(--ops-line-faint)",
+        background: "transparent",
+        fontFamily: "var(--ops-mono)",
+        cursor: "pointer",
+        color: "var(--ops-fg)",
+      } as CSSProperties}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" } as CSSProperties}>
+        <span style={{ fontSize: "0.85rem", fontWeight: 700 } as CSSProperties}>{trade.pair}</span>
+        <span style={{ display: "flex", gap: "0.35rem", alignItems: "center" } as CSSProperties}>
+          <span style={{
+            padding: "0.1rem 0.4rem", borderRadius: 2, fontSize: "0.6rem",
+            fontWeight: 700, letterSpacing: "0.06em", background: dirBg, color: dirFg,
+          } as CSSProperties}>{direction}</span>
+          {trade.leverage != null && (
+            <span style={{ fontSize: "0.65rem", color: "var(--ops-fg-mute)" } as CSSProperties}>{trade.leverage}x</span>
+          )}
+        </span>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginTop: "0.35rem" } as CSSProperties}>
+        <span style={{ fontSize: "1rem", fontWeight: 600, color: pnlColor(trade.pnl_usd) } as CSSProperties}>
+          {formatPnl(trade.pnl_usd)}
+        </span>
+        <span style={{ display: "flex", gap: "0.35rem", alignItems: "center" } as CSSProperties}>
+          <Tag kind={STATUS_TAG[trade.status] ?? "default"}>{String(trade.status ?? "").toUpperCase() || "—"}</Tag>
+          <Tag kind={trade.is_paper ? "amber" : "ok"}>{trade.is_paper ? "PAPER" : "LIVE"}</Tag>
+        </span>
+      </div>
+
+      <div style={{ marginTop: "0.4rem", fontSize: "0.65rem", color: "var(--ops-fg-dim)", display: "flex", justifyContent: "space-between", gap: "0.5rem", flexWrap: "wrap" } as CSSProperties}>
+        <span>{formatPrice(trade.entry_price)} → {formatPrice(trade.exit_price)}</span>
+        <span>
+          {Number.isFinite(trade.size) ? (trade.size as number).toFixed(4) : "—"} · {timeStr}
+        </span>
+      </div>
+    </button>
   );
 });
 
@@ -218,6 +283,7 @@ export function TradeTable({ trades, onSelectTrade }: TradeTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("time");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [filters, setFilters] = useState<TradeFilterState>(DEFAULT_TRADE_FILTERS);
+  const isMobile = useIsMobile();
 
   const handleSort = useCallback((key: SortKey) => {
     if (key === sortKey) {
@@ -236,6 +302,28 @@ export function TradeTable({ trades, onSelectTrade }: TradeTableProps) {
   const col = (label: string, key: SortKey, align?: "left" | "right") => ({
     label, sortKey: key, current: sortKey, dir: sortDir, onSort: handleSort, align,
   });
+
+  if (isMobile) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" } as CSSProperties}>
+        <TradeTableFilters filters={filters} onChange={setFilters} />
+        <div style={{ flex: 1, overflowY: "auto" } as CSSProperties}>
+          {visible.length === 0 ? (
+            <div style={{ padding: "3rem 1rem", textAlign: "center", fontFamily: "var(--ops-mono)", fontSize: "0.75rem", color: "var(--ops-fg-dim)", lineHeight: 1.6 } as CSSProperties}>
+              <div>No trades yet — Atlas will place paper trades after Oracle finds signals.</div>
+              <div style={{ marginTop: "0.5rem" }}>
+                <a href="/atlas/agents/oracle" style={{ color: "var(--ops-amber)", textDecoration: "underline", fontSize: "0.72rem" } as CSSProperties}>
+                  View Oracle Agent →
+                </a>
+              </div>
+            </div>
+          ) : (
+            visible.map((t) => <MobileTradeCard key={t.trade_id} trade={t} onSelect={onSelectTrade} />)
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, overflow: "hidden" } as CSSProperties}>

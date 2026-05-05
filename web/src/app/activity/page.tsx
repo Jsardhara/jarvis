@@ -231,7 +231,7 @@ export default function ActivityPage() {
         </h1>
 
         {/* Filters */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Select value={filterActor} onValueChange={setFilterActor}>
             <SelectTrigger className="h-7 w-36 text-[10px] font-mono uppercase tracking-wide">
               <SelectValue placeholder="ALL ACTORS" />

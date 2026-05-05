@@ -359,7 +359,7 @@ export default function InboxPage() {
     <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Inbox" }]} />
 
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold flex items-center gap-2">
             <Inbox className="h-5 w-5" />
@@ -378,7 +378,7 @@ export default function InboxPage() {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <Select value={filterAgent} onValueChange={setFilterAgent}>
           <SelectTrigger className="w-40 h-8 text-xs">
             <SelectValue placeholder="All agents" />
@@ -519,7 +519,7 @@ export default function InboxPage() {
                     </div>
 
                     {/* Thread actions */}
-                    <div className="flex items-center gap-2 mt-3 pt-3 border-t">
+                    <div className="flex items-center gap-2 mt-3 pt-3 border-t flex-wrap">
                       <Tip content="Reply to this conversation">
                         <Button
                           size="sm"

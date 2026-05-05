@@ -25,6 +25,7 @@ import {
 } from "@/components/ops";
 
 import { apiFetch } from "@/lib/api-client";
+import { useIsMobile } from "@/hooks/useIsMobile";
 
 // ─── Recall types ─────────────────────────────────────────────────────────────
 
@@ -203,6 +204,7 @@ export default function JarvisPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const restoredRef = useRef(false);
+  const isMobile = useIsMobile();
 
   // Recall state
   const [recallQuery, setRecallQuery] = useState("");
@@ -398,7 +400,7 @@ export default function JarvisPage() {
     <div
       style={{
         display: "grid",
-        gridTemplateColumns: "1fr 280px",
+        gridTemplateColumns: isMobile ? "1fr" : "1fr 280px",
         gap: 0,
         flex: 1,
         minHeight: 0,
@@ -569,7 +571,7 @@ export default function JarvisPage() {
       {/* ── Right rail ────────────────────────────────────────────────────── */}
       <div
         style={{
-          display: "flex",
+          display: isMobile ? "none" : "flex",
           flexDirection: "column",
           gap: 10,
           padding: 12,
@@ -1080,6 +1082,7 @@ function ThinkingPanel({ thinking }: { thinking: string }) {
 // ─── Delegation trace ────────────────────────────────────────────────────────
 
 function DelegationTrace({ calls }: { calls: ToolCall[] }) {
+  const isMobile = useIsMobile();
   return (
     <div
       style={{
@@ -1111,7 +1114,9 @@ function DelegationTrace({ calls }: { calls: ToolCall[] }) {
             key={c.toolUseId}
             style={{
               display: "grid",
-              gridTemplateColumns: "20px 100px 1fr 80px",
+              gridTemplateColumns: isMobile ? "20px 1fr auto" : "20px 100px 1fr 80px",
+              gridTemplateAreas: isMobile ? "'idx agent status' 'idx action action'" : undefined,
+              rowGap: isMobile ? 2 : 0,
               gap: 8,
               padding: "4px 0",
               alignItems: "center",
@@ -1119,7 +1124,7 @@ function DelegationTrace({ calls }: { calls: ToolCall[] }) {
             } as CSSProperties}
           >
             <span
-              style={{ color: "var(--ops-fg-faint)", fontSize: 9 } as CSSProperties}
+              style={{ color: "var(--ops-fg-faint)", fontSize: 9, gridArea: isMobile ? "idx" : undefined } as CSSProperties}
             >
               {String(i + 1).padStart(2, "0")}
             </span>
@@ -1128,6 +1133,8 @@ function DelegationTrace({ calls }: { calls: ToolCall[] }) {
                 display: "flex",
                 alignItems: "center",
                 gap: 5,
+                minWidth: 0,
+                gridArea: isMobile ? "agent" : undefined,
               } as CSSProperties}
             >
               {identity ? (
@@ -1156,18 +1163,21 @@ function DelegationTrace({ calls }: { calls: ToolCall[] }) {
                 gap: 6,
                 color: "var(--ops-fg-mute)",
                 fontSize: 10,
+                minWidth: 0,
+                flexWrap: "wrap",
+                gridArea: isMobile ? "action" : undefined,
               } as CSSProperties}
             >
-              <ArrowRight style={{ width: 10, height: 10 } as CSSProperties} />
-              {c.action || "?"}
+              <ArrowRight style={{ width: 10, height: 10, flexShrink: 0 } as CSSProperties} />
+              <span style={{ wordBreak: "break-word" } as CSSProperties}>{c.action || "?"}</span>
               {needsConfirm && <Tag kind="amber">CONFIRM</Tag>}
               {intent && status === "ok" && (
-                <span style={{ color: "var(--ops-fg-faint)", fontSize: 9 } as CSSProperties}>
+                <span style={{ color: "var(--ops-fg-faint)", fontSize: 9, wordBreak: "break-word" } as CSSProperties}>
                   → {intent}
                 </span>
               )}
             </span>
-            <span style={{ textAlign: "right" } as CSSProperties}>
+            <span style={{ textAlign: "right", gridArea: isMobile ? "status" : undefined } as CSSProperties}>
               {status === "ok" && <Tag kind="ok">✓ DONE</Tag>}
               {status === "running" && <Tag kind="amber">▸ RUN</Tag>}
               {status === "error" && <Tag kind="crit">✕ ERR</Tag>}
