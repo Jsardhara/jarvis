@@ -24,9 +24,7 @@ import {
   SUBSYSTEM_AGENTS,
 } from "@/components/ops";
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const JARVIS_API = process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
+import { apiFetch } from "@/lib/api-client";
 
 // ─── Recall types ─────────────────────────────────────────────────────────────
 
@@ -219,7 +217,7 @@ export default function JarvisPage() {
     setRecallHits(null);
     setRecallError(null);
     try {
-      const res = await fetch(`${JARVIS_API}/api/jarvis/recall`, {
+      const res = await apiFetch(`/api/jarvis/recall`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query: q, top_k: 5 }),
@@ -295,7 +293,7 @@ export default function JarvisPage() {
     abortRef.current = controller;
 
     try {
-      const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
+      const res = await apiFetch(`/api/jarvis/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: raw }),

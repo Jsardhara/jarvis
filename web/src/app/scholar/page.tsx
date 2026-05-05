@@ -548,13 +548,10 @@ export default function ScholarPage() {
       />
 
       <div
-        className="ops-view-body"
+        className="ops-view-body scholar-three-col"
         style={{
-          display: "grid",
-          gridTemplateColumns: "320px 1fr 320px",
-          gridTemplateRows: "100%",
           gap: 0,
-          overflow: "hidden",
+          overflow: "auto",
         } as CSSProperties}
       >
         {/* LEFT — Review Queue */}

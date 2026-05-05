@@ -867,6 +867,64 @@
   .ops-statusbar { display: none; }
 }
 
+/* ─── Responsive grid helpers ───
+   Default (desktop) values match the original inline styles. On narrow
+   viewports the column count collapses so the layout stays readable on
+   iPhone-sized screens.
+*/
+.kpi-grid-5 {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.75rem;
+}
+@media (max-width: 767px) {
+  .kpi-grid-5 { grid-template-columns: repeat(2, 1fr); gap: 0.5rem; }
+}
+
+.hero-kpi-5 {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr 1fr;
+  gap: 8px;
+}
+@media (max-width: 767px) {
+  .hero-kpi-5 { grid-template-columns: repeat(2, 1fr); }
+}
+
+.scholar-three-col {
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  gap: 16px;
+}
+@media (max-width: 1023px) {
+  .scholar-three-col { grid-template-columns: 1fr; gap: 12px; }
+}
+
+.split-2col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+@media (max-width: 639px) {
+  .split-2col { grid-template-columns: 1fr; }
+}
+
+/* Make narrow data tables horizontally scrollable rather than overflowing
+   the viewport. Used inside Panel containers that wrap fixed-width col
+   templates (e.g. trade rows, recall hits). */
+.scroll-x {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* iOS-friendly tap target floor — 44x44pt is Apple's HIG minimum. */
+@media (max-width: 767px) {
+  button, [role="button"], a.ops-button, input[type="submit"] {
+    min-height: 40px;
+  }
+  /* Slightly larger base font so dense console-style UIs are readable. */
+  .ops-app { font-size: 0.95rem; }
+}
+
 /* ═══════════════════════════════════════════════════════════════
    LEGACY ANIMATIONS (kept — used by pipeline + cards)
    ═══════════════════════════════════════════════════════════════ */

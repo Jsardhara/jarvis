@@ -54,7 +54,8 @@ function KpiTile({ label, value, valueColor }: KpiTileProps) {
   );
 }
 
-function formatPnl(value: number): string {
+function formatPnl(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "$0.00";
   const abs = Math.abs(value);
   const sign = value >= 0 ? "+" : "-";
   if (abs >= 1000) {
@@ -63,11 +64,13 @@ function formatPnl(value: number): string {
   return `${sign}$${abs.toFixed(2)}`;
 }
 
-function formatWinRate(value: number): string {
+function formatWinRate(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
   return `${(value * 100).toFixed(0)}%`;
 }
 
-function formatBestTrade(value: number): string {
+function formatBestTrade(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
   if (value === 0) return "$0";
   if (value >= 1000) return `$${(value / 1000).toFixed(1)}k`;
   return `$${value.toFixed(2)}`;
@@ -87,10 +90,8 @@ export function TradeKpiStrip({ stats }: TradeKpiStripProps) {
 
   return (
     <div
+      className="kpi-grid-5"
       style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(5, 1fr)",
-        gap: "0.75rem",
         padding: "0.75rem 1rem",
         borderBottom: "1px solid var(--ops-line)",
         background: "var(--ops-bg-deep)",

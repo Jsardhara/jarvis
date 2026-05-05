@@ -181,14 +181,12 @@ export default function CommandCenterPage() {
     >
       {/* ── Hero strip: orchestrator status ────────────────────────────────── */}
       <div
+        className="hero-kpi-5"
         style={{
           background: "var(--ops-bg-panel)",
           border: "1px solid var(--ops-line)",
           padding: "14px 18px 14px 21px",
           position: "relative",
-          display: "grid",
-          gridTemplateColumns: "1.4fr 1fr 1fr 1fr 1fr",
-          gap: 20,
           alignItems: "center",
         } as CSSProperties}
       >

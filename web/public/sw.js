@@ -1,5 +1,5 @@
 /* Jarvis service worker — cache-first for static, network-first for /api. */
-const VERSION = "v3";
+const VERSION = "v4";
 const STATIC_CACHE = `jarvis-static-${VERSION}`;
 const RUNTIME_CACHE = `jarvis-runtime-${VERSION}`;
 

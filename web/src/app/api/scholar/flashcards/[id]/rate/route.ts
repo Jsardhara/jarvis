@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const BACKEND = process.env.JARVIS_API_URL ?? "http://localhost:8001";
+import { backendBaseUrl, backendHeaders } from "@/lib/jarvis-backend";
 
 export async function POST(
   req: NextRequest,
@@ -9,9 +8,11 @@ export async function POST(
   const { id } = await params;
   try {
     const body: unknown = await req.json();
-    const res = await fetch(`${BACKEND}/api/scholar/flashcards/${id}/rate`, {
+    const headers = backendHeaders();
+    headers.set("Content-Type", "application/json");
+    const res = await fetch(`${backendBaseUrl()}/api/scholar/flashcards/${id}/rate`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
       cache: "no-store",
     });

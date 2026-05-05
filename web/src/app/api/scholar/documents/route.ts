@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-
-const BACKEND = process.env.JARVIS_API_URL ?? "http://localhost:8001";
+import { backendBaseUrl, backendHeaders } from "@/lib/jarvis-backend";
 
 export async function GET() {
   try {
-    const res = await fetch(`${BACKEND}/api/scholar/documents`, { cache: "no-store" });
+    const res = await fetch(`${backendBaseUrl()}/api/scholar/documents`, {
+      cache: "no-store",
+      headers: backendHeaders(),
+    });
     const data: unknown = await res.json();
     return NextResponse.json(data, { status: res.status });
   } catch {
@@ -15,9 +17,10 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.formData();
-    const res = await fetch(`${BACKEND}/api/scholar/documents`, {
+    const res = await fetch(`${backendBaseUrl()}/api/scholar/documents`, {
       method: "POST",
       body,
+      headers: backendHeaders(),
     });
     const data: unknown = await res.json();
     return NextResponse.json(data, { status: res.status });
