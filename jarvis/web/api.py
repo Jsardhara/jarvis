@@ -313,6 +313,51 @@ def make_app(
 
     app = FastAPI(title="Jarvis API", version="0.2.0")
 
+    # Bearer auth — required on every non-health route when JARVIS_API_TOKEN is set.
+    # Falls open (no auth) when the env var is absent so localhost dev still works.
+    # Excludes /api/health for liveness probes, WebSocket upgrades, and CORS preflight.
+    import hmac as _hmac
+    import os as _auth_os
+
+    _AUTH_TOKEN: str = _auth_os.environ.get("JARVIS_API_TOKEN", "") or _auth_os.environ.get(
+        "MC_API_TOKEN", ""
+    )
+
+    if _AUTH_TOKEN:
+        from fastapi import Request
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse
+
+        _OPEN_PATHS = {"/api/health", "/openapi.json", "/docs", "/redoc"}
+
+        class _BearerAuthMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+                # Skip preflight (CORS handles it), liveness, and docs.
+                if request.method == "OPTIONS" or request.url.path in _OPEN_PATHS:
+                    return await call_next(request)
+                # WebSocket upgrades carry token via query param (browsers can't set headers).
+                if request.url.path.startswith("/ws"):
+                    qp_token = request.query_params.get("token", "")
+                    if qp_token and _hmac.compare_digest(qp_token, _AUTH_TOKEN):
+                        return await call_next(request)
+                    return JSONResponse(
+                        {"error": "unauthorized"}, status_code=401
+                    )
+                header = request.headers.get("authorization", "")
+                if not header.startswith("Bearer "):
+                    return JSONResponse(
+                        {"error": "missing or malformed Authorization header"},
+                        status_code=401,
+                    )
+                supplied = header.removeprefix("Bearer ").strip()
+                if not _hmac.compare_digest(supplied, _AUTH_TOKEN):
+                    return JSONResponse(
+                        {"error": "invalid token"}, status_code=401
+                    )
+                return await call_next(request)
+
+        app.add_middleware(_BearerAuthMiddleware)
+
     # CORS — env-driven so tailnet / LAN origins can be allowed without code changes.
     # JARVIS_CORS_ORIGINS: comma-separated explicit origins (overrides default).
     # JARVIS_CORS_REGEX: regex for tailnet/LAN ranges (e.g. r"https?://.*\.ts\.net(:\d+)?").
