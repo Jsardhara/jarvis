@@ -234,6 +234,57 @@ class Forge:
             confidence=0.85,
         )
 
+    def pick_project(self, brief: list[dict] | None = None) -> AgentResponse:
+        """Daily Forge: pick one news story and design a buildable MVP spec."""
+        from . import forge_daily
+
+        try:
+            spec = forge_daily.pick_project(brief or [])
+        except Exception as exc:
+            return AgentResponse(
+                agent="forge",
+                intent="pick_project",
+                action="failed",
+                result={"error": f"{type(exc).__name__}: {exc}"},
+                confidence=0.0,
+            )
+        return AgentResponse(
+            agent="forge",
+            intent="pick_project",
+            action="picked",
+            result=spec.to_dict(),
+            confidence=0.85,
+        )
+
+    def scaffold_daily(self, spec: dict) -> AgentResponse:
+        """Daily Forge: build the picked MVP and push to the mono-repo."""
+        from . import forge_daily
+
+        try:
+            project_spec = forge_daily.ProjectSpec(
+                slug=str(spec.get("slug", "")),
+                title=str(spec.get("title", "")),
+                news_url=str(spec.get("news_url", "")),
+                news_source=str(spec.get("news_source", "")),
+                spec_md=str(spec.get("spec_md", "")),
+            )
+            run = forge_daily.scaffold_daily(project_spec)
+        except Exception as exc:
+            return AgentResponse(
+                agent="forge",
+                intent="scaffold_daily",
+                action="failed",
+                result={"error": f"{type(exc).__name__}: {exc}"},
+                confidence=0.0,
+            )
+        return AgentResponse(
+            agent="forge",
+            intent="scaffold_daily",
+            action=run.status,
+            result=run.to_dict(),
+            confidence=0.9 if run.status == "success" else 0.3,
+        )
+
     def list_runs(self, limit: int = 50) -> AgentResponse:
         """Proxy to runner.list_runs() when supported; return empty list otherwise."""
         runs: list[dict] = []

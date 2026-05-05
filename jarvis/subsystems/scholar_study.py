@@ -180,62 +180,28 @@ _FLASHCARD_SYSTEM = (
 )
 
 
-def _call_claude_summary(text: str, api_key: str) -> dict[str, Any]:
-    import anthropic
+def _call_claude_summary(text: str) -> dict[str, Any]:
+    """Summarise a document via the Pro/Max-routed Claude queue."""
+    from ..claude_queue import submit
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=2048,
+    raw = submit(
         system=_SUMMARY_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": text,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                    {
-                        "type": "text",
-                        "text": "Summarise the document above.",
-                    },
-                ],
-            }
-        ],
+        user=f"Summarise the document below.\n\n---\n\n{text}",
+        model="claude-sonnet-4-6",
     )
-    raw = response.content[0].text if response.content else "{}"
-    return json.loads(raw)
+    return json.loads(raw or "{}")
 
 
-def _call_claude_flashcards(text: str, api_key: str) -> list[dict[str, Any]]:
-    import anthropic
+def _call_claude_flashcards(text: str) -> list[dict[str, Any]]:
+    """Generate flashcards via the Pro/Max-routed Claude queue."""
+    from ..claude_queue import submit
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-sonnet-4-5",
-        max_tokens=4096,
+    raw = submit(
         system=_FLASHCARD_SYSTEM,
-        messages=[
-            {
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": text,
-                        "cache_control": {"type": "ephemeral"},
-                    },
-                    {
-                        "type": "text",
-                        "text": "Generate flashcards for the document above.",
-                    },
-                ],
-            }
-        ],
+        user=f"Generate flashcards for the document below.\n\n---\n\n{text}",
+        model="claude-sonnet-4-6",
     )
-    raw = response.content[0].text if response.content else "[]"
-    result = json.loads(raw)
+    result = json.loads(raw or "[]")
     return result if isinstance(result, list) else []
 
 
@@ -295,7 +261,7 @@ class StudyService:
 
     # ── Summaries ────────────────────────────────────────────────────────────
 
-    def get_summary(self, doc_id: str, api_key: str) -> dict[str, Any]:
+    def get_summary(self, doc_id: str) -> dict[str, Any]:
         with get_session() as session:
             existing = session.scalars(
                 select(StudySummary).where(StudySummary.doc_id == doc_id).limit(1)
@@ -307,7 +273,7 @@ class StudyService:
             if doc is None:
                 raise ValueError(f"document {doc_id!r} not found")
 
-            data = _call_claude_summary(doc.content_text, api_key)
+            data = _call_claude_summary(doc.content_text)
             now = _now()
             summary = StudySummary(
                 id=uuid4().hex,
@@ -329,13 +295,13 @@ class StudyService:
             ).all()
             return [_card_to_dict(r) for r in rows]
 
-    def generate_flashcards(self, doc_id: str, api_key: str) -> list[dict[str, Any]]:
+    def generate_flashcards(self, doc_id: str) -> list[dict[str, Any]]:
         with get_session() as session:
             doc = session.get(StudyDocument, doc_id)
             if doc is None:
                 raise ValueError(f"document {doc_id!r} not found")
 
-            pairs = _call_claude_flashcards(doc.content_text, api_key)
+            pairs = _call_claude_flashcards(doc.content_text)
             today = _today_iso()
             now = _now()
             saved: list[dict[str, Any]] = []

@@ -60,6 +60,32 @@ class Lens:
             confidence=0.85,
         )
 
+    def world_brief(self, window_hours: int = 18) -> AgentResponse:
+        """Unbiased world-news brief from Reuters/AP/BBC wire feeds.
+
+        Returns the last *window_hours* of dedup'd stories sorted newest-first.
+        Used by the daily autonomous Forge routine.
+        """
+        from datetime import UTC, datetime
+
+        from . import news_provider
+
+        items = news_provider.fetch_world_brief(window_hours=window_hours)
+        stories = [it.to_dict() for it in items]
+        return AgentResponse(
+            agent="lens",
+            intent="world_brief",
+            action="fetched",
+            result={
+                "stories": stories,
+                "count": len(stories),
+                "window_hours": window_hours,
+                "fetched_at": datetime.now(UTC).isoformat(),
+                "sources": [src for src, _ in news_provider.FEEDS],
+            },
+            confidence=0.9,
+        )
+
     @staticmethod
     def _to_markdown(query: str, results: list[dict]) -> str:
         lines = [f"# Search: {query}", ""]

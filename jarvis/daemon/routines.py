@@ -156,6 +156,123 @@ def announce_agent(agent_name: str, session: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _append_daily_project(rec: dict[str, Any]) -> None:
+    path = get_settings().state_dir / "daily_projects.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+
+
+def daily_forge_tick(reg: dict[str, Any], notifier: Notifier) -> dict[str, Any]:
+    """Daily autonomous loop: world news → Forge → GitHub.
+
+    Steps:
+      1. lens.world_brief() — last 18h of unbiased wire-service news.
+      2. budget.can_afford(0.50) for pick.
+      3. forge.pick_project(stories) — Opus picks 1 + writes spec.
+      4. budget.can_afford(4.00) for scaffold.
+      5. forge.scaffold_daily(spec) — claude CLI builds + git push.
+      6. log + notify.
+    """
+    from ..subsystems import budget
+
+    started = datetime.now(UTC)
+    rec_base = {"ts": started.isoformat(), "date": started.strftime("%Y-%m-%d")}
+
+    try:
+        lens_desc = reg.get("lens")
+        forge_desc = reg.get("forge")
+        if lens_desc is None or forge_desc is None:
+            raise RuntimeError("registry missing lens or forge")
+
+        # Step 1 — fetch unbiased world brief
+        brief_resp = lens_desc.call("world_brief", {"window_hours": 18})
+        stories = brief_resp.result.get("stories", [])
+        if not stories:
+            summary = "no fresh news in 18h window — daily forge skipped"
+            append_inbox(InboxEvent(
+                agent="forge", severity="warn", summary=summary, ref=rec_base
+            ))
+            _append_daily_project({**rec_base, "status": "skipped_no_news"})
+            return {"status": "skipped_no_news"}
+
+        # Step 2 — budget pre-check (rough estimate for pick)
+        if not budget.can_afford(0.50):
+            summary = "daily forge skipped — budget exhausted"
+            append_inbox(InboxEvent(
+                agent="forge", severity="warn", summary=summary, ref=rec_base
+            ))
+            notifier.push("Daily Forge skipped", summary, priority=0)
+            _append_daily_project({**rec_base, "status": "skipped_budget"})
+            return {"status": "skipped_budget"}
+
+        # Step 3 — pick project
+        pick_resp = forge_desc.call("pick_project", {"brief": stories})
+        if pick_resp.action != "picked":
+            err = pick_resp.result.get("error", "pick failed")
+            append_inbox(InboxEvent(
+                agent="forge", severity="alert", summary=f"daily forge pick failed: {err}",
+                ref=rec_base,
+            ))
+            notifier.push("Daily Forge failed", err[:200], priority=1)
+            _append_daily_project({**rec_base, "status": "failed", "error": err})
+            return {"status": "failed", "error": err}
+        spec = pick_resp.result
+
+        # Step 4 — budget check before expensive scaffold
+        if not budget.can_afford(2.50):
+            summary = f"daily forge skipped post-pick — budget exhausted (picked: {spec.get('title', '')})"
+            append_inbox(InboxEvent(
+                agent="forge", severity="warn", summary=summary, ref={**rec_base, "spec": spec},
+            ))
+            notifier.push("Daily Forge skipped", summary[:200], priority=0)
+            _append_daily_project({**rec_base, "status": "skipped_budget", "spec": spec})
+            return {"status": "skipped_budget"}
+
+        # Step 5 — build + push
+        scaffold_resp = forge_desc.call("scaffold_daily", {"spec": spec})
+        run = scaffold_resp.result
+
+        # Step 6 — log + notify
+        full_rec = {**rec_base, **run, "spec": {
+            k: spec.get(k) for k in ("slug", "title", "news_url", "news_source")
+        }}
+        _append_daily_project(full_rec)
+
+        if run.get("status") == "success":
+            project_url = (
+                f"{run.get('repo_url', '')}/tree/main/{run.get('folder', '')}"
+            )
+            summary = f"Today's project: {spec.get('title', 'untitled')} — {project_url}"
+            append_inbox(InboxEvent(
+                agent="forge", severity="info", summary=summary, ref=full_rec
+            ))
+            notifier.push(
+                f"Daily Forge: {spec.get('title', 'project')[:60]}",
+                f"{spec.get('news_source', '')} → {project_url}",
+                priority=0,
+            )
+        else:
+            err = run.get("error") or "scaffold failed"
+            summary = f"daily forge failed: {err}"
+            append_inbox(InboxEvent(
+                agent="forge", severity="alert", summary=summary, ref=full_rec
+            ))
+            notifier.push("Daily Forge failed", err[:200], priority=1)
+        return {"status": run.get("status"), "rec": full_rec}
+
+    except Exception as exc:
+        log.exception("daily_forge_tick crashed")
+        err = f"{type(exc).__name__}: {exc}"
+        append_inbox(InboxEvent(
+            agent="forge", severity="alert",
+            summary=f"daily forge crashed: {err}", ref=rec_base,
+        ))
+        notifier.push("Daily Forge crashed", err[:200], priority=1)
+        _append_daily_project({**rec_base, "status": "crashed", "error": err})
+        return {"status": "crashed", "error": err}
+
+
 def _verification_health(hours: int = 24) -> dict[str, float]:
     """Return fraction of agent_log entries in last N hours by verification status.
 

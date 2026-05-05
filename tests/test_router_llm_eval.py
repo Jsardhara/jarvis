@@ -1,22 +1,12 @@
-"""Eval harness for LLM router — 50 samples, ≥90% accuracy required.
+"""Eval harness for the regex-based router — 50-sample corpus, ≥80% required.
 
-Two test functions:
-- test_eval_mock_classifier  — always runs, uses canned mock responses.
-- test_eval_live_classifier  — skipped unless ANTHROPIC_API_KEY is set.
+The LLM router was removed (Pro/Max plan budget reasons). The regex
+classifier is now the only entry point, so this corpus doubles as the
+acceptance gate for routing accuracy.
 """
 from __future__ import annotations
 
-import json
-import os
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 from jarvis.router import classify
-
-# ---------------------------------------------------------------------------
-# 50-sample eval corpus: (request, expected_primary)
-# ---------------------------------------------------------------------------
 
 EVAL_SAMPLES: list[tuple[str, str]] = [
     # tempo — mail
@@ -79,104 +69,11 @@ EVAL_SAMPLES: list[tuple[str, str]] = [
 
 assert len(EVAL_SAMPLES) == 50, f"Expected 50 samples, got {len(EVAL_SAMPLES)}"
 
-_KNOWN_AGENTS = {"tempo", "scholar", "lens", "forge", "atlas", "jarvis"}
 
-
-def _make_canned_response(expected_primary: str) -> MagicMock:
-    """Return a mock Anthropic message yielding the correct classification."""
-    content_block = MagicMock()
-    content_block.text = json.dumps(
-        {
-            "primary": expected_primary,
-            "parallel": [],
-            "rationale": f"eval canned: {expected_primary}",
-            "confidence": 0.9,
-        }
-    )
-    msg = MagicMock()
-    msg.content = [content_block]
-    msg.usage.input_tokens = 100
-    msg.usage.output_tokens = 30
-    return msg
-
-
-# ---------------------------------------------------------------------------
-# Mock eval — always runs
-# ---------------------------------------------------------------------------
-
-
-def test_eval_mock_classifier():
-    """Eval harness with mocked Anthropic — must reach ≥90% (45/50)."""
-    from jarvis import router
-
+def test_eval_regex_baseline() -> None:
+    """Regex-only classify must hit ≥80% on the eval corpus."""
     correct = 0
     failures: list[tuple[str, str, str]] = []
-
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "test-key"}):
-        with patch.object(router, "USE_LLM_ROUTER", True):
-            for request_text, expected in EVAL_SAMPLES:
-                canned = _make_canned_response(expected)
-                with patch("jarvis.router.anthropic") as mock_module:
-                    mock_client = MagicMock()
-                    mock_module.Anthropic.return_value = mock_client
-                    mock_client.messages.create.return_value = canned
-
-                    # Clear LRU cache so each call goes through mock
-                    router.classify_llm.cache_clear()
-                    result = classify(request_text)
-
-                if result.primary == expected:
-                    correct += 1
-                else:
-                    failures.append((request_text, expected, result.primary))
-
-    pass_rate = correct / len(EVAL_SAMPLES)
-    failure_summary = "\n".join(
-        f"  '{req}' → expected={exp}, got={got}" for req, exp, got in failures
-    )
-    assert pass_rate >= 0.90, (
-        f"Eval pass rate {pass_rate:.0%} ({correct}/50) < 90%.\nFailures:\n{failure_summary}"
-    )
-
-
-# ---------------------------------------------------------------------------
-# Regex-only eval — sanity check that pure regex hits ≥70%
-# ---------------------------------------------------------------------------
-
-
-def test_eval_regex_baseline():
-    """Regex-only classify must hit ≥70% on the eval corpus (sanity floor)."""
-    from jarvis import router
-
-    correct = 0
-    with patch.object(router, "USE_LLM_ROUTER", False), patch.dict(os.environ, {}, clear=True):
-        for request_text, expected in EVAL_SAMPLES:
-            result = classify(request_text)
-            if result.primary == expected:
-                correct += 1
-
-    pass_rate = correct / len(EVAL_SAMPLES)
-    assert pass_rate >= 0.70, f"Regex baseline {pass_rate:.0%} ({correct}/50) < 70%"
-
-
-# ---------------------------------------------------------------------------
-# Live eval — skipped unless ANTHROPIC_API_KEY is present
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.skipif(
-    os.environ.get("ANTHROPIC_API_KEY") is None,
-    reason="ANTHROPIC_API_KEY not set — skipping live LLM eval",
-)
-def test_eval_live_classifier():
-    """Live eval against real Haiku model — ≥90% required."""
-    correct = 0
-    failures: list[tuple[str, str, str]] = []
-
-    from jarvis import router
-
-    router.classify_llm.cache_clear()
-
     for request_text, expected in EVAL_SAMPLES:
         result = classify(request_text)
         if result.primary == expected:
@@ -188,6 +85,7 @@ def test_eval_live_classifier():
     failure_summary = "\n".join(
         f"  '{req}' → expected={exp}, got={got}" for req, exp, got in failures
     )
-    assert pass_rate >= 0.90, (
-        f"Live eval pass rate {pass_rate:.0%} ({correct}/50) < 90%.\nFailures:\n{failure_summary}"
+    assert pass_rate >= 0.80, (
+        f"Regex eval pass rate {pass_rate:.0%} ({correct}/50) < 80%.\n"
+        f"Failures:\n{failure_summary}"
     )

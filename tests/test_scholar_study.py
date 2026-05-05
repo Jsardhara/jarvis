@@ -99,8 +99,8 @@ def test_get_summary_calls_claude_and_caches(study_svc):
             "key_concepts": ["vector space"],
             "important_points": [{"text": "Basis", "page": 1}],
         }
-        summary1 = study_svc.get_summary(doc["id"], "fake-key")
-        summary2 = study_svc.get_summary(doc["id"], "fake-key")
+        summary1 = study_svc.get_summary(doc["id"])
+        summary2 = study_svc.get_summary(doc["id"])
 
     assert mock_call.call_count == 1  # cached on second call
     assert summary1["tldr"] == "Vectors matter."
@@ -109,7 +109,7 @@ def test_get_summary_calls_claude_and_caches(study_svc):
 
 def test_get_summary_missing_doc_raises(study_svc):
     with pytest.raises(ValueError, match="not found"):
-        study_svc.get_summary("ghost", "fake-key")
+        study_svc.get_summary("ghost")
 
 
 # ── generate_flashcards (mocked Claude) ──────────────────────────────────────
@@ -123,7 +123,7 @@ def test_generate_flashcards(study_svc):
             {"front": "What is a matrix?", "back": "A rectangular array.", "source_page": 1, "tags": ["linear-algebra"]},
             {"front": "What is a vector?", "back": "An element of a vector space.", "source_page": None, "tags": []},
         ]
-        cards = study_svc.generate_flashcards(doc["id"], "fake-key")
+        cards = study_svc.generate_flashcards(doc["id"])
 
     assert len(cards) == 2
     assert cards[0]["front"] == "What is a matrix?"
@@ -134,7 +134,7 @@ def test_generate_flashcards(study_svc):
 
 def test_generate_flashcards_missing_doc_raises(study_svc):
     with pytest.raises(ValueError, match="not found"):
-        study_svc.generate_flashcards("ghost", "fake-key")
+        study_svc.generate_flashcards("ghost")
 
 
 # ── SM-2 rate_card ───────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ def _make_card(study_svc, doc_id: str) -> dict:
         mock_call.return_value = [
             {"front": "Q", "back": "A", "source_page": None, "tags": []}
         ]
-        cards = study_svc.generate_flashcards(doc_id, "fake-key")
+        cards = study_svc.generate_flashcards(doc_id)
     return cards[0]
 
 
@@ -204,7 +204,7 @@ def test_due_cards_returns_new_cards(study_svc):
         mock_call.return_value = [
             {"front": "Due Q", "back": "Due A", "source_page": None, "tags": []}
         ]
-        study_svc.generate_flashcards(doc["id"], "fake-key")
+        study_svc.generate_flashcards(doc["id"])
     due = study_svc.due_cards()
     assert len(due) == 1
     assert due[0]["front"] == "Due Q"
@@ -216,7 +216,7 @@ def test_due_cards_empty_after_good_rating(study_svc):
         mock_call.return_value = [
             {"front": "Q2", "back": "A2", "source_page": None, "tags": []}
         ]
-        cards = study_svc.generate_flashcards(doc["id"], "fake-key")
+        cards = study_svc.generate_flashcards(doc["id"])
     study_svc.rate_card(cards[0]["id"], 2)  # Good → due tomorrow
     due = study_svc.due_cards()
     assert len(due) == 0

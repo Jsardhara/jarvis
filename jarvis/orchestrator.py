@@ -189,3 +189,4 @@ class Orchestrator:
             tier=tier,
             verification_status=resp.verification.get("status"),
         )
+        return resp

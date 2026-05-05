@@ -35,7 +35,7 @@ def _make_offline_orchestrator(base_url: str = "http://atlas-offline:9999") -> A
 def test_atlas_returns_mock_with_degraded_flag_when_offline():
     """When ATLAS is unreachable, portfolio returns mock data with meta.degraded=True."""
     with respx.mock(base_url="http://atlas-offline:9999", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/system/health").mock(side_effect=httpx.ConnectError("refused"))
         orch = _make_offline_orchestrator()
         resp = orch.portfolio()
     assert resp.action == "fetched"
@@ -46,7 +46,7 @@ def test_atlas_returns_mock_with_degraded_flag_when_offline():
 def test_atlas_returns_mock_pnl_with_degraded_flag_when_offline():
     """When ATLAS is unreachable, pnl returns mock data with meta.degraded=True."""
     with respx.mock(base_url="http://atlas-offline:9999", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/system/health").mock(side_effect=httpx.ConnectError("refused"))
         orch = _make_offline_orchestrator()
         resp = orch.pnl("7d")
     assert resp.result.get("mock") is True
@@ -56,7 +56,7 @@ def test_atlas_returns_mock_pnl_with_degraded_flag_when_offline():
 def test_atlas_returns_mock_positions_with_degraded_flag_when_offline():
     """When ATLAS is unreachable, positions returns mock data with meta.degraded=True."""
     with respx.mock(base_url="http://atlas-offline:9999", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/system/health").mock(side_effect=httpx.ConnectError("refused"))
         orch = _make_offline_orchestrator()
         resp = orch.positions()
     assert resp.result.get("mock") is True
@@ -66,7 +66,7 @@ def test_atlas_returns_mock_positions_with_degraded_flag_when_offline():
 def test_atlas_oracle_scan_degraded_when_offline():
     """oracle_scan falls to mock with degraded flag when ATLAS offline."""
     with respx.mock(base_url="http://atlas-offline:9999", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/system/health").mock(side_effect=httpx.ConnectError("refused"))
         orch = _make_offline_orchestrator()
         resp = orch.oracle_scan()
     assert resp.result.get("meta", {}).get("degraded") is True
@@ -85,7 +85,7 @@ def test_atlas_returns_real_data_when_online():
         "holdings": [{"symbol": "BTC", "qty": 0.5, "value_usd": 40000.0}],
     }
     with respx.mock(base_url="http://atlas-test:8000", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(return_value=httpx.Response(200, json={"ok": True}))
+        mock.get("/system/health").mock(return_value=httpx.Response(200, json={"ok": True}))
         mock.get("/portfolio").mock(return_value=httpx.Response(200, json=portfolio_data))
         orch = _make_online_orchestrator()
         resp = orch.portfolio()
@@ -109,7 +109,7 @@ def test_health_check_caches_result():
         raise httpx.ConnectError("refused")
 
     with respx.mock(base_url="http://atlas-cached:9998", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=_count_and_fail)
+        mock.get("/system/health").mock(side_effect=_count_and_fail)
         bridge = AtlasBridge(base_url="http://atlas-cached:9998")
         orch = AtlasOrchestrator(bridge=bridge, allow_mock=True, auto_mock_on_offline=True)
         # Force cache miss first, then second call within TTL should reuse cache
@@ -128,7 +128,7 @@ def test_health_check_cache_expires():
         raise httpx.ConnectError("refused")
 
     with respx.mock(base_url="http://atlas-expire:9997", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=_count_and_fail)
+        mock.get("/system/health").mock(side_effect=_count_and_fail)
         bridge = AtlasBridge(base_url="http://atlas-expire:9997")
         orch = AtlasOrchestrator(bridge=bridge, allow_mock=True, auto_mock_on_offline=True)
         orch._health_check()
@@ -146,7 +146,7 @@ def test_health_check_cache_expires():
 def test_pipeline_propagates_degraded():
     """pipeline() in offline mode still completes and carries degraded flag in result."""
     with respx.mock(base_url="http://atlas-offline:9999", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(side_effect=httpx.ConnectError("refused"))
+        mock.get("/system/health").mock(side_effect=httpx.ConnectError("refused"))
         orch = _make_offline_orchestrator()
         resp = orch.pipeline()
     # Pipeline completes (proposed or vetoed) — degraded propagated
@@ -229,7 +229,7 @@ def test_atlas_bridge_run_strategy_success():
 def test_atlas_orchestrator_positions_count():
     """AtlasOrchestrator.positions() includes position count."""
     with respx.mock(base_url="http://test", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(return_value=httpx.Response(200))
+        mock.get("/system/health").mock(return_value=httpx.Response(200))
         mock.get("/trades/open").mock(return_value=httpx.Response(200, json=[
             {"id": "p1"},
             {"id": "p2"},
@@ -244,7 +244,7 @@ def test_atlas_orchestrator_positions_count():
 def test_atlas_orchestrator_architect_rank_with_regime():
     """AtlasOrchestrator.architect_rank() filters by regime."""
     with respx.mock(base_url="http://test", assert_all_called=False) as mock:
-        mock.get("/api/health").mock(return_value=httpx.Response(200))
+        mock.get("/system/health").mock(return_value=httpx.Response(200))
         mock.get("/strategies").mock(return_value=httpx.Response(200, json=[
             {"id": "risk_on_strat", "score": 0.9, "regime_fit": "risk_on"},
             {"id": "risk_off_strat", "score": 0.8, "regime_fit": "risk_off"},

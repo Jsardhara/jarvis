@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import os
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -219,12 +218,6 @@ class Scholar:
             self._study_svc = StudyService()
         return self._study_svc
 
-    def _api_key(self) -> str:
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        if not key:
-            raise RuntimeError("ANTHROPIC_API_KEY not set")
-        return key
-
     # ── Assignments ──────────────────────────────────────────────────────────
 
     def list_assignments(self) -> AgentResponse:
@@ -341,7 +334,7 @@ class Scholar:
         )
 
     def get_doc_summary(self, doc_id: str) -> AgentResponse:
-        summary = self._svc().get_summary(doc_id, self._api_key())
+        summary = self._svc().get_summary(doc_id)
         return AgentResponse(
             agent="scholar",
             intent="get_doc_summary",
@@ -361,7 +354,7 @@ class Scholar:
         )
 
     def generate_doc_flashcards(self, doc_id: str) -> AgentResponse:
-        cards = self._svc().generate_flashcards(doc_id, self._api_key())
+        cards = self._svc().generate_flashcards(doc_id)
         return AgentResponse(
             agent="scholar",
             intent="generate_doc_flashcards",

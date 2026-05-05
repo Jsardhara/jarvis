@@ -30,6 +30,7 @@ from .notifier import default_notifier
 from .routines import (
     atlas_tick,
     calendar_tick,
+    daily_forge_tick,
     email_tick,
     heartbeat_tick,
     morning_digest,
@@ -115,6 +116,17 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     atlas_api_url = os.environ.get("JARVIS_ATLAS_API", "http://localhost:8000")
     sched.add_job(
         atlas_health_tick, "interval", seconds=60, args=[atlas_api_url], id="atlas_health"
+    )
+    # Daily autonomous Forge — picks news story, builds MVP, pushes to GitHub
+    sched.add_job(
+        daily_forge_tick,
+        "cron",
+        hour=10,  # 10:00 UTC == 06:00 ET (EDT-aware via misfire_grace)
+        minute=0,
+        args=[reg, notifier],
+        id="daily_forge",
+        max_instances=1,
+        misfire_grace_time=3600,
     )
 
     return sched

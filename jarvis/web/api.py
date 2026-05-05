@@ -176,6 +176,10 @@ def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
             positions = positions_resp
         else:
             positions = positions_resp.get("positions", [])
+        # Normalize position shape so frontend has stable keys (id→position_id, side→direction)
+        from .atlas_proxy import _normalize_position
+
+        positions = [_normalize_position(p) for p in positions if isinstance(p, dict)]
         degraded = bool(portfolio.get("mock") or pnl.get("mock"))
     except Exception:
         log.warning("atlas snapshot failed — returning degraded mock", exc_info=True)
@@ -895,15 +899,9 @@ def make_app(
 
     @app.get("/api/scholar/documents/{doc_id}/summary")
     async def scholar_get_summary(doc_id: str) -> dict[str, Any]:
-        from ..subsystems.scholar_study import _get_api_key
-
-        try:
-            api_key = _get_api_key()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
         svc = _get_study_service()
         try:
-            summary = svc.get_summary(doc_id, api_key)
+            summary = svc.get_summary(doc_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"data": summary, "error": None}
@@ -916,15 +914,9 @@ def make_app(
 
     @app.post("/api/scholar/documents/{doc_id}/flashcards")
     async def scholar_generate_flashcards(doc_id: str) -> dict[str, Any]:
-        from ..subsystems.scholar_study import _get_api_key
-
-        try:
-            api_key = _get_api_key()
-        except RuntimeError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
         svc = _get_study_service()
         try:
-            cards = svc.generate_flashcards(doc_id, api_key)
+            cards = svc.generate_flashcards(doc_id)
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"data": cards, "error": None}
