@@ -1,17 +1,19 @@
 "use client";
 
 /**
- * Scholar workspace hooks — typed against the backend API contract at
- * http://localhost:8765/api/scholar/*
+ * Scholar workspace hooks — typed against the backend API contract.
  *
- * All fetches use NEXT_PUBLIC_JARVIS_API so the base URL is configurable.
- * 404 / network errors surface as { error: string } so callers can render
- * graceful degradation banners rather than crash.
+ * All fetches go through `apiFetch`, which routes via the Next.js proxy
+ * (relative `/api/scholar/*` URLs) and attaches the dashboard bearer
+ * token. The `[...path]` catch-all proxy at
+ * `web/src/app/api/scholar/[...path]/route.ts` forwards anything that
+ * doesn't have a dedicated route file to FastAPI on :8765 with the
+ * trusted backend token swapped in.
  */
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-const BASE = process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
+import { apiFetch } from "@/lib/api-client";
 
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
@@ -109,7 +111,7 @@ export type { SeedResult as LegacySeedResult };
 // ─── Fetch helper ─────────────────────────────────────────────────────────────
 
 async function scholarFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await apiFetch(path, {
     cache: "no-store",
     ...init,
   });

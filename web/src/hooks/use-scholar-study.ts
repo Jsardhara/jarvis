@@ -2,6 +2,8 @@
 
 import { useState, useCallback } from "react";
 
+import { apiFetch as authedFetch } from "@/lib/api-client";
+
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
 export interface ScholarDocument {
@@ -32,7 +34,7 @@ export type Rating = "again" | "hard" | "good" | "easy";
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { cache: "no-store", ...init });
+  const res = await authedFetch(url, { cache: "no-store", ...init });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`${res.status}: ${text}`);
