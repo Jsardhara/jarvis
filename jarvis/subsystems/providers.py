@@ -293,5 +293,90 @@ class PerplexitySearch:
         return {"url": url, "title": title, "text": cleaned[:4000]}
 
 
+class BraveSearch:
+    """Brave Search API provider — 2000 queries/mo free tier.
+
+    Endpoint: GET https://api.search.brave.com/res/v1/web/search
+    Auth:     X-Subscription-Token: <key>
+    Sign up:  https://api-dashboard.search.brave.com/
+
+    Returns same shape as PerplexitySearch / MockSearch so Lens callers
+    don't change. ``fetch`` is a plain HTTP GET + crude HTML strip — Brave
+    Search doesn't expose URL-content extraction.
+    """
+
+    BASE_URL = "https://api.search.brave.com/res/v1/web/search"
+    TIMEOUT_S = 12.0
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Accept": "application/json",
+            "Accept-Encoding": "gzip",
+            "X-Subscription-Token": self.api_key,
+        }
+
+    def search(self, query: str, num_results: int = 5) -> list[dict]:
+        import httpx
+
+        params = {
+            "q": query,
+            "count": str(max(1, min(num_results, 20))),
+            "safesearch": "moderate",
+        }
+        try:
+            resp = httpx.get(
+                self.BASE_URL,
+                params=params,
+                headers=self._headers(),
+                timeout=self.TIMEOUT_S,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError:
+            return []
+
+        results = (data.get("web") or {}).get("results", [])
+        out: list[dict] = []
+        for item in results[:num_results]:
+            description = item.get("description") or ""
+            out.append(
+                {
+                    "title": item.get("title") or item.get("url", ""),
+                    "url": item.get("url", ""),
+                    "snippet": description[:480],
+                    "date": item.get("page_age"),
+                    "last_updated": item.get("page_fetched"),
+                }
+            )
+        return out
+
+    def fetch(self, url: str) -> dict:
+        import re
+
+        import httpx
+
+        try:
+            resp = httpx.get(
+                url,
+                timeout=self.TIMEOUT_S,
+                follow_redirects=True,
+                headers={"User-Agent": "JarvisLens/0.2 (research)"},
+            )
+            resp.raise_for_status()
+            html = resp.text
+        except httpx.HTTPError:
+            return {"url": url, "title": "", "text": ""}
+
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        title = (title_match.group(1).strip() if title_match else "")[:200]
+        cleaned = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return {"url": url, "title": title, "text": cleaned[:4000]}
+
+
 # Back-compat alias — registry imports `ExaSearch` from this module.
 ExaSearch = PerplexitySearch

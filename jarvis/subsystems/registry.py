@@ -22,7 +22,7 @@ from ..contract import AgentResponse
 from .atlas import AtlasBridge, AtlasOrchestrator
 from .forge import Forge, MockRunner
 from .lens import Lens
-from .providers import ExaSearch, MockOutlook, MockSearch
+from .providers import BraveSearch, ExaSearch, MockOutlook, MockSearch
 from .scholar import Scholar
 from .tempo import Tempo
 from .tempo_stack import build_default_tempo_stack
@@ -47,10 +47,18 @@ def _tempo_is_live() -> bool:
 
 
 def _lens_provider() -> tuple[Any, Literal["live", "mock"]]:
-    """Return (provider_instance, mode) for Lens based on env."""
-    key = os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("EXA_API_KEY")
-    if key:
-        return ExaSearch(api_key=key), "live"
+    """Return (provider_instance, mode) for Lens based on env.
+
+    Resolution order: Brave → Perplexity/Exa → Mock. Brave wins because it
+    sits on a 2000-query/mo free tier and ships better-quality web results
+    than the legacy mock fixtures.
+    """
+    brave_key = os.environ.get("BRAVE_SEARCH_API_KEY")
+    if brave_key:
+        return BraveSearch(api_key=brave_key), "live"
+    paid_key = os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("EXA_API_KEY")
+    if paid_key:
+        return ExaSearch(api_key=paid_key), "live"
     return MockSearch(), "mock"
 
 
