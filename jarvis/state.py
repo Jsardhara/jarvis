@@ -130,6 +130,24 @@ def read_inbox(limit: int = 20) -> list[InboxEvent]:
     return [InboxEvent(**json.loads(line)) for line in tail if line.strip()]
 
 
+def read_daily_forge(limit: int = 30) -> list[dict[str, Any]]:
+    """Tail state/daily_projects.jsonl; each line = autonomous forge run record."""
+    p = get_settings().state_dir / "daily_projects.jsonl"
+    if not p.exists():
+        return []
+    lines = p.read_text(encoding="utf-8").splitlines()
+    tail = lines[-limit:] if limit else lines
+    out: list[dict[str, Any]] = []
+    for line in tail:
+        if not line.strip():
+            continue
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
 # --- Mission control: agent_log + confirmations ---
 
 

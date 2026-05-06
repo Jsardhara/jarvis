@@ -18,6 +18,7 @@ import { useTradeBlotter } from "@/hooks/useTradeBlotter";
 import type { TradeStats } from "@/hooks/useTradeBlotter";
 import { Panel, Tag, KV, Hatch, AgentGlyph, getAgentIdentity } from "@/components/ops";
 import { AgentStatusRow } from "@/components/atlas/AgentStatusRow";
+import { AtlasEventTicker } from "@/components/atlas/AtlasEventTicker";
 import { MockModeBanner } from "@/components/atlas/MockModeBanner";
 import { SentinelTimeline } from "@/components/atlas/SentinelTimeline";
 
@@ -84,6 +85,9 @@ export default function AtlasPage() {
 
       {/* KPI strip */}
       <KpiStrip snapshot={snapshot} stats={stats} />
+
+      {/* Sentinel-driven event ticker */}
+      <AtlasEventTicker />
 
       {/* Pipeline hint bar */}
       <div style={{ padding: "6px 16px", borderBottom: "1px solid var(--ops-line)", fontFamily: "var(--ops-mono)", fontSize: 10, color: "var(--ops-fg-dim)", display: "flex", alignItems: "center", gap: 8, background: "var(--ops-bg-deep)" } as CSSProperties}>

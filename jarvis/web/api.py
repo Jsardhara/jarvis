@@ -55,6 +55,7 @@ from ..state import (
     read_agent_log,
     read_confirmations,
     read_inbox,
+    read_sentinel_health,
     register_inbox_listener,
     save_watchlist,
     unregister_inbox_listener,
@@ -407,6 +408,56 @@ def make_app(
     @app.get("/api/inbox")
     async def inbox(limit: int = 50) -> dict[str, Any]:
         return {"events": [e.model_dump() for e in read_inbox(limit=limit)]}
+
+    @app.get("/api/sentinel/snapshot")
+    async def sentinel_snapshot(
+        events_limit: int = 80, heartbeat_limit: int = 60
+    ) -> dict[str, Any]:
+        """Bundle daemon state for the /sentinel dashboard.
+
+        - last_heartbeat: ts of latest sentinel_health.jsonl line
+        - jobs: [{name, status}] from latest heartbeat
+        - heartbeats: tail of sentinel_health.jsonl (sparkline source)
+        - events: tail of state/inbox.jsonl
+        """
+        heartbeats_raw = read_sentinel_health(limit=heartbeat_limit)
+        heartbeats = [hb.model_dump() for hb in heartbeats_raw]
+        last_heartbeat = heartbeats[-1]["ts"] if heartbeats else None
+        jobs_map: dict[str, str] = heartbeats[-1]["jobs"] if heartbeats else {}
+        jobs = [{"name": name, "status": status} for name, status in jobs_map.items()]
+        events = [e.model_dump() for e in read_inbox(limit=events_limit)]
+        return {
+            "last_heartbeat": last_heartbeat,
+            "jobs": jobs,
+            "heartbeats": heartbeats,
+            "events": events,
+        }
+
+    @app.get("/api/forge/snapshot")
+    async def forge_snapshot(limit: int = 30) -> dict[str, Any]:
+        """Bundle Forge state for the /forge dashboard.
+
+        - daily_runs: tail of state/daily_projects.jsonl (autonomous forge picks)
+        - next_daily_iso: next 10:00 UTC fire window for the daily_forge job
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from ..state import read_daily_forge as _read_daily_forge
+
+        daily = _read_daily_forge(limit=limit)
+        now = datetime.now(UTC)
+        next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run = next_run + timedelta(days=1)
+        statuses: dict[str, int] = {}
+        for r in daily:
+            s = str(r.get("status", "unknown"))
+            statuses[s] = statuses.get(s, 0) + 1
+        return {
+            "daily_runs": daily,
+            "next_daily_iso": next_run.isoformat(),
+            "status_counts": statuses,
+        }
 
     @app.get("/api/activity")
     async def activity(limit: int = 100) -> dict[str, Any]:

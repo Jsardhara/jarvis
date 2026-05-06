@@ -48,7 +48,7 @@ def _tempo_is_live() -> bool:
 
 def _lens_provider() -> tuple[Any, Literal["live", "mock"]]:
     """Return (provider_instance, mode) for Lens based on env."""
-    key = os.environ.get("EXA_API_KEY")
+    key = os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("EXA_API_KEY")
     if key:
         return ExaSearch(api_key=key), "live"
     return MockSearch(), "mock"

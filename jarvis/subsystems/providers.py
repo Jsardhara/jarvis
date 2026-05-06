@@ -200,20 +200,98 @@ class MockSearch:
         return {"url": url, "text": f"Mock body for {url}", "title": "Mock"}
 
 
-class ExaSearch:
-    """Exa search provider stub. Wired to real Exa MCP in Plan B2.
+class PerplexitySearch:
+    """Perplexity Search provider — direct HTTPS calls to api.perplexity.ai.
 
-    Instantiated when EXA_API_KEY is present in env. search() and fetch()
-    raise NotImplementedError until B2 wires the real Exa MCP transport.
+    Instantiated when ``PERPLEXITY_API_KEY`` is present in env. Hits the
+    /search endpoint for query results and falls back to a plain HTTP GET +
+    crude text extraction for ``fetch`` (Perplexity Search API does not
+    expose a URL-content endpoint).
+
+    Same data the perplexity-search-mcp server returns; direct HTTPS skips
+    the Node subprocess + JSON-RPC stdio hop, which only matters for
+    interactive MCP clients (Claude Desktop) — not for a long-running
+    Python subsystem.
     """
+
+    BASE_URL = "https://api.perplexity.ai"
+    TIMEOUT_S = 15.0
 
     def __init__(self, api_key: str):
         self.api_key = api_key
 
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+
     def search(self, query: str, num_results: int = 5) -> list[dict]:
-        # TODO(B2): wire to real Exa MCP search tool
-        raise NotImplementedError("ExaSearch.search wired in B2")
+        import httpx
+
+        payload = {
+            "query": query,
+            "max_results": max(1, min(num_results, 20)),
+            "max_tokens_per_page": 1024,
+        }
+        try:
+            resp = httpx.post(
+                f"{self.BASE_URL}/search",
+                json=payload,
+                headers=self._headers(),
+                timeout=self.TIMEOUT_S,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError:
+            return []
+
+        out: list[dict] = []
+        for item in data.get("results", []):
+            snippet = item.get("snippet") or ""
+            out.append(
+                {
+                    "title": item.get("title") or item.get("url", ""),
+                    "url": item.get("url", ""),
+                    "snippet": snippet[:480],
+                    "date": item.get("date"),
+                    "last_updated": item.get("last_updated"),
+                }
+            )
+        return out
 
     def fetch(self, url: str) -> dict:
-        # TODO(B2): wire to real Exa MCP fetch tool
-        raise NotImplementedError("ExaSearch.fetch wired in B2")
+        """Best-effort URL body fetch + crude text strip.
+
+        Used by Lens.deep_research to feed synthesis. Perplexity Search has
+        no URL-content endpoint, so we GET the page directly. Fails open
+        with empty text rather than raising.
+        """
+        import re
+
+        import httpx
+
+        try:
+            resp = httpx.get(
+                url,
+                timeout=self.TIMEOUT_S,
+                follow_redirects=True,
+                headers={"User-Agent": "JarvisLens/0.2 (research)"},
+            )
+            resp.raise_for_status()
+            html = resp.text
+        except httpx.HTTPError:
+            return {"url": url, "title": "", "text": ""}
+
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        title = (title_match.group(1).strip() if title_match else "")[:200]
+        # Strip script/style blocks then HTML tags
+        cleaned = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.I | re.S)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return {"url": url, "title": title, "text": cleaned[:4000]}
+
+
+# Back-compat alias — registry imports `ExaSearch` from this module.
+ExaSearch = PerplexitySearch

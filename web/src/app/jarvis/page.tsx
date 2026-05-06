@@ -256,6 +256,7 @@ export default function JarvisPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmation | null>(null);
+  const [hydrationSource, setHydrationSource] = useState<"server" | "local" | "empty" | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const restoredRef = useRef(false);
@@ -330,9 +331,16 @@ export default function JarvisPage() {
     };
 
     void fetchServer().then((ok) => {
-      if (!ok) {
-        const local = fromLocal();
-        if (local.length > 0) setTurns(local);
+      if (ok) {
+        setHydrationSource("server");
+        return;
+      }
+      const local = fromLocal();
+      if (local.length > 0) {
+        setTurns(local);
+        setHydrationSource("local");
+      } else {
+        setHydrationSource("empty");
       }
     });
   }, []);
@@ -665,6 +673,15 @@ export default function JarvisPage() {
           <KV label="MESSAGES">{turns.length}</KV>
           <KV label="SESSION">{stamp()}</KV>
           <KV label="STATUS">{busy ? "PROCESSING" : turns.length === 0 ? "STANDING BY" : "IDLE"}</KV>
+          <KV label="MEMORY">
+            {hydrationSource === "server"
+              ? "↔ SERVER (X-DEVICE)"
+              : hydrationSource === "local"
+                ? "● LOCAL ONLY"
+                : hydrationSource === "empty"
+                  ? "○ FRESH"
+                  : "…"}
+          </KV>
         </Panel>
 
         {/* Dispatch last 24h */}

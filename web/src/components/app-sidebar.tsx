@@ -304,7 +304,7 @@ export function AppSidebar({
 
   const sentinelIdentity = AGENT_IDENTITIES.sentinel;
   // /sentinel page not yet created — fall back to /atlas
-  const sentinelHref = "/atlas";
+  const sentinelHref = "/sentinel";
 
   const sidebarContent = (
     <>
@@ -343,6 +343,9 @@ export function AppSidebar({
           const agentHref =
             id === "atlas" ? "/atlas" :
             id === "scholar" ? "/scholar" :
+            id === "lens" ? "/lens" :
+            id === "tempo" ? "/tempo" :
+            id === "forge" ? "/forge" :
             `/team/${id}`;
           return (
             <AgentRow
