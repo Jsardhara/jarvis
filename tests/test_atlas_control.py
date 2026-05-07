@@ -85,6 +85,18 @@ def test_trader_execute_paper_returns_executed_no_confirm():
     assert resp.result["auto"] is True
 
 
+def test_trader_execute_paper_raises_when_bridge_unreachable():
+    """Silent-failure guard: if ATLAS is online-but-broken, paper auto must
+    NOT return action='executed' with synthetic data. Surface the failure."""
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="bridge boom")
+
+    orch = _make_orch(handler)
+    with pytest.raises(AtlasUnavailableError):
+        orch.trader_execute("strategy-fail", mode="paper")
+
+
 def test_trader_execute_live_keeps_confirm_gate():
     def handler(req: httpx.Request) -> httpx.Response:
         body = json.loads(req.content.decode("utf-8"))

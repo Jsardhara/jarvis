@@ -91,7 +91,7 @@ def _build_atlas_snapshot(atlas: AtlasOrchestrator) -> AtlasSnapshot:
                     except ValueError:
                         hb = None
                 agent_last_hb[aid] = hb
-        except (AtlasUnavailableError, Exception) as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 — degrade gracefully
             log.warning("atlas snapshot agent_state failed: %s", exc)
 
     return AtlasSnapshot(

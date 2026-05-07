@@ -628,26 +628,50 @@ class AtlasOrchestrator:
             )
 
         # Paper: auto-fire via the bridge.
-        if not self._use_mock() and not degraded:
-            raw = None
-            with contextlib.suppress(Exception):
-                raw = self.bridge.pipeline_trader_execute(
-                    signal_id=strategy_id, mode=mode, auto=True
-                )
-            if raw is not None and ("status" in raw or "correlation_id" in raw):
-                return _parse_pipeline_envelope(
-                    raw, "atlas.trader", "execute_strategy", "executed",
-                    {"strategy_id": strategy_id, "mode": mode, "auto": True},
-                    base_confidence=0.9,
-                )
-        result = {"strategy_id": strategy_id, "mode": mode, "auto": True}
-        if degraded:
-            result["meta"] = _DEGRADED_META
+        if self._use_mock() or degraded:
+            # Mock or offline degradation: synthetic acknowledgement only.
+            result = {"strategy_id": strategy_id, "mode": mode, "auto": True, "mock": True}
+            if degraded:
+                result["meta"] = _DEGRADED_META
+            return AgentResponse(
+                agent="atlas.trader",
+                intent="execute_strategy",
+                action="executed",
+                result=result,
+                needs_confirm=False,
+                follow_ups=[],
+                confidence=0.5,
+            )
+
+        raw = None
+        with contextlib.suppress(Exception):
+            raw = self.bridge.pipeline_trader_execute(
+                signal_id=strategy_id, mode=mode, auto=True
+            )
+        if raw is None:
+            # Bridge unreachable AND we're supposedly online — never silently
+            # claim the trade fired. Surface the failure so Sentinel can pause
+            # the trader and alert the operator.
+            raise AtlasUnavailableError(
+                f"trader_execute paper auto failed for {strategy_id}: bridge unreachable"
+            )
+        if "status" in raw or "correlation_id" in raw:
+            return _parse_pipeline_envelope(
+                raw, "atlas.trader", "execute_strategy", "executed",
+                {"strategy_id": strategy_id, "mode": mode, "auto": True},
+                base_confidence=0.9,
+            )
+        # Bridge returned a non-envelope dict (legacy shape) — treat as success
+        # only when it carries a recognisable trade id.
+        if not isinstance(raw, dict) or not (raw.get("id") or raw.get("txid")):
+            raise AtlasUnavailableError(
+                f"trader_execute paper auto returned unexpected shape: {list(raw)}"
+            )
         return AgentResponse(
             agent="atlas.trader",
             intent="execute_strategy",
             action="executed",
-            result=result,
+            result={"run": raw, "strategy_id": strategy_id, "mode": mode, "auto": True},
             needs_confirm=False,
             follow_ups=[],
             confidence=0.9,
