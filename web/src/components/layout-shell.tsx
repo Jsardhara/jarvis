@@ -7,6 +7,8 @@ import { SearchDialog } from "@/components/search-dialog";
 import { AppSidebar } from "@/components/app-sidebar";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { OnboardingDialog } from "@/components/onboarding-dialog";
+import { Topbar } from "@/components/ops/Topbar";
+import { Statusbar } from "@/components/ops/Statusbar";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useConnection } from "@/hooks/use-connection";
 import { apiFetch } from "@/lib/api-client";
@@ -14,7 +16,6 @@ import { showSuccess, showError } from "@/lib/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActiveRunsProvider } from "@/providers/active-runs-provider";
 import { AtlasDegradedBanner } from "@/components/AtlasDegradedBanner";
-import { cn } from "@/lib/utils";
 
 interface LayoutShellProps {
   children: React.ReactNode;
@@ -25,7 +26,7 @@ export function LayoutShell({ children }: LayoutShellProps) {
   const [isMobile, setIsMobile] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const { tasks, agents, unreadInbox, pendingDecisions } = useSidebar();
+  const { tasks, unreadInbox, pendingDecisions } = useSidebar();
   const { online } = useConnection();
 
   // Detect mobile viewport and auto-close sidebar
@@ -67,7 +68,57 @@ export function LayoutShell({ children }: LayoutShellProps) {
 
   return (
     <TooltipProvider delayDuration={300}>
-    <div className="min-h-screen bg-background">
+      {/* Atlas degraded banner sits above the grid as a 1-line strip */}
+      <AtlasDegradedBanner />
+
+      {/* Ops Black 4-area grid */}
+      <div className="ops-app">
+        <Topbar />
+
+        {/* Mobile backdrop */}
+        {isMobile && sidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            onClick={() => setSidebarOpen(false)}
+          />
+        )}
+
+        <AppSidebar
+          collapsed={!sidebarOpen}
+          unreadInbox={unreadInbox}
+          pendingDecisions={pendingDecisions}
+          isMobile={isMobile}
+          onClose={() => setSidebarOpen(false)}
+        />
+
+        <main id="main-content" className="ops-main">
+          {!online && (
+            <div
+              className="flex items-center justify-center gap-2 py-2 px-3 text-xs"
+              style={{
+                background: "color-mix(in srgb, var(--ops-crit) 10%, transparent)",
+                borderBottom: "1px solid var(--ops-crit)",
+                color: "var(--ops-crit)",
+                fontFamily: "var(--ops-mono)",
+                letterSpacing: "0.06em",
+              }}
+            >
+              <span
+                className="inline-block h-1.5 w-1.5 rounded-full"
+                style={{ background: "var(--ops-crit)", animation: "ops-pulse-dot 1.4s infinite" }}
+              />
+              CONNECTION LOST — changes may not save. Retrying automatically...
+            </div>
+          )}
+          <ActiveRunsProvider>
+            {children}
+          </ActiveRunsProvider>
+        </main>
+
+        <Statusbar />
+      </div>
+
+      {/* Overlays — rendered outside the grid so they sit above everything */}
       <a href="#main-content" className="skip-to-content">Skip to content</a>
       <KeyboardShortcuts />
       <OnboardingDialog />
@@ -78,48 +129,8 @@ export function LayoutShell({ children }: LayoutShellProps) {
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
         isMobile={isMobile}
         tasks={tasks}
-        onTaskClick={() => {
-          // Navigate to Status Board view which shows the task in context
-          router.push("/status-board");
-        }}
+        onTaskClick={() => router.push("/status-board")}
       />
-
-      {/* Mobile sidebar backdrop */}
-      {isMobile && sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
-      <AtlasDegradedBanner />
-
-      <AppSidebar
-        collapsed={!sidebarOpen}
-        unreadInbox={unreadInbox}
-        pendingDecisions={pendingDecisions}
-        isMobile={isMobile}
-        onClose={() => setSidebarOpen(false)}
-        agents={agents}
-      />
-      <main
-        id="main-content"
-        className={cn(
-          "min-h-[calc(100vh-3.5rem)] transition-all duration-200 p-4 md:p-6",
-          isMobile ? "ml-0" : (sidebarOpen ? "ml-56" : "ml-14")
-        )}
-      >
-        {!online && (
-          <div className="mb-4 rounded-md bg-destructive/10 border border-destructive/20 text-destructive text-xs text-center py-2 px-3 flex items-center justify-center gap-2">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-destructive animate-pulse" />
-            Connection lost — changes may not save. Retrying automatically...
-          </div>
-        )}
-        <ActiveRunsProvider>
-          {children}
-        </ActiveRunsProvider>
-      </main>
-    </div>
     </TooltipProvider>
   );
 }

@@ -1,24 +1,28 @@
 ---
 name: forge
-description: Code-work delegation specialist. Accepts repo + task description, plans via ecc:plan, implements via ecc:prp-implement, reviews via code-reviewer, and opens PR via github-ops. Spawns sub-agents in parallel when work is independent. Confirm before pushing or merging.
+description: Code-work delegation. Accepts repo + task. Plans via ecc:plan, implements via ecc:prp-implement, reviews via code-reviewer, opens PR via github-ops. Spawns sub-agents in parallel when work independent. Confirm before push/merge.
 model: opus
 tools: Read, Glob, Grep, Bash, Edit, Write, Agent, Skill, mcp__plugin_ecc_github__*
 ---
 
 # Forge — Code Delegation
 
-Phase 0 stub. Full implementation in Phase 2.
+## Inputs
 
-## Role
-- Receives `{repo, task, constraints}`.
-- Spawns: planner → tdd-guide → implementation → code-reviewer → security-reviewer chain.
-- Opens PR with full context. Never merges without confirm.
+`{repo, task, constraints, push: bool}`
+
+## Pipeline
+
+planner → tdd-guide → implement → code-reviewer → security-reviewer → (open_pr if push)
+
+Spawns sub-agents in parallel where independent. Never merges without operator confirm.
 
 ## Reuse
-- `ecc:plan`, `ecc:prp-plan`, `ecc:prp-implement`, `ecc:prp-pr` skills
-- `autonomous-agent-harness` skill
-- `github-ops` skill
-- Existing `~/.claude/agents/`: planner, architect, code-reviewer, security-reviewer, tdd-guide
+
+- `ecc:plan`, `ecc:prp-plan`, `ecc:prp-implement`, `ecc:prp-pr`, `ecc:prp-commit`
+- `autonomous-agent-harness`, `github-ops`
+- Subagents: planner, architect, code-reviewer, security-reviewer, tdd-guide, typescript-reviewer, python-reviewer
 
 ## Output
-Agent-contract envelope. `result.pr_url` on success, `result.failures` on block.
+
+Agent envelope. `result.pr_url` on success, `result.failures` on block, `needs_confirm=true` if push not yet authorized.

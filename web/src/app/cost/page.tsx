@@ -121,7 +121,7 @@ function CostPageInner() {
   }, [data, selectedAgent, selectedDay]);
 
   return (
-    <div className="space-y-4 font-mono">
+    <div className="space-y-4 p-5 font-mono">
       <BreadcrumbNav items={[{ label: "Cost" }]} />
 
       {/* Summary strip */}
@@ -202,7 +202,7 @@ export default function CostPage() {
   return (
     <Suspense
       fallback={
-        <div className="space-y-4 font-mono">
+        <div className="space-y-4 p-5 font-mono">
           <p className="text-sm text-muted-foreground">loading…</p>
         </div>
       }

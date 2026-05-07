@@ -77,10 +77,33 @@ def test_atlas_mode_returned_from_registry(monkeypatch):
     assert reg["atlas"].mode in ("live", "mock")
 
 
-def test_forge_mode_is_always_mock(monkeypatch):
-    """Forge descriptor is always mode='mock' until real runner lands (Plan F1)."""
+def test_forge_mode_mock_when_claude_absent(monkeypatch):
+    """Forge falls back to mode='mock' when claude CLI is not on PATH."""
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda _: None)
     reg = build_default_registry()
     assert reg["forge"].mode == "mock"
+
+
+def test_forge_mode_live_when_claude_present(monkeypatch, tmp_path):
+    """Forge uses mode='live' (WorktreeRunner) when claude CLI is found on PATH."""
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/claude")
+    # Point repo_root at tmp_path so WorktreeRunner doesn't touch the real repo
+    import jarvis.subsystems.forge_runner as fr
+
+    monkeypatch.setattr(fr, "_DEFAULT_TIMEOUT", 1)
+    # Patch WorktreeRunner.__init__ to avoid real filesystem side effects
+    original_init = fr.WorktreeRunner.__init__
+
+    def _patched_init(self, repo_root=None, claude_bin="claude", timeout=600):
+        original_init(self, repo_root=tmp_path, claude_bin=claude_bin, timeout=timeout)
+
+    monkeypatch.setattr(fr.WorktreeRunner, "__init__", _patched_init)
+    reg = build_default_registry()
+    assert reg["forge"].mode == "live"
 
 
 def test_scholar_mode_is_always_live(monkeypatch):

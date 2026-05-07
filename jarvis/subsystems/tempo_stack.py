@@ -32,6 +32,12 @@ class TempoStack:
     def list_unread(self, max_results: int = 25) -> list[dict]:
         return self.mail.list_unread(max_results)
 
+    def list_recent(self, max_results: int = 25) -> list[dict]:
+        return self.mail.list_recent(max_results)
+
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]:
+        return self.mail.search_mail(query, max_results)
+
     def get_message(self, msg_id: str) -> dict:
         return self.mail.get_message(msg_id)
 

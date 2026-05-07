@@ -63,8 +63,12 @@ def test_atlas_tick_alerts_on_drawdown():
     notifier = NoopNotifier()
     out = atlas_tick(atlas, notifier, drawdown_alert_pct=DRAWDOWN_ALERT_PCT)
     assert out["severity"] == "alert"
-    assert len(notifier.calls) == 1
-    assert "drawdown" in notifier.calls[0][0].lower()
+    # Drawdown breach now triggers BOTH pause_agent(trader) AND a separate alert.
+    assert len(notifier.calls) >= 1
+    assert any("drawdown" in title.lower() or "paused" in title.lower()
+               for title, *_ in notifier.calls)
+    assert "pause_agent" in out["actions"]
+    assert "alert" in out["actions"]
 
 
 def test_atlas_tick_no_alert_for_mock_pnl():
@@ -96,10 +100,12 @@ def test_scholar_tick_records_count():
 
 
 def test_morning_digest_pushes_summary():
+    from jarvis.subsystems.registry import build_default_registry
+
     notifier = NoopNotifier()
-    atlas = AtlasOrchestrator(bridge=_silent_atlas(), allow_mock=True)
-    out = morning_digest(Tempo(MockOutlook()), atlas, Scholar(), notifier)
-    assert "body" in out
+    reg = build_default_registry()
+    out = morning_digest(reg, notifier)
+    assert "sections" in out
     assert len(notifier.calls) == 1
     assert "briefing" in notifier.calls[0][0].lower()
 
@@ -258,7 +264,10 @@ def test_verification_health_counts_statuses(tmp_path, monkeypatch):
 
 
 def test_morning_digest_includes_verification_health():
+    from jarvis.subsystems.registry import build_default_registry
+
     notifier = NoopNotifier()
-    atlas = AtlasOrchestrator(bridge=_silent_atlas(), allow_mock=True)
-    out = morning_digest(Tempo(MockOutlook()), atlas, Scholar(), notifier)
-    assert "Verification:" in out["body"]
+    reg = build_default_registry()
+    out = morning_digest(reg, notifier)
+    # New briefing surfaces a "system" section in place of the old verification block
+    assert "system" in out["sections"]

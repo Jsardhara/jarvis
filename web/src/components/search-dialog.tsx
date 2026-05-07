@@ -1,236 +1,306 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   CommandDialog,
   CommandInput,
   CommandList,
-  CommandEmpty,
-  CommandGroup,
-  CommandItem,
-  CommandSeparator,
 } from "@/components/ui/command";
-import { useTasks, useGoals, useProjects, useBrainDump } from "@/hooks/use-data";
-import {
-  CheckSquare,
-  Rocket,
-  Crosshair,
-  Lightbulb,
-  ArrowRight,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { Task } from "@/lib/types";
+import { Hatch } from "@/components/ops/Hatch";
+import { SubH } from "@/components/ops/SubH";
 
-const QUADRANT_LABELS: Record<string, { label: string; className: string }> = {
-  do: { label: "DO", className: "bg-red-500/20 text-red-400" },
-  schedule: { label: "SCHEDULE", className: "bg-blue-500/20 text-blue-400" },
-  delegate: { label: "DELEGATE", className: "bg-amber-500/20 text-amber-400" },
-  eliminate: { label: "ELIMINATE", className: "bg-zinc-500/20 text-zinc-400" },
-};
+const JARVIS_API =
+  process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
 
-const KANBAN_LABELS: Record<string, { label: string; className: string }> = {
-  "not-started": { label: "Todo", className: "bg-zinc-500/20 text-zinc-400" },
-  "in-progress": { label: "Active", className: "bg-blue-500/20 text-blue-400" },
-  "done": { label: "Done", className: "bg-emerald-500/20 text-emerald-400" },
-};
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-function getQuadrantKey(task: Task): string {
-  if (task.importance === "important" && task.urgency === "urgent") return "do";
-  if (task.importance === "important" && task.urgency === "not-urgent") return "schedule";
-  if (task.importance === "not-important" && task.urgency === "urgent") return "delegate";
-  return "eliminate";
+type HitKind =
+  | "inbox"
+  | "task"
+  | "decision"
+  | "agent_log"
+  | "chat"
+  | "problem"
+  | "exam"
+  | "forge_run";
+
+interface SearchHit {
+  kind: HitKind;
+  id: string;
+  title: string;
+  snippet: string;
+  ts: string;
+  score: number;
+  href: string;
+  metadata: Record<string, unknown>;
 }
 
-const MAX_RESULTS = 5;
+// ── Kind metadata ─────────────────────────────────────────────────────────────
+
+const KIND_META: Record<
+  HitKind,
+  { badge: string; label: string }
+> = {
+  inbox: { badge: "[I]", label: "INBOX" },
+  task: { badge: "[T]", label: "TASKS" },
+  decision: { badge: "[D]", label: "DECISIONS" },
+  agent_log: { badge: "[A]", label: "ACTIVITY" },
+  chat: { badge: "[C]", label: "CHAT" },
+  problem: { badge: "[P]", label: "PROBLEMS" },
+  exam: { badge: "[E]", label: "EXAMS" },
+  forge_run: { badge: "[F]", label: "FORGE" },
+};
+
+const KIND_ORDER: HitKind[] = [
+  "inbox",
+  "task",
+  "decision",
+  "agent_log",
+  "chat",
+  "problem",
+  "exam",
+  "forge_run",
+];
+
+// ── Debounce hook ─────────────────────────────────────────────────────────────
+
+function useDebounce(value: string, delayMs: number): string {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+// ── useSearch ─────────────────────────────────────────────────────────────────
+
+type SearchState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ok"; hits: SearchHit[] }
+  | { status: "error"; message: string };
+
+function useSearch(query: string): SearchState {
+  const [state, setState] = useState<SearchState>({ status: "idle" });
+  const abortRef = useRef<AbortController | null>(null);
+  const debouncedQuery = useDebounce(query, 300);
+
+  useEffect(() => {
+    if (!debouncedQuery.trim()) {
+      setState({ status: "idle" });
+      return;
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    setState({ status: "loading" });
+
+    const url = `${JARVIS_API}/api/search?q=${encodeURIComponent(debouncedQuery)}&limit_per_kind=5`;
+
+    fetch(url, { signal: ac.signal })
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json() as Promise<{ data: SearchHit[]; error: string | null }>;
+      })
+      .then((body) => {
+        if (body.error) throw new Error(body.error);
+        setState({ status: "ok", hits: body.data });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === "AbortError") return;
+        const msg = err instanceof Error ? err.message : "Search failed";
+        setState({ status: "error", message: msg });
+      });
+
+    return () => ac.abort();
+  }, [debouncedQuery]);
+
+  return state;
+}
+
+// ── SearchDialog ──────────────────────────────────────────────────────────────
 
 export function SearchDialog() {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
   const router = useRouter();
-  const { tasks } = useTasks();
-  const { goals } = useGoals();
-  const { projects } = useProjects();
-  const { entries: brainDumpEntries } = useBrainDump();
+  const searchState = useSearch(query);
 
-  // Listen for Ctrl+K / Cmd+K
+  // ⌘K / Ctrl+K toggle
   useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
+    function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setOpen((prev) => !prev);
       }
     }
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  // Sort by most recent first
-  const sortedTasks = useMemo(
-    () => [...tasks].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, MAX_RESULTS),
-    [tasks]
+  // Reset query on close
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    if (!next) setQuery("");
+  }, []);
+
+  const handleSelect = useCallback(
+    (href: string) => {
+      handleOpenChange(false);
+      router.push(href);
+    },
+    [router, handleOpenChange]
   );
 
-  const sortedGoals = useMemo(
-    () => [...goals].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, MAX_RESULTS),
-    [goals]
-  );
-
-  const sortedProjects = useMemo(
-    () => [...projects].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, MAX_RESULTS),
-    [projects]
-  );
-
-  const sortedBrainDump = useMemo(
-    () =>
-      [...brainDumpEntries]
-        .filter((e) => !e.processed)
-        .sort((a, b) => new Date(b.capturedAt).getTime() - new Date(a.capturedAt).getTime())
-        .slice(0, MAX_RESULTS),
-    [brainDumpEntries]
-  );
-
-  function handleSelect(type: string) {
-    setOpen(false);
-    switch (type) {
-      case "task":
-        router.push("/priority-matrix");
-        break;
-      case "project":
-        router.push("/projects");
-        break;
-      case "goal":
-        router.push("/objectives");
-        break;
-      case "braindump":
-        router.push("/brain-dump");
-        break;
+  // Group hits by kind
+  const grouped = (() => {
+    if (searchState.status !== "ok") return null;
+    const map = new Map<HitKind, SearchHit[]>();
+    for (const hit of searchState.hits) {
+      const bucket = map.get(hit.kind) ?? [];
+      bucket.push(hit);
+      map.set(hit.kind, bucket);
     }
-  }
+    return map;
+  })();
 
   return (
-    <CommandDialog open={open} onOpenChange={setOpen}>
-      <CommandInput placeholder="Search tasks, missions, objectives, ideas..." />
-      <CommandList>
-        <CommandEmpty>No results found.</CommandEmpty>
-
-        {/* Tasks */}
-        {sortedTasks.length > 0 && (
-          <CommandGroup heading="Tasks">
-            {sortedTasks.map((task) => {
-              const quad = QUADRANT_LABELS[getQuadrantKey(task)];
-              const kanban = KANBAN_LABELS[task.kanban];
-              return (
-                <CommandItem
-                  key={task.id}
-                  value={`task ${task.title} ${task.description}`}
-                  onSelect={() => handleSelect("task")}
-                  className="flex items-center gap-2"
-                >
-                  <CheckSquare className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <span className="flex-1 truncate">{task.title}</span>
-                  {quad && (
-                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", quad.className)}>
-                      {quad.label}
-                    </span>
-                  )}
-                  {kanban && (
-                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", kanban.className)}>
-                      {kanban.label}
-                    </span>
-                  )}
-                  <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-                </CommandItem>
-              );
-            })}
-          </CommandGroup>
+    <CommandDialog open={open} onOpenChange={handleOpenChange}>
+      <CommandInput
+        placeholder="Search inbox, tasks, decisions, activity, chat…"
+        value={query}
+        onValueChange={setQuery}
+      />
+      <CommandList className="max-h-[480px]">
+        {/* Idle / empty query */}
+        {searchState.status === "idle" && (
+          <Hatch label="TYPE TO SEARCH" height={96} className="m-2" />
         )}
 
-        {sortedTasks.length > 0 && sortedProjects.length > 0 && <CommandSeparator />}
-
-        {/* Missions (Projects) */}
-        {sortedProjects.length > 0 && (
-          <CommandGroup heading="Missions">
-            {sortedProjects.map((project) => (
-              <CommandItem
-                key={project.id}
-                value={`mission project ${project.name} ${project.description}`}
-                onSelect={() => handleSelect("project")}
-                className="flex items-center gap-2"
-              >
-                <Rocket className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{project.name}</span>
-                <span className={cn(
-                  "rounded px-1.5 py-0.5 text-[10px] font-medium",
-                  project.status === "active" ? "bg-emerald-500/20 text-emerald-400" :
-                  project.status === "paused" ? "bg-amber-500/20 text-amber-400" :
-                  project.status === "completed" ? "bg-blue-500/20 text-blue-400" :
-                  "bg-zinc-500/20 text-zinc-400"
-                )}>
-                  {project.status}
-                </span>
-                <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-              </CommandItem>
-            ))}
-          </CommandGroup>
+        {/* Loading */}
+        {searchState.status === "loading" && (
+          <div className="flex items-center justify-center py-8">
+            <span
+              className="inline-block h-4 w-4 animate-spin rounded-full border-2"
+              style={{
+                borderColor: "var(--ops-fg-faint)",
+                borderTopColor: "var(--ops-accent)",
+              }}
+            />
+          </div>
         )}
 
-        {sortedProjects.length > 0 && sortedGoals.length > 0 && <CommandSeparator />}
-
-        {/* Objectives (Goals) */}
-        {sortedGoals.length > 0 && (
-          <CommandGroup heading="Objectives">
-            {sortedGoals.map((goal) => (
-              <CommandItem
-                key={goal.id}
-                value={`objective goal ${goal.title} ${goal.type} ${goal.timeframe}`}
-                onSelect={() => handleSelect("goal")}
-                className="flex items-center gap-2"
-              >
-                <Crosshair className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{goal.title}</span>
-                <span className={cn(
-                  "rounded px-1.5 py-0.5 text-[10px] font-medium",
-                  goal.type === "long-term" ? "bg-purple-500/20 text-purple-400" : "bg-cyan-500/20 text-cyan-400"
-                )}>
-                  {goal.type === "long-term" ? "Long-term" : "Milestone"}
-                </span>
-                <span className={cn(
-                  "rounded px-1.5 py-0.5 text-[10px] font-medium",
-                  goal.status === "completed" ? "bg-emerald-500/20 text-emerald-400" :
-                  goal.status === "in-progress" ? "bg-blue-500/20 text-blue-400" :
-                  "bg-zinc-500/20 text-zinc-400"
-                )}>
-                  {goal.status}
-                </span>
-                <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-              </CommandItem>
-            ))}
-          </CommandGroup>
+        {/* Error */}
+        {searchState.status === "error" && (
+          <div
+            className="mx-2 my-2 flex items-center gap-3 rounded px-3 py-2 text-xs font-mono"
+            style={{
+              background: "color-mix(in srgb, var(--ops-crit) 12%, transparent)",
+              border: "1px solid var(--ops-crit)",
+              color: "var(--ops-crit)",
+            }}
+          >
+            <span className="flex-1 truncate">ERR: {searchState.message}</span>
+            <button
+              onClick={() => setQuery((q) => q + " ")}
+              className="shrink-0 underline hover:no-underline"
+            >
+              retry
+            </button>
+          </div>
         )}
 
-        {sortedGoals.length > 0 && sortedBrainDump.length > 0 && <CommandSeparator />}
-
-        {/* Brain Dump */}
-        {sortedBrainDump.length > 0 && (
-          <CommandGroup heading="Brain Dump">
-            {sortedBrainDump.map((entry) => (
-              <CommandItem
-                key={entry.id}
-                value={`braindump idea ${entry.content}`}
-                onSelect={() => handleSelect("braindump")}
-                className="flex items-center gap-2"
-              >
-                <Lightbulb className="h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="flex-1 truncate">{entry.content}</span>
-                <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-amber-500/20 text-amber-400">
-                  unprocessed
-                </span>
-                <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-              </CommandItem>
-            ))}
-          </CommandGroup>
+        {/* Results */}
+        {searchState.status === "ok" && grouped && grouped.size === 0 && (
+          <Hatch label="NO RESULTS" height={80} className="m-2" />
         )}
+
+        {searchState.status === "ok" &&
+          grouped &&
+          grouped.size > 0 &&
+          KIND_ORDER.filter((k) => grouped.has(k)).map((kind) => {
+            const hits = grouped.get(kind)!;
+            const meta = KIND_META[kind];
+            return (
+              <div key={kind} className="px-2 pb-1">
+                <SubH className="px-1 pt-2 pb-1">{meta.label}</SubH>
+                {hits.map((hit, idx) => (
+                  <ResultRow
+                    key={`${kind}-${hit.id}-${idx}`}
+                    hit={hit}
+                    badge={meta.badge}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
+            );
+          })}
       </CommandList>
     </CommandDialog>
+  );
+}
+
+// ── ResultRow ─────────────────────────────────────────────────────────────────
+
+interface ResultRowProps {
+  hit: SearchHit;
+  badge: string;
+  onSelect: (href: string) => void;
+}
+
+function ResultRow({ hit, badge, onSelect }: ResultRowProps) {
+  return (
+    <button
+      onClick={() => onSelect(hit.href)}
+      className="group flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm transition-colors focus:outline-none focus-visible:ring-1"
+      style={
+        {
+          "--tw-ring-color": "var(--ops-accent)",
+        } as React.CSSProperties
+      }
+      onMouseEnter={(e) => {
+        (e.currentTarget as HTMLElement).style.background =
+          "color-mix(in srgb, var(--ops-accent) 8%, transparent)";
+      }}
+      onMouseLeave={(e) => {
+        (e.currentTarget as HTMLElement).style.background = "transparent";
+      }}
+    >
+      {/* Kind badge */}
+      <span
+        className="shrink-0 font-mono text-[10px] leading-none"
+        style={{ color: "var(--ops-fg-faint)" }}
+      >
+        {badge}
+      </span>
+
+      {/* Title + snippet */}
+      <span className="min-w-0 flex-1">
+        <span
+          className="block truncate text-xs font-medium leading-tight"
+          style={{ color: "var(--ops-fg)" }}
+        >
+          {hit.title}
+        </span>
+        <span
+          className="block truncate text-[11px] leading-snug"
+          style={{ color: "var(--ops-fg-faint)" }}
+        >
+          {hit.snippet}
+        </span>
+      </span>
+
+      {/* Score */}
+      <span
+        className="shrink-0 font-mono text-[10px] tabular-nums"
+        style={{ color: "var(--ops-fg-faint)" }}
+      >
+        {hit.score.toFixed(2)}
+      </span>
+    </button>
   );
 }

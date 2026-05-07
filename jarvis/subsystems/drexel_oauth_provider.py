@@ -26,6 +26,7 @@ from uuid import uuid4
 
 from jarvis.subsystems.gmail_imap_provider import (
     _extract_body,
+    _extract_flags,
     _extract_raw,
     _map_message,
 )
@@ -173,19 +174,45 @@ class DrexelOAuthProvider:
     # ---------- mail methods (Protocol) ----------
 
     def list_unread(self, max_results: int = 25) -> list[dict]:
+        return self._search_imap(["UNSEEN"], max_results, force_unread_label=True)
+
+    def list_recent(self, max_results: int = 25) -> list[dict]:
+        return self._search_imap(["ALL"], max_results, force_unread_label=False)
+
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        return self._search_imap(["TEXT", f'"{q}"'], max_results, force_unread_label=False)
+
+    def _search_imap(
+        self,
+        criteria: list[str],
+        max_results: int,
+        *,
+        force_unread_label: bool,
+    ) -> list[dict]:
         with self._imap() as c:
-            typ, data = c.search(None, "UNSEEN")
+            typ, data = c.search(None, *criteria)
             if typ != "OK" or not data or not data[0]:
                 return []
             ids = data[0].split()[-max_results:]
             messages: list[dict] = []
             for mid in reversed(ids):
-                typ, fetched = c.fetch(mid, "(BODY.PEEK[])")
+                typ, fetched = c.fetch(mid, "(BODY.PEEK[] FLAGS)")
                 if typ != "OK":
                     continue
                 raw = _extract_raw(fetched)
+                flags = _extract_flags(fetched)
                 msg = email.message_from_bytes(raw)
-                messages.append(_map_message(msg, mid.decode(), self._config.label))
+                mapped = _map_message(msg, mid.decode(), self._config.label)
+                if not force_unread_label:
+                    is_unread = b"\\Seen" not in flags
+                    labels = [lbl for lbl in mapped.get("labels", []) if lbl != "UNREAD"]
+                    if is_unread:
+                        labels = ["UNREAD"] + labels
+                    mapped["labels"] = labels
+                messages.append(mapped)
             return messages
 
     def get_message(self, msg_id: str) -> dict:

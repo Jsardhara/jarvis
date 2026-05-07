@@ -1,3 +1,31 @@
 {
-  "tasks": []
+  "tasks": [
+    {
+      "id": "80f726698dcf",
+      "title": "CS501",
+      "description": "",
+      "importance": "important",
+      "urgency": "not_urgent",
+      "kanban": "todo",
+      "projectId": null,
+      "milestoneId": null,
+      "assignedTo": "me",
+      "collaborators": [],
+      "dailyActions": [],
+      "subtasks": [],
+      "blockedBy": [],
+      "estimatedMinutes": null,
+      "actualMinutes": null,
+      "acceptanceCriteria": [],
+      "comments": [],
+      "tags": [
+        "school",
+        "course:final paper"
+      ],
+      "notes": "",
+      "dueDate": "2026-05-10",
+      "createdAt": "2026-04-28T14:36:28.627678+00:00",
+      "updatedAt": "2026-04-28T14:36:28.627681+00:00"
+    }
+  ]
 }

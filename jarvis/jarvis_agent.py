@@ -27,6 +27,7 @@ layer turns into SSE frames:
 """
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
@@ -66,6 +67,42 @@ SOUL_LITE = "jarvis_soul_lite.md"
 _RECAP_TURN_PAIRS = 3
 _RECAP_MAX_CHARS = 800
 _TURN_LOG_MAX = 12  # 6 user + 6 assistant
+_TURN_LOG_PATH = Path("state/jarvis_turn_log.json")
+_SEMANTIC_RECAP_TOP_K = 3
+_SEMANTIC_MIN_SCORE = 0.4
+_SEMANTIC_MAX_CHARS = 120  # per hit in recap
+
+
+# ---------- Turn-log persistence ----------
+
+
+def _load_turn_log() -> list[dict[str, str]]:
+    """Restore prior conversation turns from disk so memory survives restarts."""
+    if not _TURN_LOG_PATH.exists():
+        return []
+    try:
+        raw = json.loads(_TURN_LOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("turn-log read failed (%s); starting empty", exc)
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for entry in raw[-_TURN_LOG_MAX:]:
+        if isinstance(entry, dict) and isinstance(entry.get("role"), str) and isinstance(entry.get("text"), str):
+            out.append({"role": entry["role"], "text": entry["text"]})
+    return out
+
+
+def _save_turn_log(turns: list[dict[str, str]]) -> None:
+    """Persist the rolling turn log to disk (atomic write)."""
+    try:
+        _TURN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = _TURN_LOG_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(turns, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(_TURN_LOG_PATH)
+    except OSError as exc:
+        logger.warning("turn-log write failed: %s", exc)
 
 
 # ---------- Soul loader ----------
@@ -87,9 +124,11 @@ def load_soul(variant: str = "full") -> str:
 
 _AGENT_DESCRIPTIONS = {
     "tempo": (
-        "Outlook + iCloud calendar + reminders + Gmail/Drexel mail. Actions: "
-        "triage, draft_reply, send_mail, today, find_free, schedule, cancel, "
-        "add, list_open, complete."
+        "Gmail (+optional Drexel) for mail, iCloud for calendar + reminders + tasks. "
+        "Actions: triage (unread only), list_recent_mail (latest read+unread), "
+        "search_mail (args: query, max_results — searches subject/body/from across all mail, "
+        "use this when the user names a topic like 'email about exam change'), "
+        "draft_reply, send_mail, today, find_free, schedule, cancel, add, list_open, complete."
     ),
     "scholar": (
         "Academics + study planning. Actions: list_assignments, add_assignment, "
@@ -108,6 +147,12 @@ _AGENT_DESCRIPTIONS = {
         "trader_execute, trader_execute_confirmed, sage_review, pipeline."
     ),
 }
+
+_RECALL_DESCRIPTION = (
+    "Semantic long-term chat memory. "
+    "Use JarvisChat.semantic_search(query, top_k) to find relevant past turns. "
+    "The orchestrator automatically surfaces relevant history during cross-lane recap."
+)
 
 
 def _build_delegate_tool(registry: dict[str, AgentDescriptor]):
@@ -200,7 +245,7 @@ class JarvisChat:
         self._clients: dict[str, ClaudeSDKClient] = {}
         self._connected: set[str] = set()
         self._last_lane: str | None = None
-        self._turn_log: list[dict[str, str]] = []
+        self._turn_log: list[dict[str, str]] = _load_turn_log()
 
     # ----- routing -----
 
@@ -222,7 +267,12 @@ class JarvisChat:
             f"{agents_block}\n\n"
             "When a request needs an agent, call `delegate` and synthesize the "
             "response for Jyot. Do not pretend to act on his behalf without "
-            "actually calling the tool."
+            "actually calling the tool.\n\n"
+            "## Semantic memory\n\n"
+            f"{_RECALL_DESCRIPTION}\n"
+            "Relevant past turns are automatically prepended to your context when "
+            "switching model lanes. You do not need to call a tool for recall — "
+            "the relevant history appears in the recap block above the current message."
         )
         return soul + addendum
 
@@ -244,8 +294,15 @@ class JarvisChat:
 
     # ----- recap -----
 
-    def _recap(self) -> str | None:
-        """Return a short context recap of the last few turn pairs, or None."""
+    def _recap(self, upcoming_message: str | None = None) -> str | None:
+        """Return a short context recap of the last few turn pairs, or None.
+
+        If *upcoming_message* is provided, up to ``_SEMANTIC_RECAP_TOP_K``
+        semantically relevant past turns (score > _SEMANTIC_MIN_SCORE) are
+        appended after the recent-pairs block.  Each hit is capped at
+        ``_SEMANTIC_MAX_CHARS`` characters and the total recap stays within
+        ``_RECAP_MAX_CHARS``.
+        """
         if not self._turn_log:
             return None
         # Take the last N user/assistant pairs
@@ -265,14 +322,68 @@ class JarvisChat:
             lines.append(f"- You said: {u.strip()[:200]}")
             lines.append(f"- I responded: {a.strip()[:200]}")
         recap = "\n".join(lines)
-        return recap[:_RECAP_MAX_CHARS]
+        recap = recap[:_RECAP_MAX_CHARS]
 
-    def _record_turn(self, role: str, text: str) -> None:
+        # Augment with semantic hits when an upcoming message is known.
+        if upcoming_message:
+            semantic_lines = self._semantic_recap_lines(upcoming_message)
+            if semantic_lines:
+                budget = _RECAP_MAX_CHARS - len(recap)
+                if budget > 40:
+                    block = "\n".join(semantic_lines)
+                    recap += "\n" + block[:budget]
+        return recap
+
+    def _semantic_recap_lines(self, query: str) -> list[str]:
+        """Return formatted lines for semantic recall to embed in recap."""
+        try:
+            from .memory_index import search as _search
+
+            hits = _search(query, top_k=_SEMANTIC_RECAP_TOP_K)
+        except Exception as exc:
+            logger.debug("semantic recap search failed: %s", exc)
+            return []
+        if not hits:
+            return []
+        lines = ["[Possibly relevant from earlier:]"]
+        for score, turn in hits:
+            if score < _SEMANTIC_MIN_SCORE:
+                continue
+            snippet = turn.text.strip().replace("\n", " ")[:_SEMANTIC_MAX_CHARS]
+            lines.append(f"- [{turn.role}] {snippet}")
+        return lines if len(lines) > 1 else []
+
+    def _record_turn(self, role: str, text: str, lane: str | None = None) -> None:
         if not text:
             return
         self._turn_log.append({"role": role, "text": text})
         if len(self._turn_log) > _TURN_LOG_MAX:
             self._turn_log = self._turn_log[-_TURN_LOG_MAX:]
+        _save_turn_log(self._turn_log)
+        self._index_turn(role=role, text=text, lane=lane)
+
+    def _index_turn(self, role: str, text: str, lane: str | None) -> None:
+        """Persist turn to semantic index. Never raises — failures are warnings."""
+        try:
+            from datetime import UTC, datetime
+
+            from .memory_index import IndexedTurn, append_turn, embed, turn_id_from_dict
+
+            ts = datetime.now(UTC).isoformat()
+            raw = {"role": role, "text": text, "ts": ts}
+            tid = turn_id_from_dict(raw)
+            vec = embed(text)
+            turn = IndexedTurn(
+                turn_id=tid,
+                ts=ts,
+                role=role,
+                text=text,
+                lane=lane,
+                embedding=vec,
+            )
+            append_turn(turn)
+        except Exception as exc:
+            logger.warning("memory index write failed: %s", exc)
 
     # ----- public API -----
 
@@ -288,6 +399,30 @@ class JarvisChat:
                 await client.disconnect()
             self._connected.discard(model)
         self._clients.clear()
+
+    def semantic_search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        """Return top-K semantically similar past turns as plain dicts.
+
+        Each item has: score (float), role, text, ts, lane.
+        Returns an empty list when the memory index is unavailable.
+        """
+        try:
+            from .memory_index import search as _search
+
+            hits = _search(query, top_k=top_k)
+        except Exception as exc:
+            logger.warning("semantic_search failed: %s", exc)
+            return []
+        return [
+            {
+                "score": round(score, 6),
+                "role": turn.role,
+                "text": turn.text,
+                "ts": turn.ts,
+                "lane": turn.lane,
+            }
+            for score, turn in hits
+        ]
 
     async def stream(self, message: str) -> AsyncIterator[StreamEvent]:
         """Send one user turn, yield events as Claude responds."""
@@ -332,7 +467,7 @@ class JarvisChat:
             and self._last_lane != decision.model
             and not self._forced_model
         ):
-            recap = self._recap()
+            recap = self._recap(upcoming_message=cleaned)
             if recap:
                 prompt = f"{recap}\n\n[Now Jyot says:]\n{cleaned}"
 
@@ -355,8 +490,8 @@ class JarvisChat:
 
         # Update lane + log AFTER the response completes successfully.
         self._last_lane = decision.model
-        self._record_turn("user", cleaned)
-        self._record_turn("assistant", "".join(assistant_text_buf))
+        self._record_turn("user", cleaned, lane=decision.model)
+        self._record_turn("assistant", "".join(assistant_text_buf), lane=decision.model)
 
 
 async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:

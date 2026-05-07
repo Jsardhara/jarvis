@@ -386,6 +386,42 @@
       "summary": "tempo.triaged (6044 ms)",
       "details": "",
       "timestamp": "2026-04-27T18:59:08.167277+00:00"
+    },
+    {
+      "id": "76739ad07411c1eb",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (3020 ms)",
+      "details": "",
+      "timestamp": "2026-04-27T19:45:46.950976+00:00"
+    },
+    {
+      "id": "81f18bcfe53239ae",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (1923 ms)",
+      "details": "",
+      "timestamp": "2026-04-28T14:38:28.642930+00:00"
+    },
+    {
+      "id": "97447e511af8eb27",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (135 ms)",
+      "details": "",
+      "timestamp": "2026-04-28T14:38:28.788627+00:00"
+    },
+    {
+      "id": "evt_yOtX7STMQ67u",
+      "type": "decision_answered",
+      "actor": "me",
+      "taskId": null,
+      "summary": "Answered: confirm to run strategy alpha-1 in paper → \"approve\"",
+      "details": "",
+      "timestamp": "2026-04-29T13:22:28.987Z"
     }
   ]
 }

@@ -86,19 +86,47 @@ class GmailIMAPProvider:
     # ---------- mail methods (Protocol) ----------
 
     def list_unread(self, max_results: int = 25) -> list[dict]:
+        return self._search_imap(["UNSEEN"], max_results, force_unread_label=True)
+
+    def list_recent(self, max_results: int = 25) -> list[dict]:
+        return self._search_imap(["ALL"], max_results, force_unread_label=False)
+
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        # IMAP TEXT covers headers + body; quote to preserve spaces.
+        criteria = ["TEXT", f'"{q}"']
+        return self._search_imap(criteria, max_results, force_unread_label=False)
+
+    def _search_imap(
+        self,
+        criteria: list[str],
+        max_results: int,
+        *,
+        force_unread_label: bool,
+    ) -> list[dict]:
         with self._imap() as c:
-            typ, data = c.search(None, "UNSEEN")
+            typ, data = c.search(None, *criteria)
             if typ != "OK" or not data or not data[0]:
                 return []
             ids = data[0].split()[-max_results:]
             messages: list[dict] = []
             for mid in reversed(ids):
-                typ, fetched = c.fetch(mid, "(BODY.PEEK[])")
+                typ, fetched = c.fetch(mid, "(BODY.PEEK[] FLAGS)")
                 if typ != "OK":
                     continue
                 raw = _extract_raw(fetched)
+                flags = _extract_flags(fetched)
                 msg = email.message_from_bytes(raw)
-                messages.append(_map_message(msg, mid.decode(), self._config.label))
+                mapped = _map_message(msg, mid.decode(), self._config.label)
+                if not force_unread_label:
+                    is_unread = b"\\Seen" not in flags
+                    labels = [lbl for lbl in mapped.get("labels", []) if lbl != "UNREAD"]
+                    if is_unread:
+                        labels = ["UNREAD"] + labels
+                    mapped["labels"] = labels
+                messages.append(mapped)
             return messages
 
     def get_message(self, msg_id: str) -> dict:
@@ -146,6 +174,18 @@ def _extract_raw(fetched: list) -> bytes:
     for part in fetched:
         if isinstance(part, tuple) and len(part) >= 2 and isinstance(part[1], bytes):
             return part[1]
+    return b""
+
+
+def _extract_flags(fetched: list) -> bytes:
+    """Pull FLAGS bytes from imaplib's fetch response, or b'' if absent."""
+    for part in fetched:
+        if isinstance(part, tuple) and part and isinstance(part[0], bytes):
+            head = part[0]
+            if b"FLAGS" in head:
+                return head
+        elif isinstance(part, bytes) and b"FLAGS" in part:
+            return part
     return b""
 
 

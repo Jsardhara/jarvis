@@ -108,9 +108,10 @@ def test_agent_history_after_dispatch(client):
 
 
 def test_confirmations_lifecycle(client):
+    # Phase 2: paper now auto-fires; confirmation flow only triggers in live mode.
     r = client.post("/api/agents/atlas/dispatch",
                     json={"action": "trader_execute",
-                          "args": {"strategy_id": "alpha-1", "mode": "paper"}})
+                          "args": {"strategy_id": "alpha-1", "mode": "live"}})
     assert r.status_code == 200
     assert r.json()["needs_confirm"] is True
 
@@ -128,10 +129,30 @@ def test_confirmations_lifecycle(client):
 def test_reject_confirmation(client):
     client.post("/api/agents/atlas/dispatch",
                 json={"action": "trader_execute",
-                      "args": {"strategy_id": "alpha-2", "mode": "paper"}})
+                      "args": {"strategy_id": "alpha-2", "mode": "live"}})
     cid = client.get("/api/confirmations?status=pending").json()["confirmations"][-1]["id"]
     rejected = client.post(f"/api/confirmations/{cid}/reject").json()
     assert rejected["status"] == "rejected"
+
+
+def test_paper_trader_execute_does_not_require_confirmation(client):
+    """Phase 2 contract: paper mode auto-fires, no confirmation row."""
+    pending_before = client.get(
+        "/api/confirmations?status=pending"
+    ).json()["confirmations"]
+    r = client.post(
+        "/api/agents/atlas/dispatch",
+        json={
+            "action": "trader_execute",
+            "args": {"strategy_id": "alpha-paper", "mode": "paper"},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["needs_confirm"] is False
+    pending_after = client.get(
+        "/api/confirmations?status=pending"
+    ).json()["confirmations"]
+    assert len(pending_after) == len(pending_before)
 
 
 def test_reject_unknown_confirmation(client):

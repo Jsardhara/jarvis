@@ -9,46 +9,24 @@ Six agents only:
     atlas    — trading orchestrator
     jarvis   — self-handled / fallback
 
-LLM-based classifier (Haiku) is tried first when ANTHROPIC_API_KEY is set
-and JARVIS_LLM_ROUTER != "false".  Regex rules serve as fallback.
+Rules-only classifier. The LLM-backed Haiku classifier was removed in favour
+of staying entirely on the local Pro/Max plan budget — running an LLM call
+on every chat turn would compete with chat, scholar, and forge for the
+shared 5h rate-limit bucket. Regex covers the routing table in CLAUDE.md.
 """
 from __future__ import annotations
 
-import functools
-import json
 import logging
-import os
 import re
 
-try:
-    import anthropic
-except ImportError:  # pragma: no cover
-    anthropic = None  # type: ignore[assignment]
-
 from .contract import IntentClassification
-from .cost import log_cost
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Module-level switch — set JARVIS_LLM_ROUTER=false to force regex only.
-# ---------------------------------------------------------------------------
-
-USE_LLM_ROUTER: bool = os.environ.get("JARVIS_LLM_ROUTER", "true").lower() == "true"
-
-_LLM_MODEL = "claude-haiku-4-5-20251001"
 _KNOWN_AGENTS = {"tempo", "scholar", "lens", "forge", "atlas", "jarvis"}
 
-_LLM_SYSTEM = (
-    "Classify this request into ONE of: tempo, scholar, lens, forge, atlas, jarvis. "
-    "Return JSON only: "
-    '{"primary": str, "parallel": list[str], "rationale": str, "confidence": float}. '
-    "Use parallel for multi-domain briefings (e.g. morning_briefing → tempo+scholar+atlas). "
-    "Confidence must be 0.0–1.0. No extra text."
-)
-
 # ---------------------------------------------------------------------------
-# Regex rules (fallback)
+# Regex rules
 # Order matters: more-specific surfaces first.
 # ---------------------------------------------------------------------------
 
@@ -73,7 +51,7 @@ _RULES: list[tuple[re.Pattern, str]] = [
     # School / academic
     (
         re.compile(
-            r"\b(class|lecture|professor|course|assignment|homework|exam|study|midterm|final|gpa|syllabus|paper|essay)\b",
+            r"\b(class(?:es)?|lectures?|professors?|courses?|assignments?|homework|exams?|stud(?:y|ies|ying)|midterms?|finals?|gpa|syllabus|papers?|essays?)\b",
             re.I,
         ),
         "scholar",
@@ -111,13 +89,8 @@ _MULTI: list[tuple[re.Pattern, list[str]]] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Regex-only classifier
-# ---------------------------------------------------------------------------
-
-
 def _classify_regex(request: str) -> IntentClassification:
-    """Pure-regex classifier — always available, no API key required."""
+    """Pure-regex classifier."""
     if not request or not request.strip():
         return IntentClassification(
             primary="jarvis",
@@ -171,81 +144,6 @@ def _classify_regex(request: str) -> IntentClassification:
     )
 
 
-# ---------------------------------------------------------------------------
-# LLM classifier (Haiku) with LRU cache
-# ---------------------------------------------------------------------------
-
-
-@functools.lru_cache(maxsize=512)
-def classify_llm(request: str) -> IntentClassification:
-    """Classify intent via Haiku LLM.  Falls back to regex on any failure.
-
-    The cache key is the normalised (stripped, lowercased) request.  Callers
-    should pass ``request.lower().strip()`` for maximum cache hit rate.
-    """
-    if anthropic is None:
-        log.warning("anthropic package not installed — falling back to regex")
-        return _classify_regex(request)
-
-    try:
-        client = anthropic.Anthropic()
-        msg = client.messages.create(
-            model=_LLM_MODEL,
-            max_tokens=128,
-            system=_LLM_SYSTEM,
-            messages=[{"role": "user", "content": request}],
-        )
-        raw_text: str = msg.content[0].text
-        log_cost(
-            agent="jarvis-router",
-            model=_LLM_MODEL,
-            in_tokens=msg.usage.input_tokens,
-            out_tokens=msg.usage.output_tokens,
-        )
-    except Exception as exc:
-        log.warning("LLM classify failed (%s) — falling back to regex", exc)
-        return _classify_regex(request)
-
-    try:
-        data = json.loads(raw_text)
-        primary = str(data["primary"])
-        parallel = [str(a) for a in data.get("parallel", [])]
-        rationale = str(data["rationale"])
-        confidence = float(data["confidence"])
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
-        log.warning("LLM response parse error (%s) — falling back to regex", exc)
-        return _classify_regex(request)
-
-    if primary not in _KNOWN_AGENTS:
-        log.warning("LLM returned unknown agent '%s' — falling back to regex", primary)
-        return _classify_regex(request)
-
-    return IntentClassification(
-        primary=primary,
-        confidence=max(0.0, min(1.0, confidence)),
-        rationale=rationale,
-        parallel=[a for a in parallel if a in _KNOWN_AGENTS],
-        raw_request=request,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Public entry point
-# ---------------------------------------------------------------------------
-
-
 def classify(request: str) -> IntentClassification:
-    """Route *request* to the best agent.
-
-    Uses LLM classifier (Haiku) when:
-    - USE_LLM_ROUTER is True, AND
-    - ANTHROPIC_API_KEY env var is set.
-
-    Falls back to regex otherwise.
-    """
-    normalised = (request or "").lower().strip()
-
-    if USE_LLM_ROUTER and os.environ.get("ANTHROPIC_API_KEY"):
-        return classify_llm(normalised)
-
+    """Route *request* to the best agent via regex rules."""
     return _classify_regex(request)

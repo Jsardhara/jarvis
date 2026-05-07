@@ -1,28 +1,65 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import "./globals.css";
 import { LayoutShell } from "@/components/layout-shell";
 import { ThemeProvider } from "@/components/theme-provider";
+import { ServiceWorkerRegister } from "@/components/sw-register";
+import { AuthGate } from "@/components/auth-gate";
 import { Toaster } from "sonner";
 
-const inter = Inter({ subsets: ["latin"] });
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space-grotesk",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+});
 
 export const metadata: Metadata = {
-  title: "Mission Control",
-  description: "The command center for humans supervising AI agents — Eisenhower matrix, Kanban, objectives, and agent deployment",
+  title: "JARVIS // OPS",
+  description: "Mission control — orchestrator + agent fleet",
+  manifest: "/manifest.webmanifest",
+  applicationName: "Jarvis",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Jarvis",
+  },
+  formatDetection: { telephone: false },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0a0e14",
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={`${inter.className} antialiased`}>
+    <html lang="en" suppressHydrationWarning className={`dark ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}>
+      <body className="antialiased">
         <ThemeProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <ServiceWorkerRegister />
+          <AuthGate>
+            <LayoutShell>{children}</LayoutShell>
+          </AuthGate>
           <Toaster
-            theme="system"
+            theme="dark"
             position="bottom-right"
             toastOptions={{
-              className: "border-border bg-card text-card-foreground",
+              className: "border-ops-line bg-ops-elevated text-ops-fg",
+              style: {
+                fontFamily: "var(--ops-mono)",
+                fontSize: "11px",
+                letterSpacing: "0.04em",
+              },
             }}
           />
         </ThemeProvider>

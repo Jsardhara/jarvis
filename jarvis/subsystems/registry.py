@@ -22,7 +22,7 @@ from ..contract import AgentResponse
 from .atlas import AtlasBridge, AtlasOrchestrator
 from .forge import Forge, MockRunner
 from .lens import Lens
-from .providers import ExaSearch, MockOutlook, MockSearch
+from .providers import BraveSearch, ExaSearch, MockOutlook, MockSearch
 from .scholar import Scholar
 from .tempo import Tempo
 from .tempo_stack import build_default_tempo_stack
@@ -47,10 +47,18 @@ def _tempo_is_live() -> bool:
 
 
 def _lens_provider() -> tuple[Any, Literal["live", "mock"]]:
-    """Return (provider_instance, mode) for Lens based on env."""
-    key = os.environ.get("EXA_API_KEY")
-    if key:
-        return ExaSearch(api_key=key), "live"
+    """Return (provider_instance, mode) for Lens based on env.
+
+    Resolution order: Brave → Perplexity/Exa → Mock. Brave wins because it
+    sits on a 2000-query/mo free tier and ships better-quality web results
+    than the legacy mock fixtures.
+    """
+    brave_key = os.environ.get("BRAVE_SEARCH_API_KEY")
+    if brave_key:
+        return BraveSearch(api_key=brave_key), "live"
+    paid_key = os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("EXA_API_KEY")
+    if paid_key:
+        return ExaSearch(api_key=paid_key), "live"
     return MockSearch(), "mock"
 
 
@@ -89,8 +97,19 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
     lens_provider, lens_mode = _lens_provider()
     lens = Lens(lens_provider)
 
-    # Forge: always mock until Plan F1 lands
-    forge = Forge(MockRunner())
+    # Forge: live when claude CLI is on PATH, otherwise MockRunner
+    forge_mode: Literal["live", "mock"]
+    try:
+        from .forge_runner import WorktreeRunner as RealWorktreeRunner
+
+        forge_runner: Any = RealWorktreeRunner()
+        forge_mode = "live"
+        logger.info("forge: live mode (worktree runner)")
+    except (RuntimeError, FileNotFoundError) as exc:
+        logger.warning("forge: falling back to mock (%s)", exc)
+        forge_runner = MockRunner()
+        forge_mode = "mock"
+    forge = Forge(forge_runner)
 
     # Atlas: auto_mock_on_offline — health check decides live/mock per-call
     atlas_bridge = AtlasBridge()
@@ -103,10 +122,15 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
         "tempo": AgentDescriptor(
             name="tempo",
             instance=tempo,
-            description="Outlook — mail, calendar, tasks",
+            description="Gmail mail + iCloud calendar/tasks",
             mode=tempo_mode,
             actions={
                 "triage": tempo.triage,
+                "triage_smart": tempo.triage_smart,
+                "search_mail": tempo.search_mail,
+                "list_recent_mail": tempo.list_recent_mail,
+                "snooze_mail": tempo.snooze_mail,
+                "triage_status": tempo.triage_status,
                 "draft_reply": tempo.draft_reply,
                 "send_mail": tempo.send_mail,
                 "today": tempo.today,
@@ -129,6 +153,19 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
                 "add_assignment": scholar.add_assignment,
                 "plan_week": scholar.plan_week,
                 "summarize": scholar.summarize,
+                "upload_doc": scholar.upload_doc,
+                "list_docs": scholar.list_docs,
+                "get_doc_summary": scholar.get_doc_summary,
+                "get_doc_flashcards": scholar.get_doc_flashcards,
+                "generate_doc_flashcards": scholar.generate_doc_flashcards,
+                "rate_flashcard": scholar.rate_flashcard,
+                "due_flashcards": scholar.due_flashcards,
+                "solve_problem": scholar.solve_problem,
+                "rate_problem": scholar.rate_problem,
+                "weak_topics": scholar.weak_topics,
+                "exam_session": scholar.exam_session,
+                "import_seed": scholar.import_seed,
+                "ingest_syllabus": scholar.ingest_syllabus,
             },
             default_for_text=lambda _text: scholar.list_assignments(),
         ),
@@ -141,6 +178,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
                 "quick_search": lens.quick_search,
                 "deep_research": lens.deep_research,
                 "monitor": lens.monitor,
+                "world_brief": lens.world_brief,
             },
             default_for_text=lambda text: lens.quick_search(text),
         ),
@@ -148,8 +186,14 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             name="forge",
             instance=forge,
             description="Code-work delegation",
-            mode="mock",
-            actions={"execute": forge.execute},
+            mode=forge_mode,
+            actions={
+                "execute": forge.execute,
+                "list_runs": forge.list_runs,
+                "get_run": forge.get_run,
+                "pick_project": forge.pick_project,
+                "scaffold_daily": forge.scaffold_daily,
+            },
             default_for_text=lambda text: forge.execute(repo="?", task=text, push=False),
         ),
         "atlas": AgentDescriptor(

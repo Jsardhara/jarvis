@@ -250,6 +250,35 @@ class OutlookProvider:
         body = resp.json()
         return [self._map_message(m) for m in body.get("value", [])]
 
+    def list_recent(self, max_results: int = 25) -> list[dict]:
+        resp = self._request(
+            "GET",
+            "/me/messages",
+            params={
+                "$top": str(max_results),
+                "$orderby": "receivedDateTime desc",
+                "$select": "id,from,subject,bodyPreview,categories,isRead,receivedDateTime",
+            },
+        )
+        body = resp.json()
+        return [self._map_message(m) for m in body.get("value", [])]
+
+    def search_mail(self, query: str, max_results: int = 25) -> list[dict]:
+        q = (query or "").strip()
+        if not q:
+            return []
+        resp = self._request(
+            "GET",
+            "/me/messages",
+            params={
+                "$search": f'"{q}"',
+                "$top": str(max_results),
+                "$select": "id,from,subject,bodyPreview,categories,isRead,receivedDateTime",
+            },
+        )
+        body = resp.json()
+        return [self._map_message(m) for m in body.get("value", [])]
+
     def get_message(self, msg_id: str) -> dict:
         resp = self._request("GET", f"/me/messages/{msg_id}")
         return self._map_message(resp.json())

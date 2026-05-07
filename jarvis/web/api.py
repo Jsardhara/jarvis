@@ -13,12 +13,21 @@ import logging
 import re
 import time
 from dataclasses import asdict
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 try:
-    from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+    from fastapi import (
+        FastAPI,
+        File,
+        HTTPException,
+        Request,
+        UploadFile,
+        WebSocket,
+        WebSocketDisconnect,
+    )
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import StreamingResponse
 
@@ -26,6 +35,13 @@ try:
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
+from .. import config  # noqa: F401  side-effect: load_dotenv() so APPLE_ID/GMAIL_* reach subsystems
+from ..chat_turns import (
+    ChatTurnRecord,
+    append_turn,
+    read_recent,
+    user_id_from_token,
+)
 from ..contract import AgentLogEntry, Confirmation, InboxEvent, Task, TraceEvent
 from ..cost import daily_rollup
 from ..memory import OperatorPreferences, load_preferences, save_preferences
@@ -39,6 +55,7 @@ from ..state import (
     read_agent_log,
     read_confirmations,
     read_inbox,
+    read_sentinel_health,
     register_inbox_listener,
     save_watchlist,
     unregister_inbox_listener,
@@ -174,6 +191,10 @@ def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
             positions = positions_resp
         else:
             positions = positions_resp.get("positions", [])
+        # Normalize position shape so frontend has stable keys (id→position_id, side→direction)
+        from .atlas_proxy import _normalize_position
+
+        positions = [_normalize_position(p) for p in positions if isinstance(p, dict)]
         degraded = bool(portfolio.get("mock") or pnl.get("mock"))
     except Exception:
         log.warning("atlas snapshot failed — returning degraded mock", exc_info=True)
@@ -184,6 +205,75 @@ def _atlas_snapshot_data(reg: dict[str, AgentDescriptor]) -> dict[str, Any]:
         "positions": positions,
         "degraded": degraded,
         "ts": ts,
+    }
+
+
+def _fetch_atlas_cost_rollup(
+    reg: dict[str, AgentDescriptor], date_str: str
+) -> dict[str, Any] | None:
+    """Fetch Atlas /api/cost/rollup for date_str; return None on any failure."""
+    from ..subsystems.atlas import AtlasOrchestrator
+
+    atlas_desc = reg.get("atlas")
+    if atlas_desc is None:
+        return None
+    inst = atlas_desc.instance
+    if not isinstance(inst, AtlasOrchestrator):
+        return None
+    if inst.mode != "live":
+        return None
+    try:
+        return inst.bridge.cost_rollup(date_str)
+    except Exception as exc:
+        log.debug("atlas cost_rollup fetch failed: %s", exc)
+        return None
+
+
+def _merge_cost_rollups(
+    jarvis: dict[str, Any], atlas: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge Jarvis and Atlas daily_rollup dicts into one flat RawRollup.
+
+    Atlas by_agent values may be objects ``{cost_usd, calls, ...}`` or bare
+    floats. Both are normalised to bare floats before union.
+    Jarvis entries already use bare floats.
+    """
+    # Flatten Atlas by_agent: {agent: {cost_usd, ...}} → {agent: float}
+    atlas_by_agent_raw: dict[str, Any] = atlas.get("by_agent", {})
+    atlas_by_agent: dict[str, float] = {}
+    for agent, val in atlas_by_agent_raw.items():
+        if isinstance(val, dict):
+            atlas_by_agent[agent] = float(val.get("cost_usd", 0.0))
+        else:
+            atlas_by_agent[agent] = float(val)
+
+    atlas_by_model_raw: dict[str, Any] = atlas.get("by_model", {})
+    atlas_by_model: dict[str, float] = {}
+    for model, val in atlas_by_model_raw.items():
+        if isinstance(val, dict):
+            atlas_by_model[model] = float(val.get("cost_usd", 0.0))
+        else:
+            atlas_by_model[model] = float(val)
+
+    merged_by_agent = dict(jarvis.get("by_agent", {}))
+    for agent, cost in atlas_by_agent.items():
+        merged_by_agent[agent] = round(merged_by_agent.get(agent, 0.0) + cost, 8)
+
+    merged_by_model = dict(jarvis.get("by_model", {}))
+    for model, cost in atlas_by_model.items():
+        merged_by_model[model] = round(merged_by_model.get(model, 0.0) + cost, 8)
+
+    total = round(
+        float(jarvis.get("total_usd", 0.0)) + float(atlas.get("total_usd", 0.0)), 6
+    )
+    call_count = int(jarvis.get("call_count", 0)) + int(atlas.get("call_count", 0))
+
+    return {
+        "date": jarvis["date"],
+        "total_usd": total,
+        "by_agent": merged_by_agent,
+        "by_model": merged_by_model,
+        "call_count": call_count,
     }
 
 
@@ -237,16 +327,79 @@ def make_app(
     register_inbox_listener(_push_inbox_event)
 
     app = FastAPI(title="Jarvis API", version="0.2.0")
+
+    # Bearer auth — required on every non-health route when JARVIS_API_TOKEN is set.
+    # Falls open (no auth) when the env var is absent so localhost dev still works.
+    # Excludes /api/health for liveness probes, WebSocket upgrades, and CORS preflight.
+    import hmac as _hmac
+    import os as _auth_os
+
+    _AUTH_TOKEN: str = _auth_os.environ.get("JARVIS_API_TOKEN", "") or _auth_os.environ.get(
+        "MC_API_TOKEN", ""
+    )
+
+    if _AUTH_TOKEN:
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse
+
+        _OPEN_PATHS = {"/api/health", "/openapi.json", "/docs", "/redoc"}
+
+        class _BearerAuthMiddleware(BaseHTTPMiddleware):
+            async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+                # Skip preflight (CORS handles it), liveness, and docs.
+                if request.method == "OPTIONS" or request.url.path in _OPEN_PATHS:
+                    return await call_next(request)
+                # WebSocket upgrades carry token via query param (browsers can't set headers).
+                if request.url.path.startswith("/ws"):
+                    qp_token = request.query_params.get("token", "")
+                    if qp_token and _hmac.compare_digest(qp_token, _AUTH_TOKEN):
+                        return await call_next(request)
+                    return JSONResponse(
+                        {"error": "unauthorized"}, status_code=401
+                    )
+                header = request.headers.get("authorization", "")
+                if not header.startswith("Bearer "):
+                    return JSONResponse(
+                        {"error": "missing or malformed Authorization header"},
+                        status_code=401,
+                    )
+                supplied = header.removeprefix("Bearer ").strip()
+                if not _hmac.compare_digest(supplied, _AUTH_TOKEN):
+                    return JSONResponse(
+                        {"error": "invalid token"}, status_code=401
+                    )
+                return await call_next(request)
+
+        app.add_middleware(_BearerAuthMiddleware)
+
+    # CORS — env-driven so tailnet / LAN origins can be allowed without code changes.
+    # JARVIS_CORS_ORIGINS: comma-separated explicit origins (overrides default).
+    # JARVIS_CORS_REGEX: regex for tailnet/LAN ranges (e.g. r"https?://.*\.ts\.net(:\d+)?").
+    import os as _os
+    _origins_env = _os.environ.get("JARVIS_CORS_ORIGINS", "")
+    _origins = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
+    _origin_regex = _os.environ.get("JARVIS_CORS_REGEX") or None
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://localhost:3001"],
+        allow_origins=_origins,
+        allow_origin_regex=_origin_regex,
         allow_methods=["*"],
         allow_headers=["*"],
+        allow_credentials=True,
     )
 
     @app.on_event("shutdown")
     async def _cleanup() -> None:
         unregister_inbox_listener(_push_inbox_event)
+
+    # ── Atlas proxy routes (must register before /api/atlas/snapshot so that
+    #    specific static paths like /trades/open beat param routes) ────────────
+    from .atlas_proxy import register_atlas_proxy
+
+    register_atlas_proxy(app, reg)
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -255,6 +408,56 @@ def make_app(
     @app.get("/api/inbox")
     async def inbox(limit: int = 50) -> dict[str, Any]:
         return {"events": [e.model_dump() for e in read_inbox(limit=limit)]}
+
+    @app.get("/api/sentinel/snapshot")
+    async def sentinel_snapshot(
+        events_limit: int = 80, heartbeat_limit: int = 60
+    ) -> dict[str, Any]:
+        """Bundle daemon state for the /sentinel dashboard.
+
+        - last_heartbeat: ts of latest sentinel_health.jsonl line
+        - jobs: [{name, status}] from latest heartbeat
+        - heartbeats: tail of sentinel_health.jsonl (sparkline source)
+        - events: tail of state/inbox.jsonl
+        """
+        heartbeats_raw = read_sentinel_health(limit=heartbeat_limit)
+        heartbeats = [hb.model_dump() for hb in heartbeats_raw]
+        last_heartbeat = heartbeats[-1]["ts"] if heartbeats else None
+        jobs_map: dict[str, str] = heartbeats[-1]["jobs"] if heartbeats else {}
+        jobs = [{"name": name, "status": status} for name, status in jobs_map.items()]
+        events = [e.model_dump() for e in read_inbox(limit=events_limit)]
+        return {
+            "last_heartbeat": last_heartbeat,
+            "jobs": jobs,
+            "heartbeats": heartbeats,
+            "events": events,
+        }
+
+    @app.get("/api/forge/snapshot")
+    async def forge_snapshot(limit: int = 30) -> dict[str, Any]:
+        """Bundle Forge state for the /forge dashboard.
+
+        - daily_runs: tail of state/daily_projects.jsonl (autonomous forge picks)
+        - next_daily_iso: next 10:00 UTC fire window for the daily_forge job
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from ..state import read_daily_forge as _read_daily_forge
+
+        daily = _read_daily_forge(limit=limit)
+        now = datetime.now(UTC)
+        next_run = now.replace(hour=10, minute=0, second=0, microsecond=0)
+        if next_run <= now:
+            next_run = next_run + timedelta(days=1)
+        statuses: dict[str, int] = {}
+        for r in daily:
+            s = str(r.get("status", "unknown"))
+            statuses[s] = statuses.get(s, 0) + 1
+        return {
+            "daily_runs": daily,
+            "next_daily_iso": next_run.isoformat(),
+            "status_counts": statuses,
+        }
 
     @app.get("/api/activity")
     async def activity(limit: int = 100) -> dict[str, Any]:
@@ -265,6 +468,14 @@ def make_app(
     async def atlas_snapshot() -> dict[str, Any]:
         """Combine portfolio + pnl + positions; set degraded=True when ATLAS is offline."""
         return _atlas_snapshot_data(reg)
+
+    @app.get("/api/dead-letter")
+    async def dead_letter(limit: int = 50) -> dict[str, Any]:
+        """Recent dead-letter records from the failure supervisor."""
+        from ..supervisor import read_dead_letter
+
+        records = read_dead_letter(limit=limit)
+        return {"data": [r.model_dump() for r in records], "error": None}
 
     @app.get("/api/tasks")
     async def tasks() -> dict[str, Any]:
@@ -542,11 +753,31 @@ def make_app(
         save_watchlist(items)
         return {"items": load_watchlist()}
 
+    # ─── Morning briefing ─────────────────────────────────────────────────────
+
+    @app.get("/api/briefing")
+    async def morning_briefing() -> dict[str, Any]:
+        """Aggregate real state from every subsystem and return a smart briefing."""
+        from ..briefing import build_briefing
+
+        try:
+            brief = build_briefing(reg)
+        except Exception as exc:
+            log.warning("briefing failed: %s", exc, exc_info=True)
+            return {"data": None, "error": str(exc)}
+        return {"data": brief, "error": None}
+
     # ─── Cost telemetry ───────────────────────────────────────────────────────
 
     @app.get("/api/cost/rollup")
     async def cost_rollup(date_str: str | None = None) -> dict[str, Any]:
-        """Return daily cost rollup.  Query param ``date`` accepts YYYY-MM-DD."""
+        """Return daily cost rollup merged with Atlas costs.
+
+        Query param ``date_str`` accepts YYYY-MM-DD.
+        Fetches Jarvis own LLM costs + Atlas costs and unions them.
+        Atlas ``by_agent`` nested objects are flattened to bare cost_usd numbers
+        to match ``useDailyCost.ts`` ``RawRollup`` shape.
+        """
         target: date | None = None
         if date_str is not None:
             try:
@@ -555,7 +786,59 @@ def make_app(
                 raise HTTPException(
                     status_code=422, detail="date must be YYYY-MM-DD"
                 ) from None
-        return daily_rollup(target)
+        jarvis_rollup = daily_rollup(target)
+        resolved_date_str = jarvis_rollup["date"]
+
+        # Attempt to fetch Atlas costs and merge; never fail if Atlas is down
+        atlas_rollup = _fetch_atlas_cost_rollup(reg, resolved_date_str)
+        if atlas_rollup is not None:
+            jarvis_rollup = _merge_cost_rollups(jarvis_rollup, atlas_rollup)
+
+        return jarvis_rollup
+
+    # ─── Digest exports ──────────────────────────────────────────────────────
+
+    @app.get("/api/exports/daily")
+    async def exports_daily(date_str: str | None = None) -> dict[str, Any]:
+        """Return a markdown daily digest. Query param date_str=YYYY-MM-DD optional."""
+        from ..exports import daily_digest
+
+        target: date | None = None
+        if date_str is not None:
+            try:
+                target = date.fromisoformat(date_str)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="date_str must be YYYY-MM-DD"
+                ) from None
+        resolved = target or datetime.now(UTC).date()
+        md = daily_digest(resolved)
+        return {"data": {"markdown": md, "date": resolved.isoformat()}, "error": None}
+
+    @app.get("/api/exports/weekly")
+    async def exports_weekly(end_date: str | None = None) -> dict[str, Any]:
+        """Return a markdown weekly digest. Query param end_date=YYYY-MM-DD optional."""
+        from ..exports import weekly_digest
+
+        end: date | None = None
+        if end_date is not None:
+            try:
+                end = date.fromisoformat(end_date)
+            except ValueError:
+                raise HTTPException(
+                    status_code=422, detail="end_date must be YYYY-MM-DD"
+                ) from None
+        resolved_end = end or datetime.now(UTC).date()
+        resolved_start = resolved_end - timedelta(days=6)
+        md = weekly_digest(resolved_end)
+        return {
+            "data": {
+                "markdown": md,
+                "start": resolved_start.isoformat(),
+                "end": resolved_end.isoformat(),
+            },
+            "error": None,
+        }
 
     # ─── Operator preferences ─────────────────────────────────────────────────
 
@@ -573,6 +856,56 @@ def make_app(
         data = asdict(prefs)
         data["important_senders"] = list(data["important_senders"])
         return data
+
+    # ─── Tempo smart-triage ───────────────────────────────────────────────────
+
+    @app.get("/api/tempo/triage-smart")
+    async def tempo_triage_smart() -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        resp = supervise_call(reg, "tempo", "triage_smart")
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/tempo/snooze")
+    async def tempo_snooze(payload: dict[str, Any]) -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        msg_id = str(payload.get("msg_id", "")).strip()
+        until_iso = str(payload.get("until_iso", "")).strip()
+        if not msg_id:
+            raise HTTPException(status_code=400, detail="msg_id required")
+        if not until_iso:
+            raise HTTPException(status_code=400, detail="until_iso required")
+        resp = supervise_call(reg, "tempo", "snooze_mail", {"msg_id": msg_id, "until_iso": until_iso})
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/tempo/triage-status")
+    async def tempo_triage_status() -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        resp = supervise_call(reg, "tempo", "triage_status")
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/tempo/search")
+    async def tempo_search_mail(query: str, max_results: int = 25) -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        q = (query or "").strip()
+        if not q:
+            raise HTTPException(status_code=400, detail="query required")
+        resp = supervise_call(
+            reg, "tempo", "search_mail", {"query": q, "max_results": max_results}
+        )
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/tempo/recent")
+    async def tempo_list_recent(max_results: int = 25) -> dict[str, Any]:
+        from ..supervisor import supervise_call
+
+        resp = supervise_call(
+            reg, "tempo", "list_recent_mail", {"max_results": max_results}
+        )
+        return {"data": resp.result, "error": None}
 
     # ─── Scholar ingest — file upload → summary + auto-assignment ────────────
 
@@ -632,6 +965,272 @@ def make_app(
             "assignment": assignment_dump,
         }
 
+    # ─── Scholar Study Companion ─────────────────────────────────────────────
+
+    def _get_study_service():  # type: ignore[return]
+        from ..subsystems.scholar_study import StudyService
+        from ..subsystems.study_db import init_db
+
+        init_db()
+        return StudyService()
+
+    @app.get("/api/scholar/documents")
+    async def scholar_list_docs() -> dict[str, Any]:
+        svc = _get_study_service()
+        return {"data": svc.list_documents(), "error": None}
+
+    @app.post("/api/scholar/documents")
+    async def scholar_upload_doc(file: UploadFile = File(...)) -> dict[str, Any]:
+        content = await file.read()
+        filename = file.filename or "upload"
+        svc = _get_study_service()
+        try:
+            doc = svc.upload_document(filename, content)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"data": doc, "error": None}
+
+    @app.get("/api/scholar/documents/{doc_id}")
+    async def scholar_get_doc(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        doc = svc.get_document(doc_id)
+        if doc is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return {"data": doc, "error": None}
+
+    @app.delete("/api/scholar/documents/{doc_id}")
+    async def scholar_delete_doc(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        ok = svc.delete_document(doc_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="document not found")
+        return {"data": {"deleted": True}, "error": None}
+
+    @app.get("/api/scholar/documents/{doc_id}/summary")
+    async def scholar_get_summary(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        try:
+            summary = svc.get_summary(doc_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": summary, "error": None}
+
+    @app.get("/api/scholar/documents/{doc_id}/flashcards")
+    async def scholar_list_flashcards(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        cards = svc.get_flashcards(doc_id)
+        return {"data": cards, "error": None}
+
+    @app.post("/api/scholar/documents/{doc_id}/flashcards")
+    async def scholar_generate_flashcards(doc_id: str) -> dict[str, Any]:
+        svc = _get_study_service()
+        try:
+            cards = svc.generate_flashcards(doc_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": cards, "error": None}
+
+    @app.post("/api/scholar/flashcards/{card_id}/rate")
+    async def scholar_rate_card(card_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        rating = payload.get("rating")
+        if rating not in (0, 1, 2, 3):
+            raise HTTPException(status_code=400, detail="rating must be 0-3")
+        svc = _get_study_service()
+        try:
+            card = svc.rate_card(card_id, int(rating))
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": card, "error": None}
+
+    @app.get("/api/scholar/due")
+    async def scholar_due_cards(course: str | None = None) -> dict[str, Any]:
+        try:
+            resp = reg["scholar"].call("due_flashcards", {"course": course})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result.get("flashcards", []), "error": None}
+
+    # ─── Frontend-friendly aliases (shorter paths, body-based rate) ──────────
+
+    @app.get("/api/scholar/docs")
+    async def scholar_list_docs_alias() -> dict[str, Any]:
+        svc = _get_study_service()
+        return {"data": svc.list_documents(), "error": None}
+
+    @app.post("/api/scholar/rate")
+    async def scholar_rate_card_alias(payload: dict[str, Any]) -> dict[str, Any]:
+        card_id = str(payload.get("card_id", "")).strip()
+        rating = payload.get("rating")
+        if not card_id:
+            raise HTTPException(status_code=400, detail="card_id required")
+        if rating not in (0, 1, 2, 3, 4, 5):
+            raise HTTPException(status_code=400, detail="rating must be 0-5")
+        # Map 0-5 SM-2 scale → 0-3 Anki scale used by StudyService
+        sm2_to_anki = {0: 0, 1: 0, 2: 1, 3: 2, 4: 2, 5: 3}
+        mapped = sm2_to_anki[int(rating)]
+        svc = _get_study_service()
+        try:
+            card = svc.rate_card(card_id, mapped)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"data": card, "error": None}
+
+    # ─── Problem solver / exam mode / weak topics (Linalg companion) ─────────
+
+    @app.post("/api/scholar/solve")
+    async def scholar_solve(payload: dict[str, Any]) -> dict[str, Any]:
+        problem = str(payload.get("problem", "")).strip()
+        if not problem:
+            raise HTTPException(status_code=400, detail="problem required")
+        course = payload.get("course")
+        course_str = str(course) if course else None
+        try:
+            resp = reg["scholar"].call("solve_problem", {"problem": problem, "course": course_str})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/rate-problem")
+    async def scholar_rate_problem(payload: dict[str, Any]) -> dict[str, Any]:
+        problem_id = str(payload.get("problem_id", "")).strip()
+        if not problem_id:
+            raise HTTPException(status_code=400, detail="problem_id required")
+        correct = bool(payload.get("correct"))
+        try:
+            resp = reg["scholar"].call("rate_problem", {"problem_id": problem_id, "correct": correct})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/scholar/weak")
+    async def scholar_weak(
+        top_n: int = 8, course: str | None = None
+    ) -> dict[str, Any]:
+        try:
+            resp = reg["scholar"].call(
+                "weak_topics", {"top_n": int(top_n), "course": course}
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/exam")
+    async def scholar_exam(payload: dict[str, Any]) -> dict[str, Any]:
+        course = str(payload.get("course", "")).strip()
+        if not course:
+            raise HTTPException(status_code=400, detail="course required")
+        duration_min = int(payload.get("duration_min", 60))
+        problem_count = int(payload.get("problem_count", 5))
+        try:
+            resp = reg["scholar"].call(
+                "exam_session",
+                {"course": course, "duration_min": duration_min, "problem_count": problem_count},
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/seed/{seed_name}")
+    async def scholar_seed(
+        seed_name: str, course: str | None = None
+    ) -> dict[str, Any]:
+        try:
+            resp = reg["scholar"].call(
+                "import_seed", {"seed_name": seed_name, "course": course}
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.post("/api/scholar/ingest-syllabus")
+    async def scholar_ingest_syllabus(payload: dict[str, Any]) -> dict[str, Any]:
+        filename = str(payload.get("filename", "")).strip()
+        content_b64 = str(payload.get("content_b64", "")).strip()
+        course = str(payload.get("course", "")).strip()
+        if not filename or not content_b64 or not course:
+            raise HTTPException(
+                status_code=400,
+                detail="filename, content_b64, and course are required",
+            )
+        try:
+            tempo_inst = reg["tempo"].instance
+            resp = reg["scholar"].instance.ingest_syllabus(
+                filename=filename,
+                content_b64=content_b64,
+                course=course,
+                tempo=tempo_inst,
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    # ─── Forge runs ──────────────────────────────────────────────────────────
+
+    @app.post("/api/forge/execute")
+    async def forge_execute(payload: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch a forge task and return the run record."""
+        repo = str(payload.get("repo", "")).strip()
+        task = str(payload.get("task", "")).strip()
+        if not task:
+            raise HTTPException(status_code=400, detail="task required")
+        push = bool(payload.get("push", False))
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        try:
+            resp = forge_desc.call("execute", {"repo": repo, "task": task, "push": push})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/forge/runs")
+    async def forge_list_runs(limit: int = 50) -> dict[str, Any]:
+        """List recent forge runs."""
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        try:
+            resp = forge_desc.call("list_runs", {"limit": limit})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/forge/runs/{run_id}")
+    async def forge_get_run(run_id: str) -> dict[str, Any]:
+        """Fetch a single forge run by ID."""
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        try:
+            resp = forge_desc.call("get_run", {"run_id": run_id})
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        if resp.action == "not_found":
+            raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+        return {"data": resp.result, "error": None}
+
+    @app.get("/api/forge/runs/{run_id}/log")
+    async def forge_run_log(run_id: str) -> Any:
+        """Return the raw log for a forge run as plain text."""
+        from fastapi.responses import PlainTextResponse
+
+        forge_desc = reg.get("forge")
+        if forge_desc is None:
+            raise HTTPException(status_code=503, detail="forge not registered")
+        resp = forge_desc.call("get_run", {"run_id": run_id})
+        if resp.action == "not_found":
+            raise HTTPException(status_code=404, detail=f"run {run_id!r} not found")
+        log_path = resp.result.get("run", {}).get("log_path", "")
+        if not log_path:
+            raise HTTPException(status_code=404, detail="log_path not set on run")
+        try:
+            text = Path(log_path).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="log file not found") from None
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        return PlainTextResponse(text)
+
     # ─── Jarvis chatbot (Claude Opus 4.7 + OpenClaw soul) ────────────────────
 
     _jarvis_chat: dict[str, Any] = {"instance": None}
@@ -643,22 +1242,84 @@ def make_app(
             _jarvis_chat["instance"] = JarvisChat(registry=reg)
         return _jarvis_chat["instance"]
 
+    def _bearer_user_id(request: Request) -> str:
+        header = request.headers.get("authorization", "")
+        token = header.removeprefix("Bearer ").strip() if header.startswith("Bearer ") else ""
+        return user_id_from_token(token)
+
     @app.post("/api/jarvis/chat")
-    async def jarvis_chat(payload: dict[str, Any]) -> StreamingResponse:
+    async def jarvis_chat(payload: dict[str, Any], request: Request) -> StreamingResponse:
         message = str(payload.get("message", "")).strip()
         if not message:
             raise HTTPException(status_code=400, detail="message required")
         chat = _get_jarvis()
+        user_id = _bearer_user_id(request)
+        turn_id = uuid4().hex
 
         async def gen():
+            assistant_buf: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+            tool_call_index: dict[str, int] = {}
+            model = ""
+            cost_usd = 0.0
+            duration_ms = 0
             try:
                 async for ev in chat.stream(message):
-                    line = json.dumps({"type": ev.type, **ev.payload}, default=str)
+                    if ev.type == "text":
+                        assistant_buf.append(str(ev.payload.get("delta", "")))
+                    elif ev.type == "model":
+                        model = str(ev.payload.get("model", ""))
+                    elif ev.type == "tool_use":
+                        tool_use_id = str(ev.payload.get("tool_use_id", ""))
+                        tool_call_index[tool_use_id] = len(tool_calls)
+                        tool_calls.append(
+                            {
+                                "tool_use_id": tool_use_id,
+                                "agent": str(ev.payload.get("agent", "")),
+                                "action": str(ev.payload.get("action", "")),
+                                "args": ev.payload.get("args") or {},
+                                "result": None,
+                            }
+                        )
+                    elif ev.type == "tool_result":
+                        tool_use_id = str(ev.payload.get("tool_use_id", ""))
+                        if tool_use_id in tool_call_index:
+                            tool_calls[tool_call_index[tool_use_id]]["result"] = {
+                                "text": str(ev.payload.get("text", "")),
+                                "is_error": bool(ev.payload.get("is_error", False)),
+                            }
+                    elif ev.type == "done":
+                        if isinstance(ev.payload.get("total_cost_usd"), (int, float)):
+                            cost_usd = float(ev.payload["total_cost_usd"])
+                        if isinstance(ev.payload.get("duration_ms"), (int, float)):
+                            duration_ms = int(ev.payload["duration_ms"])
+
+                    line = json.dumps(
+                        {"type": ev.type, "turn_id": turn_id, **ev.payload}, default=str
+                    )
                     yield f"data: {line}\n\n"
             except Exception as exc:  # pragma: no cover
                 log.exception("jarvis chat stream failed")
                 err = json.dumps({"type": "error", "message": str(exc)})
                 yield f"data: {err}\n\n"
+                return
+
+            try:
+                append_turn(
+                    ChatTurnRecord(
+                        user_id=user_id,
+                        turn_id=turn_id,
+                        user_text=message,
+                        assistant_text="".join(assistant_buf),
+                        tool_calls=tool_calls,
+                        model=model,
+                        cost_usd=cost_usd,
+                        duration_ms=duration_ms,
+                        ts=datetime.now(UTC).isoformat(),
+                    )
+                )
+            except Exception:
+                log.exception("failed to persist chat turn")
 
         return StreamingResponse(
             gen(),
@@ -668,6 +1329,127 @@ def make_app(
                 "X-Accel-Buffering": "no",
             },
         )
+
+    @app.get("/api/jarvis/turns")
+    async def jarvis_turns(request: Request, limit: int = 50) -> dict[str, Any]:
+        """Recent chat turns for the bearer-derived user, oldest-first."""
+        if limit < 1 or limit > 500:
+            raise HTTPException(status_code=422, detail="limit must be 1-500")
+        user_id = _bearer_user_id(request)
+        records = read_recent(user_id, limit=limit)
+        return {"data": [asdict(r) for r in records], "error": None}
+
+    @app.post("/api/jarvis/terminal")
+    async def jarvis_terminal_chat(payload: dict[str, Any]) -> dict[str, Any]:
+        """Non-streaming chat endpoint for Atlas terminal reverse-path.
+
+        Atlas terminal.py POSTs unprefixed messages here with
+        ``{"message": str, "session_id": str}``. Returns
+        ``{"response": str, "session_id": str}``.
+        """
+        message = str(payload.get("message", "")).strip()
+        session_id = str(payload.get("session_id", ""))
+        if not message:
+            raise HTTPException(status_code=400, detail="message required")
+        chat = _get_jarvis()
+        chunks: list[str] = []
+        try:
+            async for ev in chat.stream(message):
+                if ev.type == "text":
+                    chunks.append(ev.payload.get("delta", ""))
+        except Exception as exc:
+            log.warning("jarvis terminal chat error: %s", exc)
+            return {"response": f"error: {exc}", "session_id": session_id}
+        return {"response": "".join(chunks), "session_id": session_id}
+
+    @app.post("/api/jarvis/recall")
+    async def jarvis_recall(payload: dict[str, Any]) -> dict[str, Any]:
+        """Semantic search over long-term chat history.
+
+        Body: {query: str, top_k?: int}
+        Response: {data: [{score, role, text, ts, lane}], error: null | str}
+        """
+        query = str(payload.get("query", "")).strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="query required")
+        top_k = int(payload.get("top_k", 5))
+        if top_k < 1 or top_k > 50:
+            raise HTTPException(status_code=422, detail="top_k must be 1-50")
+        chat = _get_jarvis()
+        try:
+            results = chat.semantic_search(query, top_k=top_k)
+        except Exception as exc:
+            log.warning("recall failed: %s", exc)
+            return {"data": [], "error": str(exc)}
+        return {"data": results, "error": None}
+
+    # ─── Cross-agent triggers ─────────────────────────────────────────────────
+
+    # ─── Global search ────────────────────────────────────────────────────────
+
+    @app.get("/api/search")
+    async def global_search(q: str = "", limit_per_kind: int = 5) -> dict[str, Any]:
+        """Keyword + semantic search across inbox, tasks, decisions, logs, chat.
+
+        Query params:
+          q              — search query string
+          limit_per_kind — max results per source (default 5)
+        """
+        from dataclasses import asdict
+
+        from ..search import search_all
+
+        if limit_per_kind < 1 or limit_per_kind > 20:
+            raise HTTPException(status_code=422, detail="limit_per_kind must be 1-20")
+        try:
+            hits = search_all(q, limit_per_kind=limit_per_kind)
+        except Exception as exc:
+            log.warning("search_all failed: %s", exc)
+            return {"data": [], "error": str(exc)}
+        return {"data": [asdict(h) for h in hits], "error": None}
+
+    # Wire inbox listener so every append_inbox call fans out to trigger rules.
+    from ..triggers import fire_for_event as _fire_for_event
+    from ..triggers import list_recent_fires as _list_recent_fires
+
+    register_inbox_listener(lambda e: _fire_for_event(reg, e))
+
+    @app.get("/api/triggers/recent")
+    async def triggers_recent(limit: int = 50) -> dict[str, Any]:
+        """Return the most recent trigger fire records."""
+        return {"data": _list_recent_fires(limit=limit), "error": None}
+
+    @app.get("/api/triggers/rules")
+    async def triggers_rules() -> dict[str, Any]:
+        """Return static list of rule names and descriptions."""
+        rules = [
+            {
+                "name": "scholar_exam_scheduled",
+                "description": "scholar.exam_session success → tempo.add blocks exam as a task",
+                "trigger": "event-driven (after exam_session call)",
+            },
+            {
+                "name": "scholar_exam_imminent",
+                "description": "Exam starting within 24h → warn InboxEvent surfaced on /scholar",
+                "trigger": "periodic (every 30 min via sentinel)",
+            },
+            {
+                "name": "tempo_task_due_today",
+                "description": "Task with course: tag due today → info InboxEvent on /scholar",
+                "trigger": "periodic (every 30 min via sentinel)",
+            },
+            {
+                "name": "forge_run_failed",
+                "description": "Forge dead-letter record → crit InboxEvent on /inbox",
+                "trigger": "periodic (every 30 min via sentinel)",
+            },
+            {
+                "name": "atlas_guardian_violation",
+                "description": "Atlas guardian_check violation → crit InboxEvent (caller-driven)",
+                "trigger": "event-driven (atlas pipeline)",
+            },
+        ]
+        return {"data": rules, "error": None}
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):  # pragma: no cover - websocket runtime
@@ -681,14 +1463,36 @@ def make_app(
         except WebSocketDisconnect:
             await bus.remove(websocket)
 
+    # Atlas WS client — started on startup when atlas mode is live
+    from ..subsystems.atlas_ws_client import AtlasWsClient as _AtlasWsClient
+
+    _atlas_ws: dict[str, Any] = {"client": None}
+
     @app.on_event("startup")
     async def _capture_loop() -> None:
         global _active_loop
         _active_loop = asyncio.get_running_loop()
+        atlas_desc = reg.get("atlas")
+        if atlas_desc is not None:
+            from ..subsystems.atlas import AtlasOrchestrator
+
+            orchestrator_inst = atlas_desc.instance
+            if isinstance(orchestrator_inst, AtlasOrchestrator) and orchestrator_inst.mode == "live":
+                ws_client = _AtlasWsClient(_make_event_sink(bus))
+                _atlas_ws["client"] = ws_client
+                await ws_client.start_ws()
+
+    @app.on_event("shutdown")
+    async def _ws_shutdown() -> None:
+        client = _atlas_ws.get("client")
+        if client is not None:
+            await client.stop()
 
     # Test helper: surface bus + registry as app.state so tests can inspect
     app.state.broadcaster = bus
     app.state.registry = reg
+    # Expose _jarvis_chat dict so tests can inject a mock chat instance
+    app.state.jarvis_chat = _jarvis_chat
     return app
 
 

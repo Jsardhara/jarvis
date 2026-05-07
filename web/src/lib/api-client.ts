@@ -26,8 +26,29 @@ export interface ApiFetchInit extends RequestInit {
  * - POST/PUT/DELETE default to 0 retries (mutations need explicit opt-in).
  * - Retries only on network errors and 5xx responses (never on 4xx).
  */
+const TOKEN_STORAGE_KEY = "jarvis-token";
+
+/** Read API token. Browser-stored localStorage value wins over build-time env. */
+export function getApiToken(): string | null {
+  if (typeof window !== "undefined") {
+    const stored = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (stored) return stored;
+  }
+  return process.env.NEXT_PUBLIC_MC_API_TOKEN ?? null;
+}
+
+export function setApiToken(token: string): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(TOKEN_STORAGE_KEY, token);
+}
+
+export function clearApiToken(): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(TOKEN_STORAGE_KEY);
+}
+
 export async function apiFetch(url: string, init?: ApiFetchInit): Promise<Response> {
-  const token = process.env.NEXT_PUBLIC_MC_API_TOKEN;
+  const token = getApiToken();
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);

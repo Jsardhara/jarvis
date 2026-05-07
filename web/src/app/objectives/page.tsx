@@ -105,7 +105,7 @@ export default function GoalsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Objectives" }]} />
         <div className="grid gap-3 sm:grid-cols-2">
           <GoalCardSkeleton />
@@ -118,7 +118,7 @@ export default function GoalsPage() {
 
   if (goalsError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Objectives" }]} />
         <ErrorState message={goalsError} onRetry={refetchGoals} />
       </div>
@@ -126,7 +126,7 @@ export default function GoalsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Objectives" }]} />
       <div className="flex items-center justify-between">
         <div>

@@ -17,6 +17,8 @@ class Settings(BaseModel):
     atlas_api: str
     pushover_user_key: str | None = None
     pushover_api_token: str | None = None
+    ntfy_topic: str | None = None
+    ntfy_server: str = "https://ntfy.sh"
     slack_bot_token: str | None = None
     slack_signing_secret: str | None = None
     discord_bot_token: str | None = None
@@ -38,6 +40,8 @@ def get_settings() -> Settings:
         atlas_api=os.environ.get("JARVIS_ATLAS_API", "http://localhost:8000"),
         pushover_user_key=os.environ.get("PUSHOVER_USER_KEY"),
         pushover_api_token=os.environ.get("PUSHOVER_API_TOKEN"),
+        ntfy_topic=os.environ.get("NTFY_TOPIC"),
+        ntfy_server=os.environ.get("NTFY_SERVER", "https://ntfy.sh"),
         slack_bot_token=os.environ.get("SLACK_BOT_TOKEN"),
         slack_signing_secret=os.environ.get("SLACK_SIGNING_SECRET"),
         discord_bot_token=os.environ.get("DISCORD_BOT_TOKEN"),

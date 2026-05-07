@@ -71,7 +71,7 @@ export default function ProjectsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Missions" }]} />
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ProjectCardSkeleton />
@@ -84,7 +84,7 @@ export default function ProjectsPage() {
 
   if (projectsError) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Missions" }]} />
         <ErrorState message={projectsError} onRetry={refetchProjects} />
       </div>
@@ -92,7 +92,7 @@ export default function ProjectsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-5">
       <BreadcrumbNav items={[{ label: "Missions" }]} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
