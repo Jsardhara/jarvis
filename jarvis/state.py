@@ -7,6 +7,7 @@ import logging
 from collections.abc import Callable, Iterable
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 from .config import get_settings
 from .contract import (

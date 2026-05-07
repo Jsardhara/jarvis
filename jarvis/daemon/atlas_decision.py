@@ -118,21 +118,23 @@ def decide(snapshot: AtlasSnapshot, policy: Policy | None = None) -> list[Decisi
         )
 
     # Rule 2 — open-position cap. Pause oracle so no fresh signals stack up.
-    if snapshot.open_positions_count >= pol.max_open_positions:
-        if snapshot.agent_states.get("oracle") != "paused":
-            actions.append(
-                DecisionAction(
-                    type="pause_agent",
-                    agent_id="oracle",
-                    reason=(
-                        f"open_position_cap: {snapshot.open_positions_count} ≥ "
-                        f"{pol.max_open_positions}"
-                    ),
-                    severity="warn",
-                    priority=1,
-                    payload={"open_positions": snapshot.open_positions_count},
-                )
+    if (
+        snapshot.open_positions_count >= pol.max_open_positions
+        and snapshot.agent_states.get("oracle") != "paused"
+    ):
+        actions.append(
+            DecisionAction(
+                type="pause_agent",
+                agent_id="oracle",
+                reason=(
+                    f"open_position_cap: {snapshot.open_positions_count} ≥ "
+                    f"{pol.max_open_positions}"
+                ),
+                severity="warn",
+                priority=1,
+                payload={"open_positions": snapshot.open_positions_count},
             )
+        )
 
     # Rule 3 — stale heartbeats. Alert per stale agent.
     for agent_id, last_hb in snapshot.agent_last_heartbeat.items():
