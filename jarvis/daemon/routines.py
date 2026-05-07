@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from ..config import get_settings
 from ..contract import InboxEvent, SentinelHealthEvent
 from ..memory import append_daily, remember_session
-from ..state import append_inbox, append_sentinel_health, read_agent_log
+from ..state import append_inbox, append_sentinel_health, read_agent_log, read_inbox
 from ..subsystems.atlas import AtlasOrchestrator, AtlasUnavailableError
 from ..subsystems.lens import Lens
 from ..subsystems.scholar import Scholar
@@ -202,6 +202,108 @@ def atlas_tick(
         "actions": [a.type for a in actions],
         "statuses": statuses,
     }
+
+
+def atlas_daily_rollup(
+    atlas: AtlasOrchestrator,
+    notifier: Notifier,
+) -> dict[str, Any]:
+    """End-of-day ATLAS digest. Push priority matches what happened today.
+
+    Aggregates the day's atlas inbox events and emits one rollup notification:
+
+      priority=2  if any "alert" tier event landed today (drawdown, pause)
+      priority=1  if only "warn" tier events landed (stale heartbeats, caps)
+      priority=0  pure info day (default — quiet rollup)
+
+    The rollup never re-fires the original alerts; those went out as they
+    happened. This is a once-per-day "here's what ATLAS did" line.
+    """
+    # Read today's atlas-tagged inbox events. read_inbox tails the file so
+    # we look at the last 500 lines and filter — cheap.
+
+    today = datetime.now(UTC).date()
+    events = read_inbox(limit=500)
+    today_atlas = [
+        e for e in events
+        if e.agent == "atlas"
+        and getattr(e, "ts", None)
+        and _ts_date(e.ts) == today
+    ]
+
+    severities = {e.severity for e in today_atlas}
+    counts = {
+        "alert": sum(1 for e in today_atlas if e.severity == "alert"),
+        "warn": sum(1 for e in today_atlas if e.severity == "warn"),
+        "info": sum(1 for e in today_atlas if e.severity == "info"),
+    }
+    action_total = 0
+    pnl_pct_last: float | None = None
+    pos_last: int | None = None
+    for e in today_atlas:
+        ref = getattr(e, "ref", {}) or {}
+        action_total += len(ref.get("actions", []) or [])
+        if "pnl_pct" in ref:
+            pnl_pct_last = float(ref.get("pnl_pct") or 0.0)
+        if "open_positions" in ref:
+            pos_last = int(ref.get("open_positions") or 0)
+
+    if "alert" in severities:
+        priority = 2
+        title = "Atlas — daily rollup (ALERT)"
+    elif "warn" in severities:
+        priority = 1
+        title = "Atlas — daily rollup (warn)"
+    else:
+        priority = 0
+        title = "Atlas — daily rollup"
+
+    summary_parts = [
+        f"events={len(today_atlas)}",
+        f"alert={counts['alert']}",
+        f"warn={counts['warn']}",
+        f"actions={action_total}",
+    ]
+    if pnl_pct_last is not None:
+        summary_parts.append(f"pnl={pnl_pct_last:+.2%}")
+    if pos_last is not None:
+        summary_parts.append(f"pos={pos_last}")
+    summary = " ".join(summary_parts)
+
+    notifier.push(title, summary, priority=priority)
+    append_inbox(
+        InboxEvent(
+            agent="atlas",
+            severity="info",
+            summary=f"daily rollup: {summary}",
+            ref={
+                "rollup": True,
+                "counts": counts,
+                "pnl_pct": pnl_pct_last,
+                "open_positions": pos_last,
+                "actions_total": action_total,
+                "priority": priority,
+            },
+        )
+    )
+    return {
+        "priority": priority,
+        "events": len(today_atlas),
+        "counts": counts,
+        "actions_total": action_total,
+    }
+
+
+def _ts_date(ts: Any) -> Any:
+    """Coerce an InboxEvent timestamp (str or datetime) to a date object."""
+    if isinstance(ts, datetime):
+        return ts.date()
+    if isinstance(ts, str):
+        try:
+            return datetime.fromisoformat(ts.replace("Z", "+00:00")).date()
+        except ValueError:
+            return None
+    return None
 
 
 def news_tick(lens: Lens, watchlist: list[str], notifier: Notifier) -> dict[str, Any]:
