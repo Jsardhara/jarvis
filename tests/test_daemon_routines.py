@@ -63,8 +63,12 @@ def test_atlas_tick_alerts_on_drawdown():
     notifier = NoopNotifier()
     out = atlas_tick(atlas, notifier, drawdown_alert_pct=DRAWDOWN_ALERT_PCT)
     assert out["severity"] == "alert"
-    assert len(notifier.calls) == 1
-    assert "drawdown" in notifier.calls[0][0].lower()
+    # Drawdown breach now triggers BOTH pause_agent(trader) AND a separate alert.
+    assert len(notifier.calls) >= 1
+    assert any("drawdown" in title.lower() or "paused" in title.lower()
+               for title, *_ in notifier.calls)
+    assert "pause_agent" in out["actions"]
+    assert "alert" in out["actions"]
 
 
 def test_atlas_tick_no_alert_for_mock_pnl():

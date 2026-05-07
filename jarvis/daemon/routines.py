@@ -22,10 +22,11 @@ from ..config import get_settings
 from ..contract import InboxEvent, SentinelHealthEvent
 from ..memory import append_daily, remember_session
 from ..state import append_inbox, append_sentinel_health, read_agent_log
-from ..subsystems.atlas import AtlasOrchestrator
+from ..subsystems.atlas import AtlasOrchestrator, AtlasUnavailableError
 from ..subsystems.lens import Lens
 from ..subsystems.scholar import Scholar
 from ..subsystems.tempo import TIER_ACTION, Tempo
+from .atlas_decision import AtlasSnapshot, DecisionAction, Policy, decide
 from .notifier import Notifier
 
 if TYPE_CHECKING:
@@ -58,21 +59,149 @@ def calendar_tick(tempo: Tempo, notifier: Notifier) -> dict[str, Any]:
     return {"count": count}
 
 
-def atlas_tick(atlas: AtlasOrchestrator, notifier: Notifier,
-               drawdown_alert_pct: float = DRAWDOWN_ALERT_PCT) -> dict[str, Any]:
+def _build_atlas_snapshot(atlas: AtlasOrchestrator) -> AtlasSnapshot:
+    """Pull live ATLAS state into a snapshot the decision engine can consume."""
     pnl_resp = atlas.pnl(window="1d")
-    pnl_pct = pnl_resp.result["pnl"].get("pnl_pct", 0)
-    is_mock = pnl_resp.result.get("mock", False)
-    if pnl_pct <= drawdown_alert_pct and not is_mock:
+    pnl_data = pnl_resp.result.get("pnl", {})
+    pnl_pct = float(pnl_data.get("pnl_pct", 0) or 0)
+    is_mock = bool(pnl_resp.result.get("mock", False))
+
+    positions_count = 0
+    try:
+        pos_resp = atlas.positions()
+        positions_count = int(pos_resp.result.get("count", 0) or 0)
+    except Exception as exc:  # noqa: BLE001 — degrade gracefully
+        log.warning("atlas snapshot positions failed: %s", exc)
+
+    agent_states: dict[str, str] = {}
+    agent_last_hb: dict[str, datetime | None] = {}
+    if not is_mock:
+        try:
+            state_resp = atlas.agent_state()
+            for entry in state_resp.result.get("agents", []):
+                aid = entry.get("id")
+                if not aid:
+                    continue
+                agent_states[aid] = str(entry.get("state") or "")
+                hb_raw = entry.get("last_heartbeat")
+                hb: datetime | None = None
+                if isinstance(hb_raw, str) and hb_raw:
+                    try:
+                        hb = datetime.fromisoformat(hb_raw.replace("Z", "+00:00"))
+                    except ValueError:
+                        hb = None
+                agent_last_hb[aid] = hb
+        except (AtlasUnavailableError, Exception) as exc:  # noqa: BLE001
+            log.warning("atlas snapshot agent_state failed: %s", exc)
+
+    return AtlasSnapshot(
+        pnl_pct=pnl_pct,
+        open_positions_count=positions_count,
+        agent_states=agent_states,
+        agent_last_heartbeat=agent_last_hb,
+        is_mock=is_mock,
+    )
+
+
+def _execute_atlas_action(
+    atlas: AtlasOrchestrator,
+    notifier: Notifier,
+    action: DecisionAction,
+) -> str:
+    """Run one decision action. Returns a short status string for inbox."""
+    if action.type == "noop":
+        return f"noop: {action.reason}"
+    if action.type == "alert":
+        title = f"Atlas — {action.agent_id or 'system'}"
+        notifier.push(title, action.reason, priority=action.priority)
+        return f"alert: {action.reason}"
+    if action.type == "pause_agent" and action.agent_id:
+        try:
+            atlas.pause_agent(action.agent_id)
+        except AtlasUnavailableError as exc:
+            log.warning("pause_agent(%s) failed: %s", action.agent_id, exc)
+            return f"pause_failed: {action.agent_id}"
+        if action.priority >= 2:
+            notifier.push(
+                f"Atlas — paused {action.agent_id}",
+                action.reason,
+                priority=action.priority,
+            )
+        return f"paused: {action.agent_id} ({action.reason})"
+    if action.type == "resume_agent" and action.agent_id:
+        try:
+            atlas.resume_agent(action.agent_id)
+        except AtlasUnavailableError as exc:
+            log.warning("resume_agent(%s) failed: %s", action.agent_id, exc)
+            return f"resume_failed: {action.agent_id}"
+        return f"resumed: {action.agent_id} ({action.reason})"
+    if action.type == "oracle_scan":
+        try:
+            atlas.trigger_oracle_scan(reason=action.reason)
+        except AtlasUnavailableError as exc:
+            log.warning("trigger_oracle_scan failed: %s", exc)
+            return f"scan_failed: {action.reason}"
+        return f"scan_triggered: {action.reason}"
+    return f"unknown_action: {action.type}"
+
+
+def atlas_tick(
+    atlas: AtlasOrchestrator,
+    notifier: Notifier,
+    drawdown_alert_pct: float = DRAWDOWN_ALERT_PCT,
+    policy: Policy | None = None,
+) -> dict[str, Any]:
+    """Decision-layer tick.
+
+    Pulls a state snapshot, runs the policy engine, executes each
+    recommended action (pause/resume/scan/alert), and writes one inbox
+    event per cycle summarizing the outcome.
+    """
+    pol = policy or Policy(
+        drawdown_pause_pct=drawdown_alert_pct,
+        drawdown_alert_pct=drawdown_alert_pct,
+    )
+    snapshot = _build_atlas_snapshot(atlas)
+    actions = decide(snapshot, pol)
+    statuses = [_execute_atlas_action(atlas, notifier, a) for a in actions]
+
+    severity = "info"
+    if any(a.severity == "alert" for a in actions):
         severity = "alert"
-        summary = f"ATLAS drawdown: {pnl_pct:.2%}"
-        notifier.push("Atlas — drawdown alert", summary, priority=2)
-    else:
-        severity = "info"
-        summary = f"ATLAS 1d pnl: {pnl_pct:.2%}{' (mock)' if is_mock else ''}"
-    append_inbox(InboxEvent(agent="atlas", severity=severity, summary=summary,
-                            ref={"pnl_pct": pnl_pct, "mock": is_mock}))
-    return {"pnl_pct": pnl_pct, "severity": severity}
+    elif any(a.severity == "warn" for a in actions):
+        severity = "warn"
+
+    summary = (
+        f"ATLAS pnl={snapshot.pnl_pct:+.2%} pos={snapshot.open_positions_count} "
+        f"actions={len(actions)}"
+    )
+    if snapshot.is_mock:
+        summary += " (mock)"
+
+    append_inbox(
+        InboxEvent(
+            agent="atlas",
+            severity=severity,
+            summary=summary,
+            ref={
+                "pnl_pct": snapshot.pnl_pct,
+                "open_positions": snapshot.open_positions_count,
+                "agent_states": snapshot.agent_states,
+                "actions": [
+                    {"type": a.type, "agent_id": a.agent_id, "reason": a.reason}
+                    for a in actions
+                ],
+                "statuses": statuses,
+                "mock": snapshot.is_mock,
+            },
+        )
+    )
+    return {
+        "pnl_pct": snapshot.pnl_pct,
+        "severity": severity,
+        "actions": [a.type for a in actions],
+        "statuses": statuses,
+    }
 
 
 def news_tick(lens: Lens, watchlist: list[str], notifier: Notifier) -> dict[str, Any]:

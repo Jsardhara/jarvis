@@ -203,11 +203,15 @@ class AtlasBridge:
         )
 
     def pipeline_trader_execute(
-        self, signal_id: str, mode: str = "paper", idempotency_key: str | None = None
+        self,
+        signal_id: str,
+        mode: str = "paper",
+        auto: bool = False,
+        idempotency_key: str | None = None,
     ) -> dict | None:
         return self._post(
             "/pipeline/trader-execute",
-            {"signal_id": signal_id, "mode": mode},
+            {"signal_id": signal_id, "mode": mode, "auto": auto},
             idempotency_key=idempotency_key,
         )
 
@@ -218,6 +222,31 @@ class AtlasBridge:
             "/pipeline/sage-review",
             {"trade_id": trade_id},
             idempotency_key=idempotency_key,
+        )
+
+    # ---- Control surface (Phase 2 — Jarvis decision layer) ----
+
+    def control_pause_agent(self, agent_id: str) -> dict | None:
+        return self._post("/control/pause-agent", {"agent_id": agent_id})
+
+    def control_resume_agent(self, agent_id: str) -> dict | None:
+        return self._post("/control/resume-agent", {"agent_id": agent_id})
+
+    def control_agent_state(self) -> dict | None:
+        return self._get("/control/agent-state")
+
+    def control_set_strategy_weights(self, weights: dict[str, float]) -> dict | None:
+        return self._post("/control/strategy-weights", {"weights": weights})
+
+    def control_get_strategy_weights(self) -> dict | None:
+        return self._get("/control/strategy-weights")
+
+    def control_trigger_oracle_scan(
+        self, reason: str | None = None, universe: list[str] | None = None
+    ) -> dict | None:
+        return self._post(
+            "/control/oracle-scan",
+            {"reason": reason, "universe": universe},
         )
 
     def cost_rollup(self, date_str: str) -> dict | None:
@@ -568,28 +597,59 @@ class AtlasOrchestrator:
         )
 
     def trader_execute(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
-        """Execution proposal — operator confirms before run."""
+        """Execution dispatch.
+
+        ``mode='paper'``: Jarvis auto-confirms (``auto=True`` to ATLAS).
+        Calls the bridge immediately and returns ``action='executed'`` with
+        ``needs_confirm=False`` so the decision layer fires without operator
+        intervention.
+
+        ``mode='live'``: does NOT call the bridge. Returns
+        ``action='proposed'`` with ``needs_confirm=True``. Operator must
+        confirm; ``trader_execute_confirmed`` then calls the bridge with
+        ``auto=False`` after approval.
+        """
         degraded = self._is_offline()
+        is_paper = mode == "paper"
+
+        if not is_paper:
+            # Live: stop at the Jarvis layer. Do NOT contact ATLAS yet.
+            result: dict = {"strategy_id": strategy_id, "mode": mode, "auto": False}
+            if degraded:
+                result["meta"] = _DEGRADED_META
+            return AgentResponse(
+                agent="atlas.trader",
+                intent="execute_strategy",
+                action="proposed",
+                result=result,
+                needs_confirm=True,
+                follow_ups=[f"confirm to run strategy {strategy_id} in {mode}"],
+                confidence=0.9,
+            )
+
+        # Paper: auto-fire via the bridge.
         if not self._use_mock() and not degraded:
             raw = None
             with contextlib.suppress(Exception):
-                raw = self.bridge.pipeline_trader_execute(signal_id=strategy_id, mode=mode)
+                raw = self.bridge.pipeline_trader_execute(
+                    signal_id=strategy_id, mode=mode, auto=True
+                )
             if raw is not None and ("status" in raw or "correlation_id" in raw):
                 return _parse_pipeline_envelope(
-                    raw, "atlas.trader", "execute_strategy", "proposed",
-                    {"strategy_id": strategy_id, "mode": mode},
+                    raw, "atlas.trader", "execute_strategy", "executed",
+                    {"strategy_id": strategy_id, "mode": mode, "auto": True},
                     base_confidence=0.9,
                 )
-        result: dict = {"strategy_id": strategy_id, "mode": mode}
+        result = {"strategy_id": strategy_id, "mode": mode, "auto": True}
         if degraded:
             result["meta"] = _DEGRADED_META
         return AgentResponse(
             agent="atlas.trader",
             intent="execute_strategy",
-            action="proposed",
+            action="executed",
             result=result,
-            needs_confirm=True,
-            follow_ups=[f"confirm to run strategy {strategy_id} in {mode}"],
+            needs_confirm=False,
+            follow_ups=[],
             confidence=0.9,
         )
 
@@ -649,6 +709,115 @@ class AtlasOrchestrator:
             action="reviewed",
             result=result,
             confidence=0.5,
+        )
+
+    # ---- Control surface (Phase 2) ----
+
+    def pause_agent(self, agent_id: str) -> AgentResponse:
+        """Tell ATLAS to pause an agent. No operator confirmation needed."""
+        if self._use_mock() or self._is_offline():
+            return AgentResponse(
+                agent="atlas.control",
+                intent="pause_agent",
+                action="paused",
+                result={"agent_id": agent_id, "mock": True},
+                confidence=0.5,
+            )
+        raw = None
+        with contextlib.suppress(Exception):
+            raw = self.bridge.control_pause_agent(agent_id)
+        if raw is None:
+            raise AtlasUnavailableError(f"control.pause_agent({agent_id}) failed")
+        return AgentResponse(
+            agent="atlas.control",
+            intent="pause_agent",
+            action="paused",
+            result=raw,
+            confidence=1.0,
+        )
+
+    def resume_agent(self, agent_id: str) -> AgentResponse:
+        if self._use_mock() or self._is_offline():
+            return AgentResponse(
+                agent="atlas.control",
+                intent="resume_agent",
+                action="resumed",
+                result={"agent_id": agent_id, "mock": True},
+                confidence=0.5,
+            )
+        raw = None
+        with contextlib.suppress(Exception):
+            raw = self.bridge.control_resume_agent(agent_id)
+        if raw is None:
+            raise AtlasUnavailableError(f"control.resume_agent({agent_id}) failed")
+        return AgentResponse(
+            agent="atlas.control",
+            intent="resume_agent",
+            action="resumed",
+            result=raw,
+            confidence=1.0,
+        )
+
+    def agent_state(self) -> AgentResponse:
+        if self._use_mock() or self._is_offline():
+            return AgentResponse(
+                agent="atlas.control",
+                intent="agent_state",
+                action="fetched",
+                result={"agents": [], "mock": True},
+                confidence=0.5,
+            )
+        raw = self.bridge.control_agent_state()
+        if raw is None:
+            raise AtlasUnavailableError("control.agent_state failed")
+        return AgentResponse(
+            agent="atlas.control",
+            intent="agent_state",
+            action="fetched",
+            result=raw,
+            confidence=1.0,
+        )
+
+    def set_strategy_weights(self, weights: dict[str, float]) -> AgentResponse:
+        if self._use_mock() or self._is_offline():
+            return AgentResponse(
+                agent="atlas.control",
+                intent="set_strategy_weights",
+                action="set",
+                result={"weights": weights, "mock": True},
+                confidence=0.5,
+            )
+        raw = self.bridge.control_set_strategy_weights(weights)
+        if raw is None:
+            raise AtlasUnavailableError("control.set_strategy_weights failed")
+        return AgentResponse(
+            agent="atlas.control",
+            intent="set_strategy_weights",
+            action="set",
+            result=raw,
+            confidence=1.0,
+        )
+
+    def trigger_oracle_scan(
+        self, reason: str | None = None, universe: list[str] | None = None
+    ) -> AgentResponse:
+        if self._use_mock() or self._is_offline():
+            return AgentResponse(
+                agent="atlas.control",
+                intent="oracle_scan",
+                action="triggered",
+                result={"reason": reason, "universe": universe, "mock": True},
+                confidence=0.5,
+            )
+        raw = self.bridge.control_trigger_oracle_scan(reason, universe)
+        if raw is None:
+            raise AtlasUnavailableError("control.trigger_oracle_scan failed")
+        return AgentResponse(
+            agent="atlas.control",
+            intent="oracle_scan",
+            action="triggered",
+            result=raw,
+            confidence=1.0,
         )
 
     # ---- Pipeline (orchestrator-style chain) ----
