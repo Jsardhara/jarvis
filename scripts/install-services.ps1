@@ -8,6 +8,7 @@
 # Tasks installed:
 #   jarvis-api.bat        - python -m uvicorn jarvis.web.api:app --host 0.0.0.0 --port 8765
 #   jarvis-sentinel.bat   - python -m jarvis.daemon.sentinel
+#   jarvis-voice.bat      - python -m jarvis.voice  (gated on VOICE_ENABLED=true in .env)
 #   jarvis-dashboard.bat  - pnpm dev (or pnpm start if -Mode prod) inside web/
 #
 # Usage:
@@ -51,6 +52,12 @@ $tasks = @(
         WorkDir = $projectRoot
         Cmd     = 'python -m jarvis.daemon.sentinel'
         Log     = Join-Path $logDir 'sentinel.log'
+    },
+    @{
+        Name    = 'jarvis-voice.bat'
+        WorkDir = $projectRoot
+        Cmd     = 'python -m jarvis.voice'
+        Log     = Join-Path $logDir 'voice.log'
     },
     @{
         Name    = 'jarvis-dashboard.bat'
