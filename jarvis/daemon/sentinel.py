@@ -44,7 +44,7 @@ log = logging.getLogger("sentinel")
 
 
 def _build_subsystems():
-    """Mocks until creds wired. Swap MockOutlook → OutlookProvider once Azure app reg lands."""
+    """Mocks until creds wired. Real stack composes via TempoStack (Gmail+iCloud+Drexel)."""
     tempo = Tempo(MockOutlook())
     atlas = AtlasOrchestrator(bridge=AtlasBridge(), allow_mock=True)
     lens = Lens(MockSearch())

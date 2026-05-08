@@ -53,8 +53,10 @@ def test_tempo_mode_mock_when_env_missing(monkeypatch):
 
 
 def test_lens_mode_mock_when_no_exa_key(monkeypatch):
-    """Lens descriptor has mode='mock' when EXA_API_KEY is absent."""
+    """Lens descriptor has mode='mock' when no search provider key is set."""
     monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.delenv("PERPLEXITY_API_KEY", raising=False)
+    monkeypatch.delenv("BRAVE_SEARCH_API_KEY", raising=False)
     reg = build_default_registry()
     assert reg["lens"].mode == "mock"
 

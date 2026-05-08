@@ -1,8 +1,12 @@
-"""Tempo — Outlook agent. Owns mail + calendar + tasks (single MS Graph token).
+"""Tempo — single time-and-correspondence agent.
 
-Why one agent: Outlook mail, calendar, and Microsoft To Do all live behind
-one OAuth scope. Splitting them creates fake boundaries. Tempo is the
-single time-and-correspondence agent for the operator.
+Owns mail + calendar + tasks behind the OutlookProvider Protocol. Concrete
+backends compose via TempoStack:
+    mail     → Gmail IMAP + Drexel (MultiMailProvider)
+    calendar → iCloud CalDAV
+    tasks    → iCloud reminders
+
+Operator forwards Outlook → Gmail; the Outlook backend was retired.
 """
 from __future__ import annotations
 
