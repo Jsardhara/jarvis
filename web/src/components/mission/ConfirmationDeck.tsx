@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api-client";
 
 const JARVIS_API =
   (typeof process !== "undefined"
@@ -20,10 +21,15 @@ interface Confirmation {
 
 async function fetchPending(): Promise<Confirmation[]> {
   try {
-    const r = await fetch(`${JARVIS_API}/api/confirmations?status=pending`);
+    const r = await apiFetch(
+      `${JARVIS_API}/api/confirmations?status=pending`
+    );
     if (!r.ok) return [];
-    const json = (await r.json()) as { items?: Confirmation[] };
-    return json.items ?? [];
+    const json = (await r.json()) as {
+      confirmations?: Confirmation[];
+      items?: Confirmation[];
+    };
+    return json.confirmations ?? json.items ?? [];
   } catch {
     return [];
   }
@@ -31,8 +37,9 @@ async function fetchPending(): Promise<Confirmation[]> {
 
 async function resolve(id: string, kind: "approve" | "reject"): Promise<void> {
   try {
-    await fetch(`${JARVIS_API}/api/confirmations/${id}/${kind}`, {
+    await apiFetch(`${JARVIS_API}/api/confirmations/${id}/${kind}`, {
       method: "POST",
+      headers: { "content-type": "application/json" },
     });
   } catch {
     // best effort — UI will refresh on next poll/event

@@ -12,12 +12,18 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { getApiToken } from "@/lib/api-client";
 
 const JARVIS_API =
   (typeof process !== "undefined"
     ? process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765"
     : "http://localhost:8765");
-const WS_URL = JARVIS_API.replace(/^http/, "ws") + "/ws";
+
+function wsUrl(): string {
+  const base = JARVIS_API.replace(/^http/, "ws") + "/ws";
+  const token = getApiToken();
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
 
 const BACKOFF_BASE_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
@@ -47,7 +53,7 @@ export function useVoiceLevel(): VoiceLevelHookValue {
 
     function connect() {
       if (!mounted.current) return;
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(wsUrl());
       wsRef.current = ws;
 
       ws.onopen = () => {

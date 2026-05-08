@@ -11,13 +11,19 @@
  */
 
 import { useEffect, useReducer, useRef } from "react";
+import { apiFetch, getApiToken } from "@/lib/api-client";
 
 const JARVIS_API =
   (typeof process !== "undefined"
     ? process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765"
     : "http://localhost:8765");
 
-const WS_URL = JARVIS_API.replace(/^http/, "ws") + "/ws";
+function wsUrl(): string {
+  const base = JARVIS_API.replace(/^http/, "ws") + "/ws";
+  const token = getApiToken();
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}
+
 const REST_URL = JARVIS_API + "/api/voice/state";
 
 const BACKOFF_BASE_MS = 1_000;
@@ -85,7 +91,7 @@ export function useVoiceState(): VoiceStateHookValue {
   useEffect(() => {
     mounted.current = true;
 
-    fetch(REST_URL)
+    apiFetch(REST_URL)
       .then((r) => (r.ok ? r.json() : null))
       .then((s: VoiceState | null) => {
         if (s && mounted.current) dispatch({ type: "state", state: s });
@@ -96,7 +102,7 @@ export function useVoiceState(): VoiceStateHookValue {
 
     function connect() {
       if (!mounted.current) return;
-      const ws = new WebSocket(WS_URL);
+      const ws = new WebSocket(wsUrl());
       wsRef.current = ws;
 
       ws.onopen = () => {

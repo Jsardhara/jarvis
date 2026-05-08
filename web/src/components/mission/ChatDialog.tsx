@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
+import { getApiToken } from "@/lib/api-client";
 
 const JARVIS_API =
   (typeof process !== "undefined"
@@ -54,9 +55,12 @@ export function ChatDialog() {
     let assistantText = "";
 
     try {
+      const headers: HeadersInit = { "content-type": "application/json" };
+      const token = getApiToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
       const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers,
         body: JSON.stringify({ message: text }),
         signal: ctrl.signal,
       });
