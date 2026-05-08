@@ -87,6 +87,18 @@ def _push_inbox_event(event: InboxEvent) -> None:
         asyncio.run_coroutine_threadsafe(_active_bus.broadcast(payload), _active_loop)
 
 
+def _push_voice_frame(payload: dict[str, Any]) -> None:
+    """Voice loop hook — broadcasts ``voice.state`` / ``voice.level`` frames.
+
+    Called synchronously from any thread (the voice loop runs in its own
+    process); schedules onto the API event loop for actual delivery.
+    """
+    if _active_bus is None or _active_loop is None:
+        return
+    if _active_loop.is_running():
+        asyncio.run_coroutine_threadsafe(_active_bus.broadcast(payload), _active_loop)
+
+
 def _build_orchestrator(registry: dict[str, AgentDescriptor]) -> Orchestrator:
     o = Orchestrator()
     for name, desc in registry.items():
@@ -326,6 +338,11 @@ def make_app(
     # Register inbox listener so sentinel-written events reach the WS bus.
     register_inbox_listener(_push_inbox_event)
 
+    # Register voice broadcaster so voice.state / voice.level frames reach
+    # the WS bus regardless of whether the voice loop runs in-process.
+    from ..voice.voice_state import register_broadcaster as _voice_register
+    _voice_register(_push_voice_frame)
+
     app = FastAPI(title="Jarvis API", version="0.2.0")
 
     # Bearer auth — required on every non-health route when JARVIS_API_TOKEN is set.
@@ -404,6 +421,12 @@ def make_app(
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, "service": "jarvis-api"}
+
+    @app.get("/api/voice/state")
+    async def voice_state_route() -> dict[str, Any]:
+        """Mission Control reads this on cold start; live updates over WS."""
+        from ..voice.voice_state import read_state as _read_voice_state
+        return _read_voice_state()
 
     @app.get("/api/inbox")
     async def inbox(limit: int = 50) -> dict[str, Any]:

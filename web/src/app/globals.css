@@ -1124,3 +1124,48 @@
 nextjs-portal {
   display: none !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────
+   Mission Control — keyframes (PR1)
+   ───────────────────────────────────────────────────────────────── */
+
+/* Dispatch graph edge fire — orchestrator → agent on agent.start.
+   Drives stroke-dashoffset via inline style on the SVG path; this
+   keyframe handles the post-fire glow tail. */
+@keyframes dispatch-edge-fire {
+  0%   { opacity: 0;    filter: drop-shadow(0 0 0 currentColor); }
+  20%  { opacity: 1;    filter: drop-shadow(0 0 6px currentColor); }
+  100% { opacity: 0.35; filter: drop-shadow(0 0 0 currentColor); }
+}
+
+/* Tier escalation pulse — voice tier badge transition (haiku → sonnet
+   → orchestrator). 220ms scale-pulse to draw the eye. */
+@keyframes tier-pulse {
+  0%   { transform: scale(1.00); opacity: 1.00; }
+  50%  { transform: scale(1.08); opacity: 0.92; }
+  100% { transform: scale(1.00); opacity: 1.00; }
+}
+
+/* Voice waveform idle breathing — flat line at 1 Hz cycle so the
+   bottom strip feels alive even with no input. */
+@keyframes voice-waveform-idle {
+  0%, 100% { opacity: 0.45; transform: scaleY(0.30); }
+  50%      { opacity: 0.65; transform: scaleY(0.55); }
+}
+
+/* Confirmation deck lift — surface raises one shade and gains a
+   shadow when pending count > 0. */
+@keyframes confirmation-lift {
+  from { box-shadow: 0 0 0 rgba(0,0,0,0); }
+  to   { box-shadow: 0 8px 28px rgba(242, 160, 61, 0.12); }
+}
+
+/* Reduced-motion respect — disable Mission Control motion. */
+@media (prefers-reduced-motion: reduce) {
+  .mc-edge-fire,
+  .mc-tier-pulse,
+  .mc-voice-idle,
+  .mc-confirm-lift {
+    animation: none !important;
+  }
+}

@@ -25,6 +25,7 @@ from typing import Any
 
 from .cheap_patterns import has_dispatch_keyword, has_heavy_keyword, match
 from .context_cache import load_voice_context, render_for_prompt
+from .voice_state import set_state as _set_voice_state
 
 logger = logging.getLogger(__name__)
 
@@ -134,21 +135,25 @@ async def handle(text: str) -> dict[str, Any]:
     # Tier 0 — local pattern match, no LLM.
     local = _local_response(text)
     if local is not None:
+        _set_voice_state("routing", tier="local", last_text=text)
         return local
 
     # Tier 3 — state-changing tasks always go through the full orchestrator
     # so the existing tier/authority gates and subsystem dispatches run.
     if has_dispatch_keyword(text):
         logger.info("[voice] tier=orchestrator (dispatch keyword)")
+        _set_voice_state("routing", tier="orchestrator", last_text=text)
         return await _full_dispatch(text)
 
     # Tier 2 — heavy reasoning keywords escalate to Sonnet.
     if has_heavy_keyword(text):
         logger.info("[voice] tier=sonnet (heavy keyword)")
+        _set_voice_state("routing", tier="sonnet", last_text=text)
         return await _ask_claude(text, DEFAULT_SONNET_MODEL)
 
     # Tier 1 — default. Haiku + cached context.
     logger.info("[voice] tier=haiku")
+    _set_voice_state("routing", tier="haiku", last_text=text)
     return await _ask_claude(text, DEFAULT_HAIKU_MODEL)
 
 
