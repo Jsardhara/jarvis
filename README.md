@@ -1,5 +1,10 @@
 # Jarvis
 
+[![tests](https://img.shields.io/badge/tests-149%20passing-brightgreen)](#)
+[![coverage](https://img.shields.io/badge/coverage-96%25-brightgreen)](#)
+[![python](https://img.shields.io/badge/python-3.11%2B-blue)](#)
+[![voice](https://img.shields.io/badge/voice-live-blue)](#)
+
 Personal-assistant multi-agent system on Claude Code. Single operator. Free-tier first.
 
 ```
@@ -17,13 +22,28 @@ api   ──┘                                            │
 |-------|-------|
 | Orchestrator + intent router | live |
 | Subsystems (5 + sentinel) | live |
-| Sentinel daemon | live, 6 cron routines |
+| Sentinel daemon | live, 14 cron routines |
 | Voice (wake → STT → router → TTS) | live, free stack, ~$0.001/query |
 | Web dashboard | live, Next.js 15 + React 19 |
 | ATLAS bridge (Alpaca MCP) | live, paper mode |
 | UI/UX redesign | queued |
 
 **Tests:** 149 passing, ~96% coverage. `pytest --cov=jarvis --cov-fail-under=80`.
+
+---
+
+## Recent progress
+
+| Date | Shipped |
+|------|---------|
+| 2026-05-08 | Repo condense — drop Outlook backend, ATLAS dev agents, gan-harness, web demo seeds. README rewrite. -4,959 lines. |
+| 2026-05-08 | Voice phase 5.2 — Andrew +15%, cheap-handler 4-tier router, chime + 6 fillers, cached fact sheet. ~$0.001/query. |
+| 2026-05-08 | Voice phase 5.1 — wake → STT → orchestrator → TTS wired on free stack. Andrew Multilingual + faster-whisper + openwakeword. |
+| 2026-05-08 | Autostart — 5 Windows launchers in Startup folder (api, sentinel, voice, dashboard, atlas). |
+| 2026-05-07 | ATLAS pivot — Kraken executor ripped out, Alpaca MCP sole executor. Migration `002_drop_kraken_legacy.sql`. Freqtrade removed. |
+| 2026-05-07 | API surface — `api/routers/control.py` + `pipeline.py` with bearer auth + idempotency + fakes harness. |
+| 2026-05-07 | Jarvis ↔ ATLAS — `subsystems/atlas.py`, `daemon/atlas_decision.py`, sentinel `atlas_health` job. |
+| 2026-04-26 | Phases 0–7 shipped overnight — orchestrator, 5 subsystems, sentinel, voice scaffold, web dashboard, home automation bridge. |
 
 ---
 
