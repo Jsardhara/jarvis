@@ -8,6 +8,7 @@ import { ConfirmationDeck } from "./ConfirmationDeck";
 import { ActivitySwimlanes } from "./ActivitySwimlanes";
 import { VoicePanel } from "./VoicePanel";
 import { ChatDialog } from "./ChatDialog";
+import { ConversationPanel } from "./ConversationPanel";
 
 /**
  * Mission Control — top-level layout.
@@ -36,6 +37,8 @@ export function MissionControl() {
       </div>
 
       <ActivitySwimlanes events={bus.events} />
+
+      <ConversationPanel />
 
       <VoicePanel voice={bus.voice} samples={bus.voiceSamples} />
 
