@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable, Iterable
 
 from .stt import STTProvider
 from .tts import TTSProvider
+from .voice_state import set_state as _set_voice_state
 from .wake import WakeDetector
 
 HandleFn = Callable[[str], Awaitable[dict]]
@@ -24,7 +25,13 @@ async def process_utterance(text: str, handle: HandleFn,
     """
     response = await handle(text)
     spoken = _voice_summary(response)
+    _set_voice_state(
+        "tts",
+        last_text=text,
+        last_reply_source=response.get("source"),
+    )
     audio = tts.synthesize(spoken)
+    _set_voice_state("idle")
     return response, audio
 
 
@@ -58,9 +65,12 @@ async def run_voice_loop(detector: WakeDetector, stt: STTProvider, tts: TTSProvi
     """One-shot voice cycle. Real loop wraps this in `while True`."""
     if audio_source is None:
         raise RuntimeError("audio_source required (sounddevice or fixture)")
+    _set_voice_state("wake")
     chunks = audio_source()
     if not detector.listen(chunks):
+        _set_voice_state("idle")
         return None
+    _set_voice_state("stt")
     audio = b"".join(audio_source())
     text = stt.transcribe(audio)
     response, spoken = await process_utterance(text, handle, tts)
