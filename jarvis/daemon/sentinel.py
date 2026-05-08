@@ -38,6 +38,7 @@ from .routines import (
     news_tick,
     scholar_tick,
 )
+from .voice_context_tick import voice_context_tick
 
 log = logging.getLogger("sentinel")
 
@@ -116,6 +117,9 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
     sched.add_job(mission_control_sync_tick, "interval", seconds=30, id="mc_sync")
     sched.add_job(_triggers_tick, "interval", minutes=30, args=[reg], id="triggers")
+    # Voice fact sheet refresh — feeds the cheap voice handler with current
+    # pnl / mail counts / next event so quick queries skip subsystem fan-out.
+    sched.add_job(voice_context_tick, "interval", minutes=5, id="voice_context")
     atlas_api_url = os.environ.get("JARVIS_ATLAS_API", "http://localhost:8000")
     sched.add_job(
         atlas_health_tick, "interval", seconds=60, args=[atlas_api_url], id="atlas_health"

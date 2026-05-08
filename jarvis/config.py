@@ -33,6 +33,8 @@ class Settings(BaseModel):
     voice_wake_word: str = "hey jarvis"
     voice_name: str = "en-US-AndrewMultilingualNeural"  # default; locked after Phase B A/B
     voice_whisper_model: str = "base.en"  # tiny.en | base.en | small.en | medium.en
+    voice_silence_threshold: float = 500.0  # int16 RMS — energy VAD cutoff
+    voice_max_response_tokens: int = 120  # cap LLM reply length for terse voice
     deepgram_api_key: str | None = None
     elevenlabs_api_key: str | None = None
     elevenlabs_voice_id: str | None = None
@@ -67,6 +69,8 @@ def get_settings() -> Settings:
         voice_wake_word=os.environ.get("VOICE_WAKE_WORD", "hey jarvis"),
         voice_name=os.environ.get("VOICE_NAME", "en-US-AndrewMultilingualNeural"),
         voice_whisper_model=os.environ.get("VOICE_WHISPER_MODEL", "base.en"),
+        voice_silence_threshold=float(os.environ.get("VOICE_SILENCE_THRESHOLD", "500")),
+        voice_max_response_tokens=int(os.environ.get("VOICE_MAX_RESPONSE_TOKENS", "120")),
         deepgram_api_key=os.environ.get("DEEPGRAM_API_KEY") or None,
         elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY") or None,
         elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID") or None,

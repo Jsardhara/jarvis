@@ -16,42 +16,27 @@ from jarvis.voice import audio_io
 
 
 def test_collect_until_silence_stops_after_silence_threshold(monkeypatch):
-    # Stub webrtcvad — first 10 frames are speech, rest silence.
-    speech_frames = 10
+    """First 10 frames voiced, rest silent — collector stops after silence hangover."""
+    counter = {"calls": 0}
 
-    class _FakeVad:
-        def __init__(self, aggressiveness: int) -> None:
-            self.calls = 0
+    def _fake_is_voiced(frame: bytes, threshold: float = 500.0) -> bool:  # noqa: ARG001
+        counter["calls"] += 1
+        return counter["calls"] <= 10
 
-        def is_speech(self, frame: bytes, sr: int) -> bool:  # noqa: ARG002
-            self.calls += 1
-            return self.calls <= speech_frames
-
-    fake_vad = types.ModuleType("webrtcvad")
-    fake_vad.Vad = _FakeVad  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webrtcvad", fake_vad)
-
+    monkeypatch.setattr("jarvis.voice.silence.is_voiced", _fake_is_voiced)
     chunks = (b"x" * audio_io.FRAME_BYTES for _ in range(200))
     out = audio_io.collect_until_silence(
         chunks, silence_ms=120, frame_ms=30, max_ms=15_000,
     )
-    # 10 speech frames + 4 trailing silence frames (120ms / 30ms) → 14 frames.
+    # 10 voiced + 4 trailing silence frames (120ms / 30ms) → 14 frames.
     assert len(out) == audio_io.FRAME_BYTES * 14
 
 
 def test_collect_until_silence_stops_at_max_ms_safety(monkeypatch):
-    fake_vad = types.ModuleType("webrtcvad")
-
-    class _AlwaysSpeech:
-        def __init__(self, aggressiveness: int) -> None:
-            pass
-
-        def is_speech(self, frame: bytes, sr: int) -> bool:  # noqa: ARG002
-            return True
-
-    fake_vad.Vad = _AlwaysSpeech  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "webrtcvad", fake_vad)
-
+    """Always-voiced input — collector stops when max_ms reached, not before."""
+    monkeypatch.setattr(
+        "jarvis.voice.silence.is_voiced", lambda frame, threshold=500.0: True,
+    )
     chunks = (b"x" * audio_io.FRAME_BYTES for _ in range(10_000))
     out = audio_io.collect_until_silence(
         chunks, silence_ms=700, frame_ms=30, max_ms=300,

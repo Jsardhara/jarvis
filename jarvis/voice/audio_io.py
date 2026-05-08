@@ -130,26 +130,25 @@ def _decode(audio_bytes: bytes) -> tuple[Any, int]:
 def collect_until_silence(
     chunks: Iterable[bytes],
     *,
-    sample_rate: int = DEFAULT_SAMPLE_RATE,
+    sample_rate: int = DEFAULT_SAMPLE_RATE,  # noqa: ARG001 — kept for API compat
     frame_ms: int = DEFAULT_FRAME_MS,
     silence_ms: int = 700,
     max_ms: int = 15_000,
-    vad_aggressiveness: int = 2,
+    threshold: float | None = None,
 ) -> bytes:
-    """Pull frames from ``chunks`` until ``silence_ms`` of silence (VAD)
-    or ``max_ms`` of audio has accumulated. Returns the concatenated PCM.
+    """Pull frames from ``chunks`` until ``silence_ms`` of silence
+    (energy VAD) or ``max_ms`` of audio has accumulated. Returns the
+    concatenated PCM.
 
     Defaults are tuned for short utterances ("what's the time", "summarize
     today"). Bump ``silence_ms`` or ``max_ms`` for longer monologues.
-    """
-    try:
-        import webrtcvad
-    except ImportError as exc:
-        raise RuntimeError(
-            "webrtcvad not installed — pip install -e '.[voice]'"
-        ) from exc
 
-    vad = webrtcvad.Vad(vad_aggressiveness)
+    Replaced webrtcvad with energy-based VAD because Python 3.14 has no
+    prebuilt webrtcvad wheel. See :mod:`jarvis.voice.silence`.
+    """
+    from .silence import DEFAULT_THRESHOLD, is_voiced
+
+    thresh = threshold if threshold is not None else DEFAULT_THRESHOLD
     voiced: list[bytes] = []
     silence_count = 0
     silence_frames_threshold = silence_ms // frame_ms
@@ -157,7 +156,7 @@ def collect_until_silence(
     for total, frame in enumerate(chunks, start=1):
         if total > max_frames:
             break
-        is_speech = vad.is_speech(frame, sample_rate)
+        is_speech = is_voiced(frame, threshold=thresh)
         if is_speech:
             voiced.append(frame)
             silence_count = 0
