@@ -105,15 +105,13 @@ def _build_tts(settings: Any) -> TTSProvider:
 
 
 async def _dispatch_factory():
-    """Return an async ``handle(text) -> dict`` closure over the orchestrator."""
-    from ..orchestrator import Orchestrator
-    from ..registry import build_default_registry  # type: ignore[import-not-found]
+    """Return the cheap-handler entrypoint.
 
-    reg = build_default_registry()
-    orch = Orchestrator(reg)
-
-    async def _handle(text: str) -> dict[str, Any]:
-        return await orch.dispatch(text)
+    Voice queries are routed through :mod:`jarvis.voice.cheap_handler`
+    which itself escalates to the full ``Orchestrator.dispatch`` for
+    state-changing requests. Same Jarvis brain, cheapest tier per query.
+    """
+    from .cheap_handler import handle as _handle
 
     return _handle
 
@@ -158,10 +156,20 @@ async def _one_cycle(
     tts: TTSProvider,
     handle: Any,
 ) -> None:
+    from .chime import load_chime
+    from .fillers import load_filler_bytes
+
     chunks = mic_chunks()
     if not wake.listen(chunks):
         return
     logger.info("[voice] wake detected — listening for utterance")
+
+    # Phase 2 — instant chime so operator knows we heard the wake word.
+    try:
+        play_audio(load_chime(), blocking=False)
+    except Exception as exc:  # noqa: BLE001 — chime is decorative
+        logger.warning("[voice] chime play failed: %s", exc)
+
     pcm = collect_until_silence(mic_chunks())
     if not pcm:
         logger.info("[voice] silence — skipping")
@@ -172,6 +180,21 @@ async def _one_cycle(
         logger.info("[voice] empty transcription — skipping")
         return
     logger.info("[voice] heard: %s", text[:200])
+
+    # Phase 2 — kick off filler in the background while the LLM runs.
+    # Skip filler when the query will be answered by a local pattern
+    # (those return in <50ms; the filler would arrive AFTER the reply).
+    from .cheap_patterns import match as _local_match
+
+    will_be_local = _local_match(text) is not None
+    if not will_be_local:
+        filler_bytes = load_filler_bytes()
+        if filler_bytes:
+            try:
+                play_audio(filler_bytes, blocking=False)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[voice] filler play failed: %s", exc)
+
     response = await handle(text)
     spoken = _voice_summary(response)
     logger.info("[voice] reply: %s", spoken[:200])

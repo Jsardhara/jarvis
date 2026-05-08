@@ -41,3 +41,4 @@ Thumbs.db
 
 # pnpm install temp leftovers
 _tmp_*
+jarvis.egg-info/
