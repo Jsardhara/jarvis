@@ -1,12 +1,12 @@
 {
   "tasks": [
     {
-      "id": "80f726698dcf",
-      "title": "CS501",
+      "id": "f05d947977b5",
+      "title": "Linear Algebra Test opens in 30 min",
       "description": "",
       "importance": "important",
-      "urgency": "not_urgent",
-      "kanban": "todo",
+      "urgency": "urgent",
+      "kanban": "done",
       "projectId": null,
       "milestoneId": null,
       "assignedTo": "me",
@@ -18,14 +18,11 @@
       "actualMinutes": null,
       "acceptanceCriteria": [],
       "comments": [],
-      "tags": [
-        "school",
-        "course:final paper"
-      ],
+      "tags": [],
       "notes": "",
-      "dueDate": "2026-05-10",
-      "createdAt": "2026-04-28T14:36:28.627678+00:00",
-      "updatedAt": "2026-04-28T14:36:28.627681+00:00"
+      "dueDate": "2026-04-30T15:30:00",
+      "createdAt": "2026-04-29T14:58:22.532284+00:00",
+      "updatedAt": "2026-05-04T13:48:00.000000+00:00"
     }
   ]
 }

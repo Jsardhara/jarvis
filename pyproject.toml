@@ -39,9 +39,16 @@ web = [
     "websockets>=12",
 ]
 voice = [
-    "pvporcupine>=3.0",
-    "sounddevice>=0.4",
-    "openai-whisper>=20231117",
+    # Free stack (Phase 5.1)
+    "edge-tts>=6.1",            # free Microsoft Neural TTS, no API key
+    "faster-whisper>=1.0",      # CTranslate2-optimized whisper, ~4x faster on CPU
+    "openwakeword>=0.6",        # free 'Hey Jarvis' pretrained wake word
+    "sounddevice>=0.4",         # mic + speaker I/O
+    "webrtcvad>=2.0",           # voice-activity-detection for end-of-utterance
+    "numpy>=1.24",              # audio array handling
+    # Optional fallbacks (operator may install if needed)
+    "pvporcupine>=3.0",         # paid wake-word alternative
+    "openai-whisper>=20231117", # legacy whisper fallback
 ]
 
 [tool.setuptools.packages.find]

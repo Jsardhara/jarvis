@@ -10,9 +10,9 @@
         "reject"
       ],
       "context": "{\n  \"strategy_id\": \"alpha-1\",\n  \"mode\": \"paper\"\n}",
-      "status": "answered",
-      "answer": "approve",
-      "answeredAt": "2026-04-29T13:22:28.980Z",
+      "status": "pending",
+      "answer": null,
+      "answeredAt": null,
       "createdAt": "2026-04-26T23:35:54.782727+00:00"
     }
   ]
