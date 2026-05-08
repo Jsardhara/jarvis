@@ -25,6 +25,18 @@ class Settings(BaseModel):
     twilio_account_sid: str | None = None
     twilio_auth_token: str | None = None
     twilio_phone: str | None = None
+    # Voice subsystem (Phase 5.1)
+    voice_enabled: bool = False
+    voice_engine_stt: str = "whisper-local"  # whisper-local | deepgram
+    voice_engine_tts: str = "edge-tts"  # edge-tts | elevenlabs | piper
+    voice_wake_backend: str = "openwakeword"  # openwakeword | porcupine | mock
+    voice_wake_word: str = "hey jarvis"
+    voice_name: str = "en-US-AndrewMultilingualNeural"  # default; locked after Phase B A/B
+    voice_whisper_model: str = "base.en"  # tiny.en | base.en | small.en | medium.en
+    deepgram_api_key: str | None = None
+    elevenlabs_api_key: str | None = None
+    elevenlabs_voice_id: str | None = None
+    picovoice_access_key: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -48,4 +60,15 @@ def get_settings() -> Settings:
         twilio_account_sid=os.environ.get("TWILIO_ACCOUNT_SID"),
         twilio_auth_token=os.environ.get("TWILIO_AUTH_TOKEN"),
         twilio_phone=os.environ.get("TWILIO_PHONE"),
+        voice_enabled=os.environ.get("VOICE_ENABLED", "false").lower() in ("1", "true", "yes"),
+        voice_engine_stt=os.environ.get("VOICE_ENGINE_STT", "whisper-local"),
+        voice_engine_tts=os.environ.get("VOICE_ENGINE_TTS", "edge-tts"),
+        voice_wake_backend=os.environ.get("VOICE_WAKE_BACKEND", "openwakeword"),
+        voice_wake_word=os.environ.get("VOICE_WAKE_WORD", "hey jarvis"),
+        voice_name=os.environ.get("VOICE_NAME", "en-US-AndrewMultilingualNeural"),
+        voice_whisper_model=os.environ.get("VOICE_WHISPER_MODEL", "base.en"),
+        deepgram_api_key=os.environ.get("DEEPGRAM_API_KEY") or None,
+        elevenlabs_api_key=os.environ.get("ELEVENLABS_API_KEY") or None,
+        elevenlabs_voice_id=os.environ.get("ELEVENLABS_VOICE_ID") or None,
+        picovoice_access_key=os.environ.get("PICOVOICE_ACCESS_KEY") or None,
     )

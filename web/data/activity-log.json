@@ -415,13 +415,355 @@
       "timestamp": "2026-04-28T14:38:28.788627+00:00"
     },
     {
-      "id": "evt_yOtX7STMQ67u",
-      "type": "decision_answered",
-      "actor": "me",
+      "id": "2f3beb5272930923",
+      "type": "task_completed",
+      "actor": "tempo",
       "taskId": null,
-      "summary": "Answered: confirm to run strategy alpha-1 in paper → \"approve\"",
+      "summary": "tempo.listed (2431 ms)",
       "details": "",
-      "timestamp": "2026-04-29T13:22:28.987Z"
+      "timestamp": "2026-05-05T13:18:55.355019+00:00"
+    },
+    {
+      "id": "15b58ddd5dc0bb87",
+      "type": "task_completed",
+      "actor": "atlas",
+      "taskId": null,
+      "summary": "atlas.fetched (3414 ms)",
+      "details": "",
+      "timestamp": "2026-05-05T13:18:59.138880+00:00"
+    },
+    {
+      "id": "9d67dc8e877198f5",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched",
+      "details": "",
+      "timestamp": "2026-05-05T13:18:59.794128+00:00"
+    },
+    {
+      "id": "09162104d895979d",
+      "type": "task_failed",
+      "actor": "forge",
+      "taskId": null,
+      "summary": "forge.?",
+      "details": "'WorktreeRunner' object has no attribute 'run'",
+      "timestamp": "2026-05-05T13:19:00.613784+00:00"
+    },
+    {
+      "id": "78d0698fe34264bf",
+      "type": "task_completed",
+      "actor": "atlas",
+      "taskId": null,
+      "summary": "atlas.fetched (3404 ms)",
+      "details": "",
+      "timestamp": "2026-05-05T13:20:18.513396+00:00"
+    },
+    {
+      "id": "8a1bc3932a9f2969",
+      "type": "task_completed",
+      "actor": "atlas",
+      "taskId": null,
+      "summary": "atlas.fetched (3669 ms)",
+      "details": "",
+      "timestamp": "2026-05-05T13:20:32.044244+00:00"
+    },
+    {
+      "id": "2be8a6b31cfcf6b1",
+      "type": "task_completed",
+      "actor": "atlas",
+      "taskId": null,
+      "summary": "atlas.fetched (3392 ms)",
+      "details": "",
+      "timestamp": "2026-05-05T13:21:24.205263+00:00"
+    },
+    {
+      "id": "8fca8531d0de9044",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (1714 ms)",
+      "details": "",
+      "timestamp": "2026-05-05T13:21:26.330535+00:00"
+    },
+    {
+      "id": "d45972c62f7d1be4",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched",
+      "details": "",
+      "timestamp": "2026-05-05T13:21:26.713918+00:00"
+    },
+    {
+      "id": "2f34c4a1adcd476c",
+      "type": "task_completed",
+      "actor": "scholar",
+      "taskId": null,
+      "summary": "scholar.listed",
+      "details": "",
+      "timestamp": "2026-05-05T13:21:27.113129+00:00"
+    },
+    {
+      "id": "54c45aaa80c3de04",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:52.662682+00:00"
+    },
+    {
+      "id": "44cbd37bbc66d194",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:52.666900+00:00"
+    },
+    {
+      "id": "381e273be980fdc0",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (2206 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:54.877510+00:00"
+    },
+    {
+      "id": "2864eaf7904c4069",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:54.880582+00:00"
+    },
+    {
+      "id": "cf0a362c87b88e01",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:54.882856+00:00"
+    },
+    {
+      "id": "41e421f083759acd",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (141 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:55.027608+00:00"
+    },
+    {
+      "id": "d4282dcc67712894",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (155 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:56.544648+00:00"
+    },
+    {
+      "id": "b4a8312a0651c0bd",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:56.547291+00:00"
+    },
+    {
+      "id": "8bd799b005caa842",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:56.549233+00:00"
+    },
+    {
+      "id": "482b25f0e2941133",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (157 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:56.710712+00:00"
+    },
+    {
+      "id": "bb914e9246bfc092",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:56.717661+00:00"
+    },
+    {
+      "id": "540a8ea5626e60b8",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-06T16:41:56.720291+00:00"
+    },
+    {
+      "id": "050635ac70cbccd0",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.classified (53231 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T16:43:02.118631+00:00"
+    },
+    {
+      "id": "c5d2e702b6a03b55",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched",
+      "details": "",
+      "timestamp": "2026-05-06T16:43:30.221003+00:00"
+    },
+    {
+      "id": "0ad5b8ef848ea35e",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched",
+      "details": "",
+      "timestamp": "2026-05-06T17:04:20.868356+00:00"
+    },
+    {
+      "id": "03c2aa2f2dff397c",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched (1089 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T17:43:16.476800+00:00"
+    },
+    {
+      "id": "de56de4339b6d366",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched (1587 ms)",
+      "details": "",
+      "timestamp": "2026-05-06T18:07:02.521346+00:00"
+    },
+    {
+      "id": "439d6b6c9d8d4d34",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (4 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:08:11.816055+00:00"
+    },
+    {
+      "id": "ce837776d7241683",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (6115 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:08:17.936875+00:00"
+    },
+    {
+      "id": "c28d322c4dbcfefd",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (3 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:08:17.941702+00:00"
+    },
+    {
+      "id": "c478fe8e6a29bf89",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-07T13:08:17.942881+00:00"
+    },
+    {
+      "id": "1b07624326973d0f",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-07T13:08:17.943920+00:00"
+    },
+    {
+      "id": "e684ad47c0d91787",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (190 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:08:18.135145+00:00"
+    },
+    {
+      "id": "450670db27967c1e",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (358 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:09:51.278285+00:00"
+    },
+    {
+      "id": "cdcf93c3b391c3cc",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:09:51.285291+00:00"
+    },
+    {
+      "id": "a6c0b56936265987",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-07T13:09:51.287250+00:00"
+    },
+    {
+      "id": "1655b2914dc181ca",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-07T13:09:51.289223+00:00"
+    },
+    {
+      "id": "0661a5d7d2a40a26",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (162 ms)",
+      "details": "",
+      "timestamp": "2026-05-07T13:09:51.453692+00:00"
+    },
+    {
+      "id": "aec654a01c9ec9e7",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-07T13:09:51.455732+00:00"
     }
   ]
 }

@@ -57,7 +57,8 @@
       "Bash(docker exec *)",
       "Bash(powershell -Command \"Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | Select-Object Name,Id\")",
       "Bash(powershell -Command \"Start-Process 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe'\")",
-      "Bash(grep -vE \"AtlasWsClient disconnected|^$\")"
+      "Bash(grep -vE \"AtlasWsClient disconnected|^$\")",
+      "Bash(powershell -Command ' *)"
     ]
   }
 }
