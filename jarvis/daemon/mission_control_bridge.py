@@ -49,7 +49,11 @@ def sync_tick(web_data_dir: Path | None = None) -> dict[str, int]:
     counts["agents"] = _write_agents(out / "agents.json")
     counts["inbox"] = _mirror_inbox(state_dir / "inbox.jsonl", out / "inbox.json")
     counts["activity"] = _mirror_activity(state_dir / "agent_log.jsonl", out / "activity-log.json")
-    counts["tasks"] = _mirror_tasks(out / "tasks.json")
+    # Tasks: dashboard is the source of truth and writes web/data/tasks.json
+    # directly. Backend reads from there (jarvis/voice/context_cache.load_tasks).
+    # Mirroring state/tasks.json would clobber every task the operator creates
+    # in the UI on the next sentinel tick, so we only COUNT here, never write.
+    counts["tasks"] = _count_dashboard_tasks(out / "tasks.json")
     counts["decisions"] = _mirror_decisions(
         state_dir / "confirmations.jsonl",
         out / "decisions.json",
@@ -160,11 +164,23 @@ def _log_to_event(x: AgentLogEntry) -> dict[str, Any]:
     }
 
 
-def _mirror_tasks(out: Path) -> int:
+def _mirror_tasks(out: Path) -> int:  # pragma: no cover — kept for legacy callers
     tasks = load_tasks()
     mapped = [_task_to_mission(t) for t in tasks]
     _atomic_json_write(out, {"tasks": mapped})
     return len(mapped)
+
+
+def _count_dashboard_tasks(path: Path) -> int:
+    """Count tasks already in the dashboard-owned file (read-only)."""
+    if not path.exists():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    items = data.get("tasks") if isinstance(data, dict) else data
+    return len(items) if isinstance(items, list) else 0
 
 
 def _task_to_mission(t: Task) -> dict[str, Any]:

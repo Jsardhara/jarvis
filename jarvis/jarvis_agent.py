@@ -209,6 +209,27 @@ def _err(msg: str) -> dict[str, Any]:
     }
 
 
+def _build_live_state_block() -> str:
+    """Render the per-turn live operator state block.
+
+    The SDK client caches its system prompt at connect time, so this
+    block has to ride along with each user message instead. Empty
+    return when there's nothing fresh to share so the prompt stays terse.
+    """
+    try:
+        from .voice.context_cache import load_voice_context, render_for_prompt
+
+        body = render_for_prompt(load_voice_context())
+        if not body or body in ("(context empty)", "(context unavailable; respond conservatively)"):
+            return ""
+        return (
+            "[LIVE OPERATOR STATE — refreshed this turn; trust this over older context]\n"
+            f"{body}"
+        )
+    except Exception:  # noqa: BLE001 — never block chat on context-read failure
+        return ""
+
+
 # ---------- Streaming chat ----------
 
 
@@ -543,6 +564,14 @@ class JarvisChat:
             recap = self._recap(upcoming_message=cleaned)
             if recap:
                 prompt = f"{recap}\n\n[Now Jyot says:]\n{cleaned}"
+
+        # Inject live operator state (tasks, mail, pnl, calendar) into THIS
+        # user turn. The SDK client caches its system prompt at connect time
+        # so anything time-sensitive has to ride along with the user message
+        # to be visible to a long-lived session.
+        live_block = _build_live_state_block()
+        if live_block:
+            prompt = f"{live_block}\n\n[Jyot]: {prompt}"
 
         try:
             await client.query(prompt)
