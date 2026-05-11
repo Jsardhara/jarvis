@@ -239,7 +239,7 @@ function Article({
           className="font-mono text-[8px] uppercase tracking-widest"
           style={{ color: "var(--ops-fg-faint)" }}
         >
-          {event.agent} · {fmtTime(event.ts)}
+          {event.agent ?? "system"} · {fmtTime(event.ts ?? "")}
         </span>
         {event.url && (
           <a
@@ -260,10 +260,11 @@ function Article({
 function groupByTag(events: InboxEvent[]): Record<string, InboxEvent[]> {
   const out: Record<string, InboxEvent[]> = {};
   for (const e of events) {
+    const agentKey = (e.agent ?? "").toLowerCase();
     const tag =
       e.severity === "alert"
         ? "ALERT"
-        : (e.tag?.toUpperCase() || TAG_FROM_AGENT[e.agent.toLowerCase()] || "FEED");
+        : (e.tag?.toUpperCase() || TAG_FROM_AGENT[agentKey] || "FEED");
     (out[tag] ??= []).push(e);
   }
   return out;
