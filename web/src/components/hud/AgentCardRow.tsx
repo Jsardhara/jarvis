@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 
-type AgentStatus = "online" | "pending" | "offline" | "error";
+type AgentStatus = "online" | "active" | "pending" | "offline" | "error" | string;
 
 export interface AgentCard {
   id: string;
@@ -18,12 +18,15 @@ interface AgentCardRowProps {
   active?: string;
 }
 
-const STATUS_PILL: Record<AgentStatus, { color: string; label: string }> = {
-  online:  { color: "var(--ops-ok)",   label: "ONLINE"  },
-  pending: { color: "var(--ops-crit)", label: "PENDING" },
+const STATUS_PILL: Record<string, { color: string; label: string }> = {
+  online:  { color: "var(--ops-ok)",       label: "ONLINE"  },
+  active:  { color: "var(--ops-ok)",       label: "ACTIVE"  },
+  pending: { color: "var(--ops-crit)",     label: "PENDING" },
   offline: { color: "var(--ops-fg-faint)", label: "OFFLINE" },
-  error:   { color: "var(--ops-crit)", label: "ERROR" },
+  error:   { color: "var(--ops-crit)",     label: "ERROR"   },
 };
+
+const STATUS_FALLBACK = { color: "var(--ops-fg-faint)", label: "UNKNOWN" };
 
 export function AgentCardRow({ agents, active }: AgentCardRowProps) {
   return (
@@ -36,7 +39,7 @@ export function AgentCardRow({ agents, active }: AgentCardRowProps) {
 }
 
 function AgentCardItem({ agent, active }: { agent: AgentCard; active: boolean }) {
-  const pill = STATUS_PILL[agent.status];
+  const pill = STATUS_PILL[agent.status?.toLowerCase?.()] ?? STATUS_FALLBACK;
   const accent = agent.accent ?? "var(--hud-cyan)";
 
   return (

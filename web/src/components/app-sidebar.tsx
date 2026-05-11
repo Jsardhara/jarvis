@@ -22,9 +22,10 @@ interface NavEntry {
 }
 
 const CONTROL_LINKS: NavEntry[] = [
-  { href: "/jarvis",       label: "Talk to Jarvis", glyph: "◉" },
-  { href: "/",             label: "Command Center", glyph: "◇" },
-  { href: "/status-board", label: "Status Board",   glyph: "▤" },
+  { href: "/",             label: "Command Center",  glyph: "◉" },
+  { href: "/architecture", label: "Architecture",    glyph: "◈" },
+  { href: "/news",         label: "Daily Dispatch",  glyph: "▤" },
+  { href: "/status-board", label: "Status Board",    glyph: "▦" },
 ];
 
 const COMMS_LINKS: NavEntry[] = [
