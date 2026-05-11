@@ -1,6 +1,6 @@
-{
+﻿{
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "_comment": "Jarvis project — six runtime agents (jarvis+tempo+scholar+lens+forge+atlas) + dev-side team (jarvis-*). Multiple agents may run in parallel via Task tool.",
+  "_comment": "Jarvis project â€” six runtime agents (jarvis+tempo+scholar+lens+forge+atlas) + dev-side team (jarvis-*). Multiple agents may run in parallel via Task tool.",
 
   "enabledMcpjsonServers": [
     "github",
@@ -15,6 +15,29 @@
   "_pending_oauth": [
     "Outlook (MS Graph via MSAL device-code, not MCP)"
   ],
+
+  "_jarvis_desktop_notes": {
+    "_comment": "jarvis-desktop MCP gives full GUI control. Auto-allow ONLY read-only + non-destructive nav. Mutating tools prompt every time so operator approves in-context.",
+    "auto_allowed_safe": [
+      "desktop_screenshot",
+      "desktop_list_windows",
+      "desktop_get_mouse_position",
+      "desktop_get_screen_size",
+      "desktop_move_mouse",
+      "desktop_focus_window"
+    ],
+    "prompt_each_time": [
+      "desktop_click",
+      "desktop_double_click",
+      "desktop_right_click",
+      "desktop_drag",
+      "desktop_type",
+      "desktop_press_key",
+      "desktop_scroll"
+    ],
+    "how_to_widen": "If a task needs a mutating tool repeatedly, either (a) approve once via 'always allow' on prompt, (b) add specific tool to permissions.allow above (e.g. 'mcp__jarvis-desktop__desktop_click'), or (c) blanket 'mcp__jarvis-desktop__*' for full trust mode.",
+    "how_to_revoke": "Remove tool from permissions.allow and restart session."
+  },
 
   "permissions": {
     "allow": [
@@ -82,7 +105,14 @@
       "mcp__plugin_ecc_context7__*",
       "mcp__plugin_ecc_memory__*",
       "mcp__plugin_ecc_sequential-thinking__*",
-      "mcp__plugin_ecc_playwright__*"
+      "mcp__plugin_ecc_playwright__*",
+
+      "mcp__jarvis-desktop__desktop_screenshot",
+      "mcp__jarvis-desktop__desktop_list_windows",
+      "mcp__jarvis-desktop__desktop_get_mouse_position",
+      "mcp__jarvis-desktop__desktop_get_screen_size",
+      "mcp__jarvis-desktop__desktop_move_mouse",
+      "mcp__jarvis-desktop__desktop_focus_window"
     ],
     "deny": [
       "Bash(rm -rf *)",
@@ -131,7 +161,7 @@
   "teammateMode": "in-process",
 
   "_agent_team": {
-    "_comment": "Dev-side agents the operator spawns via Task tool to parallelize work on Jarvis itself. Runtime subsystem agents (tempo/scholar/lens/forge/atlas) are different — those are dispatched by jarvis orchestrator at runtime.",
+    "_comment": "Dev-side agents the operator spawns via Task tool to parallelize work on Jarvis itself. Runtime subsystem agents (tempo/scholar/lens/forge/atlas) are different â€” those are dispatched by jarvis orchestrator at runtime.",
     "runtime_agents": [
       "jarvis",
       "tempo",
@@ -162,3 +192,4 @@
     }
   }
 }
+
