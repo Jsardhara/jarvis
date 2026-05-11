@@ -1,7 +1,7 @@
 "use client";
 
-import { MissionControl } from "@/components/mission/MissionControl";
+import { HudMissionControl } from "@/components/hud/HudMissionControl";
 
 export default function MissionControlPage() {
-  return <MissionControl />;
+  return <HudMissionControl />;
 }

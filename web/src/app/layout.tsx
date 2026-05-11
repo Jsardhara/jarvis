@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
+import { JetBrains_Mono, Orbitron, Rajdhani } from "next/font/google";
 import "./globals.css";
 import { LayoutShell } from "@/components/layout-shell";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -13,15 +13,22 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const spaceGrotesk = Space_Grotesk({
+const rajdhani = Rajdhani({
   subsets: ["latin"],
-  variable: "--font-space-grotesk",
+  variable: "--font-rajdhani",
   display: "swap",
-  weight: ["400", "500", "600", "700"],
+  weight: ["300", "400", "500", "600", "700"],
+});
+
+const orbitron = Orbitron({
+  subsets: ["latin"],
+  variable: "--font-orbitron",
+  display: "swap",
+  weight: ["400", "500", "600", "700", "800", "900"],
 });
 
 export const metadata: Metadata = {
-  title: "JARVIS // OPS",
+  title: "JARVIS // HUD MK-VII",
   description: "Mission control — orchestrator + agent fleet",
   manifest: "/manifest.webmanifest",
   applicationName: "Jarvis",
@@ -34,7 +41,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0a0e14",
+  themeColor: "#040d1a",
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
@@ -43,7 +50,11 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`dark ${jetbrainsMono.variable} ${spaceGrotesk.variable}`}>
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`dark ${jetbrainsMono.variable} ${rajdhani.variable} ${orbitron.variable}`}
+    >
       <body className="antialiased">
         <ThemeProvider>
           <ServiceWorkerRegister />

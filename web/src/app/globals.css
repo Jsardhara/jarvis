@@ -3,57 +3,67 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ═══════════════════════════════════════════════════════════════
-   JARVIS // OPERATIONS BLACK
-   Mission-control aesthetic — dark, technical, schematic
-   Single source of truth for the Ops Black token system.
-   Existing shadcn semantic tokens (--background, --card, etc.)
-   are remapped to ops-* values so legacy components inherit
-   the new look without mass refactors.
+   JARVIS // HUD MK-VII
+   Iron Man-style mission-control HUD. Cyan-on-navy.
+   Token names preserved from previous Ops Black palette so legacy
+   components recolor automatically — values rebalanced for the
+   sci-fi terminal aesthetic.
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ─── Operations Black: surfaces ─────────────────────────────── */
-  --ops-bg-void: #070809;
-  --ops-bg-deep: #0B0D10;
-  --ops-bg-panel: #0F1114;
-  --ops-bg-elevated: #14171C;
-  --ops-bg-input: #16191E;
-  --ops-bg-hover: #1A1E24;
+  /* ─── HUD: surfaces ──────────────────────────────────────────── */
+  --ops-bg-void: #040d1a;          /* near-black navy */
+  --ops-bg-deep: #061629;
+  --ops-bg-panel: #0a1c30;
+  --ops-bg-elevated: #0e2236;
+  --ops-bg-input: #0a1f33;
+  --ops-bg-hover: #11283f;
 
-  /* ─── Operations Black: borders / lines ──────────────────────── */
-  --ops-line-faint: #14171C;
-  --ops-line: #1F242B;
-  --ops-line-strong: #2A3038;
-  --ops-line-bright: #3A424D;
+  /* ─── HUD: borders / lines (cyan-tinted) ─────────────────────── */
+  --ops-line-faint: rgba(0, 229, 255, 0.10);
+  --ops-line: rgba(0, 229, 255, 0.22);
+  --ops-line-strong: rgba(0, 229, 255, 0.40);
+  --ops-line-bright: #00e5ff;
 
-  /* ─── Operations Black: foreground ───────────────────────────── */
-  --ops-fg: #E8E6DF;
-  --ops-fg-mute: #B0B3B8;
-  --ops-fg-dim: #7A7E86;
-  --ops-fg-faint: #4F545C;
+  /* ─── HUD: foreground ────────────────────────────────────────── */
+  --ops-fg: #ffffff;
+  --ops-fg-mute: #b0d8e0;
+  --ops-fg-dim: #7de8f5;
+  --ops-fg-faint: #4a7888;
 
-  /* ─── Mission accent (sodium-vapor amber) ────────────────────── */
-  --ops-amber: #F2A03D;
-  --ops-amber-bright: #FFB652;
-  --ops-amber-glow: rgba(242, 160, 61, 0.18);
+  /* ─── Mission accent (cyan teal — replaces amber) ────────────── */
+  --ops-amber: #00e5ff;
+  --ops-amber-bright: #66f1ff;
+  --ops-amber-glow: rgba(0, 229, 255, 0.30);
 
-  /* ─── Status hues ────────────────────────────────────────────── */
-  --ops-ok: #6FCF7F;
-  --ops-warn: #F2A03D;
-  --ops-crit: #E5484D;
-  --ops-info: #7CB6E8;
+  /* ─── HUD-specific accents ───────────────────────────────────── */
+  --hud-cyan: #00e5ff;
+  --hud-cyan-bright: #66f1ff;
+  --hud-cyan-soft: #7de8f5;
+  --hud-orb-core: #ffffff;
+  --hud-orb-mid: #00ffff;
+  --hud-orb-bloom: rgba(0, 229, 255, 0.55);
+  --hud-glow-strong: 0 0 14px rgba(0, 229, 255, 0.55), 0 0 28px rgba(0, 229, 255, 0.25);
+  --hud-glow-soft: 0 0 6px rgba(0, 229, 255, 0.30);
 
-  /* ─── Agent identity hues (locked five + sentinel) ───────────── */
-  --ops-agent-tempo:    #7CB6E8;  /* mail + cal + tasks — sky blue */
-  --ops-agent-scholar:  #B98CE0;  /* academics — violet            */
-  --ops-agent-lens:     #E0859E;  /* research — rose               */
-  --ops-agent-forge:    #6FCF7F;  /* code — emerald                */
-  --ops-agent-atlas:    #E0B85C;  /* trading — gold                */
-  --ops-agent-sentinel: #5FD3D3;  /* daemon — cyan                 */
+  /* ─── Status hues (HUD-bright) ───────────────────────────────── */
+  --ops-ok: #00ff88;
+  --ops-warn: #ffd600;
+  --ops-crit: #ff3b3b;
+  --ops-info: #66f1ff;
+
+  /* ─── Agent identity hues — kept semantic for chart legibility ─ */
+  --ops-agent-tempo:    #66f1ff;  /* mail + cal + tasks — bright cyan */
+  --ops-agent-scholar:  #b98ce0;  /* academics — violet               */
+  --ops-agent-lens:     #ff9ec7;  /* research — hot pink              */
+  --ops-agent-forge:    #00ff88;  /* code — neon green                */
+  --ops-agent-atlas:    #ffd600;  /* trading — gold                   */
+  --ops-agent-sentinel: #00e5ff;  /* daemon — primary cyan            */
 
   /* ─── Type stack ─────────────────────────────────────────────── */
   --ops-mono: var(--font-jetbrains-mono), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --ops-sans: var(--font-space-grotesk), 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --ops-sans: var(--font-rajdhani), 'Rajdhani', ui-sans-serif, system-ui, sans-serif;
+  --ops-display: var(--font-orbitron), 'Orbitron', var(--ops-sans), sans-serif;
 
   /* ─── Layout grid ────────────────────────────────────────────── */
   --ops-sidebar-w: 220px;
@@ -309,18 +319,35 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Dot-grid backdrop — 24px radial dots @ 2.5% opacity */
+  /* HUD scanline + grid backdrop */
   body {
+    background-color: var(--ops-bg-void);
     background-image:
-      radial-gradient(circle at center, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
-    background-size: 24px 24px;
-    background-position: 0 0;
+      /* horizontal scanlines */
+      repeating-linear-gradient(
+        180deg,
+        transparent 0,
+        transparent 2px,
+        rgba(0, 229, 255, 0.012) 3px,
+        transparent 4px
+      ),
+      /* faint cyan grid */
+      linear-gradient(rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0, 229, 255, 0.03) 1px, transparent 1px),
+      /* central radial vignette */
+      radial-gradient(
+        ellipse at 50% 35%,
+        rgba(0, 229, 255, 0.06) 0%,
+        transparent 55%
+      );
+    background-size: auto, 32px 32px, 32px 32px, auto;
   }
 
-  /* Headers default to Space Grotesk + uppercase tracked */
+  /* Headers default to Rajdhani + uppercase tracked */
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--ops-sans);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.10em;
+    text-transform: uppercase;
     font-weight: 500;
   }
 
@@ -1169,3 +1196,145 @@ nextjs-portal {
     animation: none !important;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   HUD MK-VII — utility classes
+   ═══════════════════════════════════════════════════════════════ */
+
+@layer utilities {
+  /* Panel: flat dark fill + 1px cyan border */
+  .hud-panel {
+    background: rgba(10, 28, 48, 0.55);
+    border: 1px solid var(--ops-line);
+    backdrop-filter: blur(2px);
+    position: relative;
+  }
+  .hud-panel-active {
+    border-color: var(--hud-cyan);
+    box-shadow: var(--hud-glow-soft), inset 0 0 0 1px rgba(0,229,255,0.10);
+  }
+
+  /* Corner brackets — appear at the 4 corners of HUD panels */
+  .hud-corners::before,
+  .hud-corners::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--hud-cyan);
+    pointer-events: none;
+  }
+  .hud-corners::before {
+    top: -1px; left: -1px;
+    border-right: none;
+    border-bottom: none;
+  }
+  .hud-corners::after {
+    bottom: -1px; right: -1px;
+    border-left: none;
+    border-top: none;
+  }
+
+  /* Section label — // PREFIX TEXT */
+  .hud-label {
+    font-family: var(--ops-sans);
+    font-size: 10px;
+    letter-spacing: 0.20em;
+    text-transform: uppercase;
+    color: var(--hud-cyan);
+    font-weight: 500;
+  }
+  .hud-label-mute {
+    color: var(--ops-fg-mute);
+  }
+
+  /* Display (Orbitron) */
+  .hud-display {
+    font-family: var(--ops-display);
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  /* Pill status badge */
+  .hud-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    font-family: var(--ops-mono);
+    font-size: 8px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    border-radius: 6px;
+    border: 1px solid currentColor;
+    line-height: 1.4;
+  }
+
+  /* Glow utilities */
+  .hud-glow { box-shadow: var(--hud-glow-soft); }
+  .hud-glow-strong { box-shadow: var(--hud-glow-strong); }
+  .hud-text-glow { text-shadow: 0 0 8px rgba(0,229,255,0.55); }
+
+  /* Horizontal cyan progress bar */
+  .hud-bar-track {
+    height: 3px;
+    background: rgba(0, 229, 255, 0.08);
+    border: 1px solid rgba(0, 229, 255, 0.15);
+    position: relative;
+    overflow: hidden;
+  }
+  .hud-bar-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: linear-gradient(90deg, var(--hud-cyan), var(--hud-cyan-bright));
+    box-shadow: 0 0 8px rgba(0, 229, 255, 0.55);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   HUD MK-VII — keyframes
+   ═══════════════════════════════════════════════════════════════ */
+
+@keyframes hud-orb-pulse {
+  0%, 100% { transform: scale(1.0); opacity: 0.95; }
+  50%      { transform: scale(1.06); opacity: 1; }
+}
+
+@keyframes hud-orb-bloom {
+  0%, 100% { box-shadow: 0 0 28px var(--hud-orb-bloom), 0 0 60px var(--hud-orb-bloom); }
+  50%      { box-shadow: 0 0 40px var(--hud-orb-bloom), 0 0 90px var(--hud-orb-bloom); }
+}
+
+@keyframes hud-scan {
+  0%   { transform: translateY(-100%); opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+
+@keyframes hud-flicker {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.85; }
+}
+
+.hud-orb {
+  animation: hud-orb-pulse 2.4s ease-in-out infinite, hud-orb-bloom 2.4s ease-in-out infinite;
+}
+
+.hud-scan-line {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 60px;
+  background: linear-gradient(180deg, transparent, rgba(0,229,255,0.12), transparent);
+  animation: hud-scan 4s linear infinite;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-orb,
+  .hud-scan-line {
+    animation: none !important;
+  }
+}
+
