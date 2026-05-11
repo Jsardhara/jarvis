@@ -5,7 +5,8 @@ import asyncio
 
 import httpx
 
-from jarvis.voice.loop import _voice_summary, process_utterance
+from jarvis.voice import loop as voice_loop
+from jarvis.voice.loop import _spoken_text, process_utterance
 from jarvis.voice.stt import DeepgramSTT, MockSTT
 from jarvis.voice.tts import ElevenLabsTTS, MockTTS
 from jarvis.voice.wake import MockWakeDetector
@@ -70,54 +71,136 @@ def test_elevenlabs_tts_returns_empty_on_failure():
     assert t.synthesize("hi") == b""
 
 
-def test_voice_summary_email_counts():
-    out = _voice_summary({
+# ---------------------------------------------------------------------------
+# _spoken_text — extracts/synthesizes the spoken-ready line from handler dict
+# ---------------------------------------------------------------------------
+
+
+def test_spoken_text_uses_voice_tier_reply():
+    """Cheap-handler tiers (local/Haiku/Sonnet) put spoken text in responses.voice."""
+    out = _spoken_text({
         "responses": {
-            "aide": {"agent": "aide", "action": "triaged",
-                     "result": {"counts": {"action_required": 3}}}
-        }
+            "voice": {
+                "agent": "voice",
+                "action": "Yeah, three emails — none urgent.",
+                "result": {"text": "Yeah, three emails — none urgent.", "source": "local"},
+            }
+        },
+        "source": "local",
     })
-    assert "3 action emails" in out
+    assert out == "Yeah, three emails — none urgent."
 
 
-def test_voice_summary_calendar():
-    out = _voice_summary({
-        "responses": {
-            "chronos": {"agent": "chronos", "action": "listed", "result": {"count": 4}}
-        }
+def test_spoken_text_falls_back_to_action_when_result_text_missing():
+    out = _spoken_text({
+        "responses": {"voice": {"agent": "voice", "action": "Got it."}},
     })
-    assert "4 events today" in out
+    assert out == "Got it."
 
 
-def test_voice_summary_ledger():
-    out = _voice_summary({
-        "responses": {
-            "ledger": {"agent": "ledger", "action": "fetched",
-                       "result": {"pnl": {"pnl_pct": 0.012}}}
-        }
+def test_spoken_text_voice_tier_empty_string_fallback():
+    out = _spoken_text({
+        "responses": {"voice": {"agent": "voice", "action": "", "result": {"text": ""}}},
     })
-    assert "1.2%" in out
+    assert out == "Got it."
 
 
-def test_voice_summary_needs_confirm():
-    out = _voice_summary({"needs_confirm": True, "responses": {}})
-    assert "confirm" in out.lower()
+def test_spoken_text_needs_confirm():
+    out = _spoken_text({"needs_confirm": True, "responses": {}})
+    assert "okay" in out.lower() or "confirm" in out.lower()
 
 
-def test_voice_summary_empty():
-    assert _voice_summary({"responses": {}}) == "Nothing to report."
+def test_spoken_text_empty_responses():
+    out = _spoken_text({"responses": {}})
+    assert out  # non-empty
+    assert "?" in out  # invites follow-up
 
 
-def test_voice_summary_other_agent():
-    out = _voice_summary({"responses": {"sherlock": {"agent": "sherlock", "action": "researched"}}})
-    assert "sherlock" in out
+def test_spoken_text_dispatch_path_calls_humanizer(monkeypatch):
+    """Tier 3 (orchestrator) — no voice tier present → humanizer runs."""
+    captured = {}
+
+    def fake_humanize(response):
+        captured["response"] = response
+        return "Drafted that — held for your review."
+
+    monkeypatch.setattr(voice_loop, "_humanize_dispatch", fake_humanize)
+    out = _spoken_text({
+        "responses": {"tempo": {"agent": "tempo", "action": "drafted", "result": {"id": "abc"}}},
+        "source": "orchestrator",
+    })
+    assert out == "Drafted that — held for your review."
+    assert captured["response"]["source"] == "orchestrator"
 
 
-def test_process_utterance_pipeline():
+def test_humanize_dispatch_uses_submit(monkeypatch):
+    """Humanizer routes through claude_queue.submit with Haiku model."""
+    seen = {}
+
+    def fake_submit(*, system, user, model):
+        seen["system"] = system
+        seen["user"] = user
+        seen["model"] = model
+        return "  Got it — anything else?  "
+
+    import jarvis.claude_queue as cq
+    monkeypatch.setattr(cq, "submit", fake_submit)
+
+    out = voice_loop._humanize_dispatch({
+        "responses": {"tempo": {"action": "drafted"}}
+    })
+    assert out == "Got it — anything else?"
+    assert seen["model"] == voice_loop.HUMANIZER_MODEL
+    assert "Background work output" in seen["user"]
+
+
+def test_humanize_dispatch_swallows_errors(monkeypatch):
+    """LLM failure → fallback string, voice never crashes."""
+    def boom(**kwargs):
+        raise RuntimeError("rate limited")
+
+    import jarvis.claude_queue as cq
+    monkeypatch.setattr(cq, "submit", boom)
+
+    out = voice_loop._humanize_dispatch({"responses": {"tempo": {"action": "drafted"}}})
+    assert out  # non-empty fallback
+    assert "?" in out
+
+
+# ---------------------------------------------------------------------------
+# process_utterance — full pipeline
+# ---------------------------------------------------------------------------
+
+
+def test_process_utterance_pipeline_voice_tier():
+    """Voice-tier reply (Tier 0/1/2) → spoken text passed straight to TTS."""
     async def stub_handle(text):
-        return {"responses": {"chronos": {"agent": "chronos", "action": "listed",
-                                          "result": {"count": 2}}}}
+        return {
+            "responses": {
+                "voice": {
+                    "agent": "voice",
+                    "action": "Three events on the calendar today.",
+                    "result": {"text": "Three events on the calendar today."},
+                }
+            },
+            "source": "local",
+        }
     tts = MockTTS()
     response, audio = asyncio.run(process_utterance("what's today", stub_handle, tts))
-    assert "2 events today" in tts.calls[0]
+    assert "Three events" in tts.calls[0]
     assert b"<mock-audio:" in audio
+    assert response["source"] == "local"
+
+
+def test_process_utterance_pipeline_dispatch(monkeypatch):
+    """Orchestrator dispatch → humanizer produces spoken ack."""
+    async def stub_handle(text):
+        return {
+            "responses": {"tempo": {"agent": "tempo", "action": "drafted", "result": {"id": "x"}}},
+            "source": "orchestrator",
+        }
+    monkeypatch.setattr(voice_loop, "_humanize_dispatch",
+                        lambda r: "Drafted — want me to send it?")
+    tts = MockTTS()
+    _response, _audio = asyncio.run(process_utterance("draft email to bob", stub_handle, tts))
+    assert tts.calls[0] == "Drafted — want me to send it?"

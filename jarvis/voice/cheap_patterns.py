@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Each rule = (compiled-regex, builder-function-returning-str-or-None)
 # Builder takes the original text; returns the response or None to fall
@@ -56,6 +56,88 @@ def _repeat(_text: str) -> str:
     return "__REPEAT_LAST__"
 
 
+_DURATION_MULTIPLIER = {
+    "second": 1, "seconds": 1, "sec": 1, "secs": 1,
+    "minute": 60, "minutes": 60, "min": 60, "mins": 60,
+    "hour": 3600, "hours": 3600, "hr": 3600, "hrs": 3600,
+}
+
+_WORD_TO_NUM = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "fifteen": 15, "twenty": 20, "thirty": 30, "sixty": 60,
+    "a": 1, "an": 1,
+}
+
+_QUIET_DURATION_RE = re.compile(
+    r"\b(?:quiet|mute|stand\s+down|silence)"
+    r"(?:\s+(?:for|me|me\s+for))?"
+    r"\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|sixty|a|an)\s+"
+    r"(second|seconds|sec|secs|minute|minutes|min|mins|hour|hours|hr|hrs)\b",
+    re.I,
+)
+_QUIET_BARE_RE = re.compile(
+    r"^(?:quiet|stand\s+down|silence|hush)(?:\s+jarvis)?[.!?]?$", re.I,
+)
+_SPEAK_UP_RE = re.compile(
+    r"^(?:speak\s+up|come\s+back|wake\s+up|unmute|listen\s+up)(?:\s+jarvis)?[.!?]?$",
+    re.I,
+)
+_START_FRESH_RE = re.compile(
+    r"^(?:start\s+fresh|forget\s+(?:that|it|everything)|new\s+conversation|reset\s+memory)[.!?]?$",
+    re.I,
+)
+
+
+def _parse_duration(amount: str, unit: str) -> timedelta:
+    amount_lower = amount.lower()
+    if amount_lower.isdigit():
+        n = int(amount_lower)
+    else:
+        n = _WORD_TO_NUM.get(amount_lower, 1)
+    mult = _DURATION_MULTIPLIER.get(unit.lower(), 60)
+    return timedelta(seconds=n * mult)
+
+
+def _format_duration(td: timedelta) -> str:
+    total = int(td.total_seconds())
+    if total >= 3600:
+        h = total // 3600
+        return f"{h} hour" if h == 1 else f"{h} hours"
+    if total >= 60:
+        m = total // 60
+        return f"{m} minute" if m == 1 else f"{m} minutes"
+    return f"{total} seconds"
+
+
+def _quiet_for(text: str) -> str | None:
+    m = _QUIET_DURATION_RE.search(text)
+    if not m:
+        return None
+    duration = _parse_duration(m.group(1), m.group(2))
+    from . import proactive
+    proactive.mute_for(duration)
+    return f"Quiet for {_format_duration(duration)}."
+
+
+def _quiet_bare(_text: str) -> str:
+    from . import proactive
+    proactive.mute_for(timedelta(minutes=10))
+    return "Quiet for 10 minutes."
+
+
+def _speak_up(_text: str) -> str:
+    from . import proactive
+    proactive.clear_mute()
+    return "Back."
+
+
+def _start_fresh(_text: str) -> str:
+    from . import conversation_memory
+    conversation_memory.clear()
+    return "Fresh slate."
+
+
 RULES: tuple[Rule, ...] = (
     (
         re.compile(r"\bwhat\s+(?:time|hour)\s+(?:is\s+it|now)\b", re.I),
@@ -74,8 +156,12 @@ RULES: tuple[Rule, ...] = (
         re.compile(r"^(?:thanks|thank\s+you|thx|ty|cheers|appreciated)[.!?]?$", re.I),
         _thanks,
     ),
+    (_QUIET_DURATION_RE, _quiet_for),
+    (_SPEAK_UP_RE, _speak_up),
+    (_START_FRESH_RE, _start_fresh),
+    (_QUIET_BARE_RE, _quiet_bare),
     (
-        re.compile(r"^(?:stop|cancel|never\s+mind|nevermind|abort|quiet|mute)[.!?]?$", re.I),
+        re.compile(r"^(?:stop|cancel|never\s+mind|nevermind|abort|mute)[.!?]?$", re.I),
         _stop,
     ),
     (
@@ -102,6 +188,21 @@ DISPATCH_KEYWORDS: frozenset[str] = frozenset(
     },
 )
 
+# Read-only queries that nonetheless require *tools* (screenshot, file
+# read, window listing, etc.). Routing these to Haiku/Sonnet without
+# tools causes hallucinated answers. Route to agent_brain instead so
+# the SDK loop has access to MCP + Read/Bash/Grep/Glob.
+TOOL_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "screen", "screenshot", "window", "windows open", "what's open",
+        "click", "type into", "press key", "scroll",
+        "look at", "show me", "see your screen", "see the screen",
+        "focus on", "drag",
+        "read file", "open file", "what's in", "list files",
+        "run command", "in terminal", "in cmd",
+    },
+)
+
 
 def match(text: str) -> str | None:
     """Return a local response, or None if no rule matches."""
@@ -122,11 +223,19 @@ def has_dispatch_keyword(text: str) -> bool:
     return any(kw in lowered for kw in DISPATCH_KEYWORDS)
 
 
+def has_tool_keyword(text: str) -> bool:
+    """True if the query needs tools (screenshot, file read, etc.)."""
+    lowered = text.lower()
+    return any(kw in lowered for kw in TOOL_KEYWORDS)
+
+
 __all__ = [
     "match",
     "has_heavy_keyword",
     "has_dispatch_keyword",
+    "has_tool_keyword",
     "RULES",
     "HEAVY_KEYWORDS",
     "DISPATCH_KEYWORDS",
+    "TOOL_KEYWORDS",
 ]

@@ -74,7 +74,17 @@ async def test_one_cycle_full_pipeline(monkeypatch):
 
     async def _handle(text: str) -> dict[str, Any]:
         received["text"] = text
-        return {"responses": {"echo": {"action": text}}}
+        # Mirror cheap_handler shape — voice tier carries spoken-ready text.
+        return {
+            "responses": {
+                "voice": {
+                    "agent": "voice",
+                    "action": f"echo: {text}",
+                    "result": {"text": f"echo: {text}", "source": "stub"},
+                }
+            },
+            "source": "stub",
+        }
 
     await voice_main._one_cycle(wake, stt, tts, _handle)
 

@@ -255,26 +255,45 @@ class JarvisChat:
     # ----- soul + client construction -----
 
     def _system_for(self, model: str) -> str:
+        from .voice.persona import PERSONA
+
         variant = "full" if model == self._opus_model else "lite"
         soul = load_soul(variant)
+        # Text channel — keep terse persona but allow markdown.
+        chat_persona = (
+            PERSONA
+            + "\n\nText channel — markdown ok, but stay terse. "
+            "Fragments fine when natural. Never lecture.\n\n"
+        )
         agents_block = "\n".join(
             f"- **{name}** — {desc}" for name, desc in _AGENT_DESCRIPTIONS.items()
         )
         addendum = (
             "\n\n---\n\n## Tool use\n\n"
-            "You have one tool, `delegate(agent, action, args)`. Use it to dispatch "
-            "to your team. Available agents and their actions:\n\n"
+            "You have a real tool surface — use it instead of guessing.\n\n"
+            "**Subsystem dispatch** — `delegate(agent, action, args)`. Use this to "
+            "hand work to your team. Available agents and their actions:\n\n"
             f"{agents_block}\n\n"
-            "When a request needs an agent, call `delegate` and synthesize the "
-            "response for Jyot. Do not pretend to act on his behalf without "
-            "actually calling the tool.\n\n"
+            "**File system + shell** — `Read`, `Bash`, `Grep`, `Glob`. Use these to "
+            "inspect the operator's repo, run commands, find files. Default cwd is "
+            "`C:\\Users\\jyot2\\jarvis`.\n\n"
+            "**Desktop GUI control** — `mcp__jarvis-desktop__desktop_*` tools "
+            "(screenshot, list_windows, focus_window, click, type, press_key, "
+            "scroll, drag, get_mouse_position, get_screen_size, move_mouse, "
+            "double_click, right_click). When the operator asks 'what's on "
+            "screen', call `desktop_screenshot` first — do not narrate from memory. "
+            "When asked to click / type / press something, do it; don't ask for a "
+            "JSON config file. Take a screenshot, identify coordinates, then act.\n\n"
+            "Never fabricate tool capabilities or claim a tool isn't 'in your "
+            "registry' — the tools above are wired in. If a call fails, surface "
+            "the actual error, then retry or escalate.\n\n"
             "## Semantic memory\n\n"
             f"{_RECALL_DESCRIPTION}\n"
             "Relevant past turns are automatically prepended to your context when "
             "switching model lanes. You do not need to call a tool for recall — "
             "the relevant history appears in the recap block above the current message."
         )
-        return soul + addendum
+        return chat_persona + soul + addendum
 
     def _build_client_for(self, model: str) -> ClaudeSDKClient:
         if model in self._clients:
@@ -284,9 +303,40 @@ class JarvisChat:
         opts = ClaudeAgentOptions(
             model=model,
             system_prompt=self._system_for(model),
-            mcp_servers={"jarvis-team": srv},
-            allowed_tools=["mcp__jarvis-team__delegate"],
+            mcp_servers={
+                "jarvis-team": srv,
+                "jarvis-desktop": {
+                    "type": "stdio",
+                    "command": "C:\\Python314\\python.exe",
+                    "args": [
+                        "C:\\Users\\jyot2\\jarvis\\jarvis\\tools\\desktop_mcp.py",
+                    ],
+                },
+            },
+            allowed_tools=[
+                "mcp__jarvis-team__delegate",
+                # GUI control via the Jarvis Desktop MCP
+                "mcp__jarvis-desktop__desktop_screenshot",
+                "mcp__jarvis-desktop__desktop_list_windows",
+                "mcp__jarvis-desktop__desktop_focus_window",
+                "mcp__jarvis-desktop__desktop_get_mouse_position",
+                "mcp__jarvis-desktop__desktop_get_screen_size",
+                "mcp__jarvis-desktop__desktop_move_mouse",
+                "mcp__jarvis-desktop__desktop_click",
+                "mcp__jarvis-desktop__desktop_double_click",
+                "mcp__jarvis-desktop__desktop_right_click",
+                "mcp__jarvis-desktop__desktop_drag",
+                "mcp__jarvis-desktop__desktop_type",
+                "mcp__jarvis-desktop__desktop_press_key",
+                "mcp__jarvis-desktop__desktop_scroll",
+                # File system + shell so Jarvis can actually inspect the repo
+                "Read",
+                "Bash",
+                "Grep",
+                "Glob",
+            ],
             permission_mode="bypassPermissions",
+            cwd="C:\\Users\\jyot2\\jarvis",
         )
         client = ClaudeSDKClient(options=opts)
         self._clients[model] = client
@@ -492,6 +542,71 @@ class JarvisChat:
         self._last_lane = decision.model
         self._record_turn("user", cleaned, lane=decision.model)
         self._record_turn("assistant", "".join(assistant_text_buf), lane=decision.model)
+
+
+    async def respond_single(self, message: str) -> dict[str, Any]:
+        """Single-shot reply for non-streaming surfaces (voice channel).
+
+        Drives :meth:`stream` end-to-end, accumulates the assistant text +
+        tool-call summary, and returns a dispatch-shaped dict the voice
+        loop can pass to :func:`jarvis.voice.loop._spoken_text`.
+
+        The artifact lands under the ``agent_brain`` key (not ``voice``)
+        so the voice humanizer condenses long replies before TTS.
+        """
+        text_buf: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        cost_usd = 0.0
+        try:
+            async for ev in self.stream(message):
+                if ev.type == "text":
+                    text_buf.append(str(ev.payload.get("delta", "")))
+                elif ev.type == "tool_use":
+                    tool_calls.append(
+                        {
+                            "name": str(ev.payload.get("name", "")),
+                            "agent": str(ev.payload.get("agent", "")),
+                            "action": str(ev.payload.get("action", "")),
+                        }
+                    )
+                elif ev.type == "done":
+                    raw_cost = ev.payload.get("total_cost_usd")
+                    if isinstance(raw_cost, (int, float)):
+                        cost_usd = float(raw_cost)
+        except Exception as exc:  # pragma: no cover — voice never crashes on chat fail
+            logger.warning("respond_single failed: %s", exc)
+            return {
+                "responses": {
+                    "voice": {
+                        "agent": "jarvis-chat",
+                        "action": "Hit a snag running that.",
+                        "result": {
+                            "source": "jarvis-chat-error",
+                            "text": "Hit a snag running that.",
+                            "error": str(exc)[:500],
+                        },
+                    },
+                },
+                "needs_confirm": False,
+                "source": "jarvis-chat-error",
+            }
+        spoken = "".join(text_buf).strip() or "Done."
+        return {
+            "responses": {
+                "agent_brain": {
+                    "agent": "jarvis-chat",
+                    "action": spoken,
+                    "result": {
+                        "source": "jarvis-chat",
+                        "text": spoken,
+                        "tool_calls": tool_calls,
+                        "cost_usd": cost_usd,
+                    },
+                },
+            },
+            "needs_confirm": False,
+            "source": "jarvis-chat",
+        }
 
 
 async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:

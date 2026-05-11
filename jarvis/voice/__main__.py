@@ -15,7 +15,7 @@ The loop runs forever. Each iteration:
 2. After wake, capture the next utterance until 700 ms of silence.
 3. STT → text.
 4. Forward text to :class:`jarvis.orchestrator.Orchestrator.dispatch`.
-5. Compress response via ``_voice_summary`` and TTS-synthesize it.
+5. Render reply via ``_spoken_text`` (humanizes dispatch results) and TTS.
 6. Play the audio back.
 
 Designed to live as a Windows autostart background process. Logs to
@@ -31,7 +31,7 @@ from typing import Any
 
 from ..config import get_settings
 from .audio_io import collect_until_silence, mic_chunks, play_audio
-from .loop import _voice_summary
+from .loop import _spoken_text
 from .stt import DeepgramSTT, MockSTT, STTProvider, WhisperSTT
 from .tts import ElevenLabsTTS, MockTTS, PiperTTS, TTSProvider
 from .wake import MockWakeDetector, WakeDetector
@@ -140,11 +140,19 @@ async def run_forever() -> None:
     logger.info(
         "[voice] loop started — say '%s' to talk", settings.voice_wake_word,
     )
+
+    # Spawn proactive alert channel — daemon → voice bridge for severity=='alert'.
+    from . import proactive
+
+    proactive_task = asyncio.create_task(proactive.run(tts))
+    logger.info("[voice] proactive alert channel spawned")
+
     while True:
         try:
             await _one_cycle(wake, stt, tts, handle)
         except KeyboardInterrupt:
             logger.info("[voice] stopped by user")
+            proactive_task.cancel()
             break
         except Exception as exc:  # noqa: BLE001 — keep loop alive across faults
             logger.exception("[voice] cycle error: %s", exc)
@@ -196,7 +204,7 @@ async def _one_cycle(
                 logger.warning("[voice] filler play failed: %s", exc)
 
     response = await handle(text)
-    spoken = _voice_summary(response)
+    spoken = _spoken_text(response)
     logger.info("[voice] reply: %s", spoken[:200])
     audio = tts.synthesize(spoken)
     if audio:

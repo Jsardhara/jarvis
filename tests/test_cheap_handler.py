@@ -57,7 +57,7 @@ async def test_status_query_uses_haiku(monkeypatch):
     monkeypatch.setattr("jarvis.claude_queue.submit", _fake_submit, raising=False)
     out = await cheap_handler.handle("what's my pnl today")
     assert captured["model"] == "claude-haiku-4-5"
-    assert captured["max_tokens"] == 120
+    assert captured["user"] == "what's my pnl today"
     assert "PnL" in out["responses"]["voice"]["action"]
     assert out["source"] == "claude-haiku-4-5"
 
@@ -89,14 +89,59 @@ async def test_code_keyword_escalates_to_sonnet(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dispatch_keyword_falls_through_to_orchestrator(monkeypatch):
-    """Drafting / scheduling go through the full Orchestrator path."""
+async def test_dispatch_keyword_routes_to_jarvis_chat(monkeypatch):
+    """State-changing utterances now hit the unified JarvisChat brain."""
     submitted = []
     monkeypatch.setattr(
         "jarvis.claude_queue.submit",
         lambda **kw: submitted.append(kw) or "no",
         raising=False,
     )
+
+    captured_text: list[str] = []
+
+    class _FakeChat:
+        async def respond_single(self, text: str) -> dict:
+            captured_text.append(text)
+            return {
+                "responses": {
+                    "agent_brain": {
+                        "agent": "jarvis-chat",
+                        "action": "draft created",
+                        "result": {"text": "draft created", "source": "jarvis-chat"},
+                    },
+                },
+                "needs_confirm": False,
+                "source": "jarvis-chat",
+            }
+
+    cheap_handler._JARVIS_CHAT_SINGLETON["instance"] = _FakeChat()
+
+    try:
+        out = await cheap_handler.handle("draft an email to the team about delays")
+    finally:
+        cheap_handler._JARVIS_CHAT_SINGLETON["instance"] = None
+
+    assert submitted == []
+    assert captured_text == ["draft an email to the team about delays"]
+    assert out["source"] == "jarvis-chat"
+    assert out["responses"]["agent_brain"]["action"] == "draft created"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_falls_back_to_orchestrator_when_chat_raises(monkeypatch):
+    """If JarvisChat.respond_single blows up, voice still answers via legacy path."""
+    monkeypatch.setattr(
+        "jarvis.claude_queue.submit",
+        lambda **kw: "x",
+        raising=False,
+    )
+
+    class _BoomChat:
+        async def respond_single(self, text: str) -> dict:
+            raise RuntimeError("sdk crashed")
+
+    cheap_handler._JARVIS_CHAT_SINGLETON["instance"] = _BoomChat()
 
     captured_text: list[str] = []
 
@@ -124,11 +169,14 @@ async def test_dispatch_keyword_falls_through_to_orchestrator(monkeypatch):
     monkeypatch.setitem(sys.modules, "jarvis.orchestrator", fake_orch_mod)
     monkeypatch.setitem(sys.modules, "jarvis.subsystems.registry", fake_reg_mod)
 
-    out = await cheap_handler.handle("draft an email to the team about delays")
-    assert submitted == []  # no Haiku/Sonnet shortcut call
+    try:
+        out = await cheap_handler.handle("draft an email to the team about delays")
+    finally:
+        cheap_handler._JARVIS_CHAT_SINGLETON["instance"] = None
+
     assert captured_text == ["draft an email to the team about delays"]
-    assert out["needs_confirm"] is True
     assert out["source"] == "orchestrator"
+    assert out["needs_confirm"] is True
 
 
 @pytest.mark.asyncio
@@ -166,7 +214,8 @@ async def test_repeat_replays_last_reply(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_max_tokens_default_caps_response(monkeypatch):
+async def test_haiku_call_passes_system_prompt(monkeypatch):
+    """Brevity is now enforced by VOICE_SYSTEM_PROMPT, not a max_tokens cap."""
     captured = {}
     monkeypatch.setattr(
         "jarvis.claude_queue.submit",
@@ -174,4 +223,5 @@ async def test_max_tokens_default_caps_response(monkeypatch):
         raising=False,
     )
     await cheap_handler.handle("how is everything")
-    assert captured["max_tokens"] == cheap_handler.DEFAULT_MAX_TOKENS == 120
+    assert "chief of staff" in captured["system"].lower()
+    assert "1-2 sentences" in captured["system"]

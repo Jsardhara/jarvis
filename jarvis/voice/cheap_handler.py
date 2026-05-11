@@ -13,9 +13,10 @@ Heavy keywords (explain, why, code, refactor) → Sonnet.
 Dispatch keywords (draft, send, schedule, execute, …) → full orchestrator.
 Everything else → Haiku.
 
-Returns the dict shape the existing voice loop expects (matching
-:class:`jarvis.orchestrator.Orchestrator.dispatch`'s output) so
-``_voice_summary`` can compress for TTS without changes.
+Returns the dict shape the voice loop expects (matching
+:class:`jarvis.orchestrator.Orchestrator.dispatch`'s output) — Tier 0/1/2
+populate ``responses.voice`` with spoken-ready text, Tier 3 leaves raw
+agent artifacts for ``_spoken_text`` to humanize.
 """
 
 from __future__ import annotations
@@ -23,19 +24,23 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .cheap_patterns import has_dispatch_keyword, has_heavy_keyword, match
+from . import conversation_memory
+from .cheap_patterns import (
+    has_dispatch_keyword,
+    has_heavy_keyword,
+    has_tool_keyword,
+    match,
+)
 from .context_cache import load_voice_context, render_for_prompt
+from .persona import PERSONA
 from .voice_state import set_state as _set_voice_state
 
 logger = logging.getLogger(__name__)
 
-VOICE_SYSTEM_PROMPT = """You are Jarvis voice. Reply in 1-2 sentences, max 30 words.
-Pull facts from CONTEXT below; never invent numbers.
-If something isn't in CONTEXT, say "I'd need to check the dashboard for that."
-
-CONTEXT
-{context_block}
-"""
+VOICE_SYSTEM_PROMPT = (
+    PERSONA
+    + "\n\nCONTEXT\n{context_block}\n\nRECENT EXCHANGES\n{memory_block}\n"
+)
 
 DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"
 DEFAULT_SONNET_MODEL = "claude-sonnet-4-6"
@@ -46,7 +51,7 @@ _LAST_REPLY: dict[str, str] = {"text": ""}
 
 
 def _wrap(reply: str, *, source: str) -> dict[str, Any]:
-    """Match Orchestrator.dispatch shape so _voice_summary works unchanged."""
+    """Match Orchestrator.dispatch shape; voice tier carries spoken-ready text."""
     return {
         "responses": {
             "voice": {
@@ -75,14 +80,13 @@ async def _ask_claude(text: str, model: str) -> dict[str, Any]:
     from ..claude_queue import submit  # type: ignore[import-not-found]
 
     context = load_voice_context()
-    system = VOICE_SYSTEM_PROMPT.format(context_block=render_for_prompt(context))
+    memory_block = conversation_memory.render_for_prompt() or "(none)"
+    system = VOICE_SYSTEM_PROMPT.format(
+        context_block=render_for_prompt(context),
+        memory_block=memory_block,
+    )
     try:
-        reply = submit(
-            model=model,
-            system=system,
-            messages=[{"role": "user", "content": text}],
-            max_tokens=DEFAULT_MAX_TOKENS,
-        )
+        reply = submit(system=system, user=text, model=model)
         if isinstance(reply, dict):  # some queue paths return dict
             reply = reply.get("text", "")
     except Exception as exc:  # noqa: BLE001 — voice should never crash on LLM fail
@@ -91,16 +95,12 @@ async def _ask_claude(text: str, model: str) -> dict[str, Any]:
     reply = (reply or "").strip()
     if reply:
         _LAST_REPLY["text"] = reply
+        conversation_memory.remember(text, reply)
     return _wrap(reply, source=model)
 
 
-async def _full_dispatch(text: str) -> dict[str, Any]:
-    """Fall through to the standard Orchestrator for state-changing tasks.
-
-    Voice is just an input channel here — Jarvis behaves identically to
-    a typed dashboard request. Same agents, same confirmation gates,
-    same cost.
-    """
+async def _orchestrator_fallback(text: str) -> dict[str, Any]:
+    """Legacy orchestrator-only path. Used if the Agent SDK brain fails."""
     try:
         from ..orchestrator import Orchestrator  # type: ignore[import-not-found]
         from ..subsystems.registry import build_default_registry  # type: ignore[import-not-found]
@@ -108,7 +108,6 @@ async def _full_dispatch(text: str) -> dict[str, Any]:
         reg = build_default_registry()
         orch = Orchestrator(reg)
         result = await orch.dispatch(text)
-        # Stash the most-relevant action string for "repeat".
         responses = result.get("responses", {})
         if responses:
             first = next(iter(responses.values()), {})
@@ -121,6 +120,47 @@ async def _full_dispatch(text: str) -> dict[str, Any]:
             "I had trouble routing that. Try again or use the dashboard.",
             source="orchestrator-error",
         )
+
+
+_JARVIS_CHAT_SINGLETON: dict[str, Any] = {"instance": None}
+
+
+def _shared_jarvis_chat():
+    """Lazily build and cache the unified JarvisChat instance.
+
+    Voice and dashboard chat share this single brain so memory, tools, and
+    persona stay in sync across surfaces.
+    """
+    inst = _JARVIS_CHAT_SINGLETON.get("instance")
+    if inst is not None:
+        return inst
+    from ..jarvis_agent import JarvisChat  # type: ignore[import-not-found]
+    from ..subsystems.registry import build_default_registry  # type: ignore[import-not-found]
+
+    inst = JarvisChat(registry=build_default_registry())
+    _JARVIS_CHAT_SINGLETON["instance"] = inst
+    return inst
+
+
+async def _full_dispatch(text: str) -> dict[str, Any]:
+    """Tier-3 — route voice through the shared JarvisChat brain.
+
+    Falls back to the legacy Orchestrator path only if JarvisChat itself
+    raises or can't be imported in this environment.
+    """
+    try:
+        chat = _shared_jarvis_chat()
+        result = await chat.respond_single(text)
+        responses = result.get("responses", {})
+        block = responses.get("agent_brain") or responses.get("voice") or {}
+        spoken = (block.get("result") or {}).get("text") or block.get("action")
+        if spoken:
+            _LAST_REPLY["text"] = spoken
+        result.setdefault("source", "jarvis-chat")
+        return result
+    except Exception as exc:  # noqa: BLE001 — voice never crashes on brain fail
+        logger.warning("[voice] JarvisChat unavailable (%s) — falling back", exc)
+        return await _orchestrator_fallback(text)
 
 
 async def handle(text: str) -> dict[str, Any]:
@@ -138,11 +178,11 @@ async def handle(text: str) -> dict[str, Any]:
         _set_voice_state("routing", tier="local", last_text=text)
         return local
 
-    # Tier 3 — state-changing tasks always go through the full orchestrator
-    # so the existing tier/authority gates and subsystem dispatches run.
-    if has_dispatch_keyword(text):
-        logger.info("[voice] tier=orchestrator (dispatch keyword)")
-        _set_voice_state("routing", tier="orchestrator", last_text=text)
+    # Tier 3 — state-changing or tool-needing utterances route to the
+    # Claude Agent SDK brain (file ops, GUI control, sub-agent dispatch).
+    if has_dispatch_keyword(text) or has_tool_keyword(text):
+        logger.info("[voice] tier=agent-brain (dispatch/tool keyword)")
+        _set_voice_state("routing", tier="agent-brain", last_text=text)
         return await _full_dispatch(text)
 
     # Tier 2 — heavy reasoning keywords escalate to Sonnet.
