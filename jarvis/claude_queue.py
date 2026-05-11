@@ -96,28 +96,70 @@ def submit(
 
 
 # ---------------------------------------------------------------------------
-# Multimodal — raw anthropic SDK (vision / PDF / document blocks)
+# Multimodal — claude-agent-sdk stream-input path (Pro/Max OAuth)
 # ---------------------------------------------------------------------------
 
 
-def _resolve_anthropic_key() -> str:
-    """Return ANTHROPIC_API_KEY env var.
+def _multimodal_once(
+    system: str,
+    content: list[dict],
+    model: str,
+) -> str:
+    """One multimodal turn via claude-agent-sdk. Sync wrapper around async query.
 
-    Multimodal calls go to api.anthropic.com directly, which requires a
-    real Anthropic API key (Console billing). The Claude Code Pro/Max
-    OAuth token used elsewhere is *not* accepted here.
+    Uses the SDK's stream-input form — ``prompt=AsyncIterable[dict]`` — which
+    forwards Anthropic-format content blocks (text/image/document) straight
+    through the Claude Code CLI session. Authenticates with the Pro/Max
+    OAuth token, never the API key.
     """
-    import os
+    import asyncio
+    import threading
+    from typing import Any as _Any
 
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if key:
-        return key
-    raise RuntimeError(
-        "ANTHROPIC_API_KEY not set. Multimodal (vision/PDF/audio) calls go "
-        "through api.anthropic.com and need a real API key — Pro/Max OAuth "
-        "won't work here. Get one at https://console.anthropic.com/settings/keys "
-        "and add ANTHROPIC_API_KEY=... to your environment."
+    from claude_agent_sdk import (
+        AssistantMessage,
+        ClaudeAgentOptions,
+        TextBlock,
+        query,
     )
+
+    async def _stream_in():
+        yield {
+            "type": "user",
+            "message": {"role": "user", "content": content},
+        }
+
+    async def _run() -> str:
+        opts = ClaudeAgentOptions(
+            model=model,
+            system_prompt=system,
+            permission_mode="bypassPermissions",
+        )
+        chunks: list[str] = []
+        async for msg in query(prompt=_stream_in(), options=opts):
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and block.text:
+                        chunks.append(block.text)
+        return "".join(chunks)
+
+    box: dict[str, _Any] = {}
+
+    def runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            box["result"] = loop.run_until_complete(_run())
+        except BaseException as exc:  # noqa: BLE001
+            box["error"] = exc
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    t.join(timeout=180)
+    if "error" in box:
+        raise box["error"]
+    return str(box.get("result", "")).strip()
 
 
 def submit_multimodal(
@@ -125,7 +167,7 @@ def submit_multimodal(
     content: list[dict],
     *,
     model: str = "claude-sonnet-4-6",
-    max_tokens: int = 1024,
+    max_tokens: int = 1024,  # kept for API compat; SDK manages tokens
     backoff_sec: tuple[float, ...] = _DEFAULT_BACKOFF_SEC,
 ) -> str:
     """Run a multimodal Claude turn through the global queue.
@@ -140,26 +182,17 @@ def submit_multimodal(
                                           "media_type": "application/pdf",
                                           "data": "<b64>"}}
 
-    Returns the assembled assistant text. Raises after all retries on
-    persistent failure.
+    Authenticates through the local Claude Code session (Pro/Max plan),
+    not via ANTHROPIC_API_KEY. Same global lock + retry as ``submit``.
     """
-    import anthropic
-
-    client = anthropic.Anthropic(api_key=_resolve_anthropic_key())
+    del max_tokens  # SDK path manages output tokens internally
     attempts = len(backoff_sec) + 1
     last_exc: BaseException | None = None
 
     with _LOCK:
         for i in range(attempts):
             try:
-                resp = client.messages.create(
-                    model=model,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=[{"role": "user", "content": content}],
-                )
-                parts = [b.text for b in resp.content if getattr(b, "type", "") == "text"]
-                return "".join(parts).strip()
+                return _multimodal_once(system, content, model)
             except BaseException as exc:  # noqa: BLE001
                 last_exc = exc
                 if i >= attempts - 1 or not _is_retryable(exc):
