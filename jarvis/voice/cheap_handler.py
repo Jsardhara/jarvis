@@ -163,6 +163,27 @@ async def _full_dispatch(text: str) -> dict[str, Any]:
         return await _orchestrator_fallback(text)
 
 
+async def _link_response(text: str) -> dict[str, Any]:
+    """Run multimodal link_handler in a thread, wrap result for voice."""
+    import asyncio
+
+    from ..subsystems import link_handler
+
+    loop = asyncio.get_running_loop()
+    resp = await loop.run_in_executor(None, link_handler.handle, text)
+    summary = ""
+    if resp.action == "summarized":
+        summary = str(resp.result.get("summary", "")).strip()
+    elif resp.action == "failed":
+        summary = "Couldn't process that link. Try a different one."
+    else:
+        summary = "No URL found."
+    if summary:
+        _LAST_REPLY["text"] = summary
+        conversation_memory.remember(text, summary)
+    return _wrap(summary or "Nothing useful.", source="link_handler")
+
+
 async def handle(text: str) -> dict[str, Any]:
     """Route a voice query to the cheapest tier that can answer.
 
@@ -171,6 +192,14 @@ async def handle(text: str) -> dict[str, Any]:
     text = (text or "").strip()
     if not text:
         return _wrap("", source="empty")
+
+    # URL detected → multimodal link_handler runs before any tier routing.
+    from ..subsystems import link_handler
+
+    if link_handler.extract_urls(text):
+        logger.info("[voice] tier=link_handler (URL detected)")
+        _set_voice_state("routing", tier="link_handler", last_text=text)
+        return await _link_response(text)
 
     # Tier 0 — local pattern match, no LLM.
     local = _local_response(text)

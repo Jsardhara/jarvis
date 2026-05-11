@@ -476,6 +476,16 @@ class JarvisChat:
 
     async def stream(self, message: str) -> AsyncIterator[StreamEvent]:
         """Send one user turn, yield events as Claude responds."""
+        # Short-circuit: message contains a URL → run multimodal link_handler
+        # and synthesize stream events from its summary. Skips the normal
+        # routing + Claude SDK call entirely.
+        from .subsystems import link_handler
+
+        if link_handler.extract_urls(message or ""):
+            async for ev in self._stream_via_link_handler(message or ""):
+                yield ev
+            return
+
         if self._forced_model is not None:
             decision = RouteDecision(
                 model=self._forced_model,
@@ -543,6 +553,61 @@ class JarvisChat:
         self._record_turn("user", cleaned, lane=decision.model)
         self._record_turn("assistant", "".join(assistant_text_buf), lane=decision.model)
 
+    async def _stream_via_link_handler(self, message: str) -> AsyncIterator[StreamEvent]:
+        """Run link_handler in a thread, synthesize stream events from result."""
+        import asyncio
+
+        from .subsystems import link_handler
+
+        cleaned = message.strip()
+        # Sonnet handles link summaries — emit decision badge first.
+        decision_model = self._sonnet_model
+        yield StreamEvent(
+            "model",
+            {
+                "model": decision_model,
+                "reason": "link_handler — multimodal URL ingestion",
+                "tier": 2,
+                "manual": False,
+                "length_chars": len(cleaned),
+            },
+        )
+
+        try:
+            loop = asyncio.get_running_loop()
+            resp = await loop.run_in_executor(None, link_handler.handle, cleaned)
+        except Exception as exc:  # pragma: no cover — already caught inside handle
+            yield StreamEvent("error", {"message": f"link_handler failed: {exc}"})
+            return
+
+        if resp.action == "no_url":
+            yield StreamEvent("text", {"delta": "No URL found in your message."})
+            yield StreamEvent("done", {"total_cost_usd": 0.0})
+            return
+
+        if resp.action == "failed":
+            err = resp.result.get("error", "unknown")
+            yield StreamEvent(
+                "text",
+                {
+                    "delta": (
+                        f"Couldn't process that link — {err}. "
+                        "Try a different URL or a public one."
+                    )
+                },
+            )
+            yield StreamEvent("done", {"total_cost_usd": 0.0})
+            return
+
+        summary = str(resp.result.get("summary", "")).strip() or "Nothing useful."
+        # Surface the summary in one text event so the UI streams it as a
+        # single delta — consistent with the rest of the pipeline.
+        yield StreamEvent("text", {"delta": summary})
+        yield StreamEvent("done", {"total_cost_usd": 0.0})
+
+        self._last_lane = decision_model
+        self._record_turn("user", cleaned, lane=decision_model)
+        self._record_turn("assistant", summary, lane=decision_model)
 
     async def respond_single(self, message: str) -> dict[str, Any]:
         """Single-shot reply for non-streaming surfaces (voice channel).

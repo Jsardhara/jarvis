@@ -50,6 +50,12 @@ voice = [
     "pvporcupine>=3.0",         # paid wake-word alternative
     "openai-whisper>=20231117", # legacy whisper fallback
 ]
+links = [
+    # URL ingestion + multimodal pipeline
+    "yt-dlp>=2024.10",          # download YouTube/Insta/TikTok/X video + audio
+    "imageio-ffmpeg>=0.5",      # ships ffmpeg binary as wheel (no system install)
+    "pillow>=10.0",             # keyframe resize / PNG encode
+]
 
 [tool.setuptools.packages.find]
 where = ["."]
