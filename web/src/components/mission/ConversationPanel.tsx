@@ -22,6 +22,9 @@ export function ConversationPanel() {
   const [voiceReply, setVoiceReply] = useState(true);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenRef = useRef<string>("");
+  // Turn IDs that existed at mount/first-hydration — these are historical
+  // replies the operator already heard. Never speak them aloud.
+  const historicalIdsRef = useRef<Set<string> | null>(null);
 
   const handleFinal = useCallback(
     (text: string) => {
@@ -43,10 +46,21 @@ export function ConversationPanel() {
   }, [turns, streaming]);
 
   useEffect(() => {
+    // First time turns becomes non-empty → snapshot historical IDs and bail.
+    // (Initial empty array is skipped so the snapshot happens after server
+    // hydration completes, even when there is no history at all.)
+    if (historicalIdsRef.current === null) {
+      if (turns.length === 0) return;
+      historicalIdsRef.current = new Set(turns.map((t) => t.turn_id));
+      return;
+    }
+
     if (!voiceReply || streaming || turns.length === 0) return;
     const last = turns[turns.length - 1];
     if (!last.assistant_text) return;
     if (last.turn_id === lastSpokenRef.current) return;
+    // Skip anything that was already on screen at mount.
+    if (historicalIdsRef.current.has(last.turn_id)) return;
     lastSpokenRef.current = last.turn_id;
     speech.speak(last.assistant_text);
   }, [turns, streaming, voiceReply, speech]);
