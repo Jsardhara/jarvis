@@ -83,7 +83,7 @@ def write_voice_context(payload: dict[str, Any], path: Path | None = None) -> Pa
 def render_for_prompt(ctx: dict[str, Any]) -> str:
     """Compress the fact sheet into a few lines suitable for an LLM prompt."""
     if not ctx:
-        return "(context unavailable; respond conservatively)"
+        return f"(context unavailable; respond conservatively)\n{render_tasks_block()}"
     lines: list[str] = []
     if "pnl_today_pct" in ctx:
         lines.append(f"pnl_today: {ctx['pnl_today_pct']:+.2%}")
@@ -95,9 +95,74 @@ def render_for_prompt(ctx: dict[str, Any]) -> str:
         lines.append(f"next_event: {ctx['next_event']}")
     if "atlas_health" in ctx:
         lines.append(f"atlas_health: {ctx['atlas_health']}")
+    tasks_block = render_tasks_block()
+    if tasks_block:
+        lines.append(tasks_block)
     if not lines:
         return "(context empty)"
     return "\n".join(lines)
+
+
+def _tasks_path() -> Path:
+    """Resolve tasks.json — dashboard owns web/data/tasks.json.
+
+    Test override: ``JARVIS_TASKS_PATH`` (explicit file path). The generic
+    ``JARVIS_STATE_DIR`` is *not* honored here because the dashboard
+    writes to web/data/tasks.json regardless of state-dir overrides, so
+    pointing at state/tasks.json would silently miss every task created
+    in the UI.
+    """
+    explicit = os.environ.get("JARVIS_TASKS_PATH")
+    if explicit:
+        return Path(explicit)
+    project_root = Path(__file__).resolve().parent.parent.parent
+    return project_root / "web" / "data" / "tasks.json"
+
+
+def load_tasks() -> list[dict[str, Any]]:
+    """Read tasks from web/data/tasks.json. Returns empty list on miss/error."""
+    p = _tasks_path()
+    if not p.exists():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if isinstance(data, dict):
+        return list(data.get("tasks") or [])
+    if isinstance(data, list):
+        return data
+    return []
+
+
+def render_tasks_block(limit: int = 8) -> str:
+    """Render open tasks as a compact bullet block for the LLM prompt.
+
+    Filters to non-done items, sorts by urgency+importance (Eisenhower
+    do-first), shows up to ``limit``. Returns an empty string when no
+    open tasks so the prompt stays terse.
+    """
+    tasks = load_tasks()
+    open_tasks = [
+        t for t in tasks if str(t.get("kanban", "")).lower() not in ("done", "archived")
+    ]
+    if not open_tasks:
+        return ""
+
+    def rank(t: dict[str, Any]) -> int:
+        urg = str(t.get("urgency", "")).lower() == "urgent"
+        imp = str(t.get("importance", "")).lower() == "important"
+        return -(int(urg) * 2 + int(imp))
+
+    open_tasks.sort(key=rank)
+    bullets: list[str] = []
+    for t in open_tasks[:limit]:
+        title = str(t.get("title", "")).strip()
+        kanban = str(t.get("kanban", "?")).lower()
+        urg = "U" if str(t.get("urgency", "")).lower() == "urgent" else " "
+        imp = "I" if str(t.get("importance", "")).lower() == "important" else " "
+        bullets.append(f"  - [{urg}{imp}/{kanban}] {title}"[:120])
+    return f"open_tasks ({len(open_tasks)}):\n" + "\n".join(bullets)
 
 
 __all__ = [
@@ -105,5 +170,7 @@ __all__ = [
     "load_voice_context",
     "write_voice_context",
     "render_for_prompt",
+    "render_tasks_block",
+    "load_tasks",
     "STALE_AFTER_MIN",
 ]

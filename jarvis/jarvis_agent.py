@@ -293,6 +293,19 @@ class JarvisChat:
             "switching model lanes. You do not need to call a tool for recall — "
             "the relevant history appears in the recap block above the current message."
         )
+
+        # Live operator state — tasks, mail, calendar, atlas health.
+        # Re-read on every turn so newly-created tasks land in context
+        # without daemon refresh.
+        from .voice.context_cache import load_voice_context, render_for_prompt
+
+        live_state = render_for_prompt(load_voice_context())
+        if live_state and live_state != "(context empty)":
+            addendum += (
+                "\n\n## Live operator state (refreshed each turn)\n\n"
+                f"{live_state}\n"
+            )
+
         return chat_persona + soul + addendum
 
     def _build_client_for(self, model: str) -> ClaudeSDKClient:
