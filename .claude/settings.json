@@ -188,7 +188,7 @@
       "jarvis-frontend-dev": "web/src/ (read-only on jarvis/)",
       "jarvis-test-runner": "tests/ + minimal jarvis/ for genuine bugs",
       "jarvis-dashboard-designer": "web/src/app/globals.css + component proposals",
-      "jarvis-outlook-integrator": "jarvis/subsystems/outlook_provider.py + integration points"
+      "jarvis-outlook-integrator": "jarvis/agents/tempo/providers/ + integration points"
     }
   }
 }

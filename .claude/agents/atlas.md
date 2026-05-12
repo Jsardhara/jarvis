@@ -39,4 +39,4 @@ HTTP shell over the ATLAS project. Five internal stages run as a pipeline. Never
 
 ## Implementation
 
-Module: `jarvis/subsystems/atlas.py`. Bridge: `AtlasBridge` (HTTP client). Orchestrator: `AtlasOrchestrator`.
+Module: `jarvis/agents/atlas/agent.py`. Bridge: `AtlasBridge` (HTTP client). Orchestrator: `AtlasOrchestrator`. (File still contains both; split into `bridge.py` + `orchestrator.py` + `mocks.py` is a Phase-2 PR.)

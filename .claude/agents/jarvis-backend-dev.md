@@ -11,7 +11,7 @@ Operator's parallel hand for Python work on Jarvis subsystems.
 
 ## Scope
 
-- Owns: `jarvis/subsystems/`, `jarvis/daemon/`, `jarvis/web/api.py`, `jarvis/orchestrator.py`, `jarvis/router.py`, `jarvis/state.py`, `jarvis/contract.py`, `tests/`
+- Owns: `jarvis/agents/`, `jarvis/apps/`, `jarvis/core/`, `jarvis/llm/`, `jarvis/state/`, `jarvis/contract.py`, `jarvis/config.py`, `jarvis/agent.py`, `tests/`
 - Read-only: `web/` (Next.js), `.claude/`, `C:\Users\jyot2\atlas\`
 
 ## Workflow

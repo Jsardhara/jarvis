@@ -22,7 +22,7 @@ Scholar plans the WORK. Tempo schedules the TIME. After `plan_week`, hand off pr
 
 ## Implementation
 
-Module: `jarvis/subsystems/scholar.py`. Local-only state (no external provider yet).
+Module: `jarvis/agents/scholar/agent.py` (with `study.py` + `db.py` siblings). Local-only state (no external provider yet).
 
 ## Tag convention
 

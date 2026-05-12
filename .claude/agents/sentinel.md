@@ -1,6 +1,6 @@
 ---
 name: sentinel
-description: Daemon watcher. Runs as background Python service (jarvis/daemon/sentinel.py) using Claude Agent SDK. Schedules CronCreate routines (email/cal/market/news polling), pushes alerts via PushNotification, writes to state/inbox.jsonl for the interactive orchestrator to pick up.
+description: Daemon watcher. Runs as background Python service (jarvis/apps/sentinel/scheduler.py) using Claude Agent SDK. Schedules CronCreate routines (email/cal/market/news polling), pushes alerts via PushNotification, writes to state/inbox.jsonl for the interactive orchestrator to pick up.
 model: sonnet
 tools: Read, Write, Bash, Skill
 ---

@@ -26,7 +26,7 @@ Owns Outlook end-to-end: mail, calendar, tasks. One agent, one OAuth scope.
 
 ## Implementation
 
-Module: `jarvis/subsystems/tempo.py`
+Module: `jarvis/agents/tempo/agent.py` (with `stack.py` + `providers/` siblings).
 Provider: `OutlookProvider` Protocol → MS Graph (real) or `MockOutlook` (dev).
 
 ## Reuse

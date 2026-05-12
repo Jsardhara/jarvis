@@ -17,7 +17,7 @@ tools: Read, Glob, Grep, Bash, Skill, WebFetch, WebSearch, mcp__plugin_ecc_exa__
 
 ## Implementation
 
-Module: `jarvis/subsystems/lens.py`
+Module: `jarvis/agents/lens/agent.py` (with `link_handler.py`, `news_provider.py` as siblings).
 Provider: `SearchProvider` Protocol → Exa MCP (real) or `MockSearch` (dev).
 
 ## Reuse
