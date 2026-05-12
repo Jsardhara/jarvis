@@ -118,7 +118,7 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
 
     scholar = Scholar()
 
-    return {
+    registry: dict[str, AgentDescriptor] = {
         "tempo": AgentDescriptor(
             name="tempo",
             instance=tempo,
@@ -216,3 +216,17 @@ def build_default_registry() -> dict[str, AgentDescriptor]:
             default_for_text=lambda _text: atlas.portfolio(),
         ),
     }
+
+    # R1 — wire scholar.exam_session → tempo.add via the trigger helper.
+    # Late-bound: scholar is built before the registry dict exists, so we set
+    # the callback here once both halves are constructed.
+    try:
+        from jarvis.core.triggers import fire_exam_scheduled
+
+        scholar.set_on_exam_scheduled(
+            lambda session: fire_exam_scheduled(registry, session)
+        )
+    except Exception:  # pragma: no cover — never block registry construction
+        logger.warning("registry: failed to wire scholar.on_exam_scheduled", exc_info=True)
+
+    return registry

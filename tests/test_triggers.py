@@ -403,3 +403,255 @@ class TestListRecentFires:
 
         assert len(results) == 1
         assert results[0]["rule_name"] == "scholar_exam_scheduled"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 — fire_for_event handler body
+# ---------------------------------------------------------------------------
+
+class TestFireForEventAtlasCrit:
+    def test_atlas_crit_pushes_priority_2(self, tmp_path, monkeypatch):
+        """An atlas+crit InboxEvent fires a priority-2 notifier push."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        notifier = MagicMock()
+        event = InboxEvent(
+            agent="atlas",
+            severity="crit",
+            summary="Guardian violation: position size exceeds cap",
+            ref={"strategy_id": "strat_001", "violations": ["position size exceeds cap"]},
+        )
+
+        fired = triggers.fire_for_event({}, event, notifier=notifier)
+
+        assert len(fired) == 1
+        assert fired[0].rule_name == "atlas_crit_push"
+        notifier.push.assert_called_once()
+        args, kwargs = notifier.push.call_args
+        assert kwargs.get("priority", args[2] if len(args) >= 3 else None) == 2
+
+    def test_atlas_info_event_is_skipped(self, tmp_path, monkeypatch):
+        """Non-crit atlas events do not push."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        notifier = MagicMock()
+        event = InboxEvent(
+            agent="atlas",
+            severity="info",
+            summary="ATLAS pnl=+0.42% pos=3 actions=0",
+            ref={"pnl_pct": 0.0042, "open_positions": 3},
+        )
+
+        fired = triggers.fire_for_event({}, event, notifier=notifier)
+
+        assert fired == []
+        notifier.push.assert_not_called()
+
+    def test_atlas_crit_dedup_skips_second_fire(self, tmp_path, monkeypatch):
+        """Same (rule, source_key) within dedup window is skipped."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        notifier = MagicMock()
+        event = InboxEvent(
+            agent="atlas",
+            severity="crit",
+            summary="Guardian violation: stop loss missing",
+            ref={"strategy_id": "strat_dup", "violations": ["stop loss missing"]},
+        )
+
+        first = triggers.fire_for_event({}, event, notifier=notifier)
+        second = triggers.fire_for_event({}, event, notifier=notifier)
+
+        assert len(first) == 1
+        assert second == []
+        assert notifier.push.call_count == 1
+
+
+class TestFireForEventForgeCrit:
+    def test_forge_crit_pushes_priority_2(self, tmp_path, monkeypatch):
+        """A forge+crit InboxEvent (dead-letter) fires a priority-2 push."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        notifier = MagicMock()
+        event = InboxEvent(
+            agent="forge",
+            severity="crit",
+            summary="Forge execute failed: timeout after 3 retries",
+            ref={"request_id": "req_xyz", "error_class": "TimeoutError", "retries": 3},
+        )
+
+        fired = triggers.fire_for_event({}, event, notifier=notifier)
+
+        assert len(fired) == 1
+        assert fired[0].rule_name == "forge_crit_push"
+        notifier.push.assert_called_once()
+        args, kwargs = notifier.push.call_args
+        assert kwargs.get("priority", args[2] if len(args) >= 3 else None) == 2
+
+
+class TestFireForEventScholarImminent:
+    def test_scholar_warn_imminent_dispatches_tempo_add(self, tmp_path, monkeypatch):
+        """scholar+warn with session_id ref → dispatch tempo.add to block the slot."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        reg = _make_registry()
+        notifier = MagicMock()
+
+        starts_at = (datetime.now(UTC) + timedelta(hours=3)).isoformat()
+        event = InboxEvent(
+            agent="scholar",
+            severity="warn",
+            summary="Exam in 3h: Linear Algebra",
+            ref={"session_id": "sess_77", "course": "Linear Algebra", "starts_at": starts_at},
+        )
+
+        fired = triggers.fire_for_event(reg, event, notifier=notifier)
+
+        assert len(fired) == 1
+        assert fired[0].rule_name == "scholar_exam_imminent_block"
+        # tempo.call was invoked with action "add"
+        reg["tempo"].call.assert_called_once()
+        call_args = reg["tempo"].call.call_args
+        assert call_args[0][0] == "add"
+        payload = call_args[0][1]
+        assert "Linear Algebra" in payload["title"]
+        assert payload["due"] == starts_at
+        assert "scholar" in payload["tags"]
+        assert "exam" in payload["tags"]
+
+    def test_scholar_warn_without_session_id_is_skipped(self, tmp_path, monkeypatch):
+        """scholar+warn without a session_id ref doesn't trigger the imminent-exam handler."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        reg = _make_registry()
+        event = InboxEvent(
+            agent="scholar",
+            severity="warn",
+            summary="Generic scholar warning",
+            ref={"unrelated": "data"},
+        )
+
+        fired = triggers.fire_for_event(reg, event, notifier=MagicMock())
+
+        assert fired == []
+        reg["tempo"].call.assert_not_called()
+
+    def test_scholar_imminent_missing_tempo_is_graceful(self, tmp_path, monkeypatch):
+        """If tempo is not in the registry, the handler logs + skips without raising."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        event = InboxEvent(
+            agent="scholar",
+            severity="warn",
+            summary="Exam in 2h: Statistics",
+            ref={"session_id": "sess_88", "course": "Statistics", "starts_at": ""},
+        )
+
+        # No tempo in reg — handler should swallow and return empty
+        fired = triggers.fire_for_event({}, event, notifier=MagicMock())
+
+        assert fired == []
+
+
+class TestFireForEventUnhandled:
+    def test_lens_event_returns_empty(self, tmp_path, monkeypatch):
+        """Events that don't match any rule pattern return [] cleanly."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+
+        event = InboxEvent(
+            agent="lens",
+            severity="info",
+            summary="3 new world brief items",
+            ref={},
+        )
+
+        fired = triggers.fire_for_event({}, event, notifier=MagicMock())
+
+        assert fired == []
+
+
+# ---------------------------------------------------------------------------
+# Fix 4 — scan_periodic pushes warn/crit through the injected notifier
+# ---------------------------------------------------------------------------
+
+class TestScanPeriodicNotifies:
+    def test_crit_dead_letter_pushes_priority_2(self, tmp_path, monkeypatch):
+        """R4 forge dead-letter → notifier push at priority=2."""
+        from jarvis.core import triggers
+
+        # Stub _fired_path + _dead_letter_path so we use isolated fixtures
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+        monkeypatch.setattr(triggers, "_dead_letter_path", lambda: tmp_path / "dead_letter.jsonl")
+        monkeypatch.setattr(triggers, "_exams_path", lambda: tmp_path / "no_exams.jsonl")
+        # Empty tasks file
+        monkeypatch.setenv("JARVIS_STATE_DIR", str(tmp_path))
+
+        dl_path = tmp_path / "dead_letter.jsonl"
+        dl_path.write_text(
+            json.dumps({
+                "agent": "forge",
+                "request_id": "req_dead_42",
+                "action": "execute",
+                "error_msg": "Claude SDK timeout",
+                "error_class": "TimeoutError",
+                "retries": 3,
+                "ts": datetime.now(UTC).isoformat(),
+            }) + "\n",
+            encoding="utf-8",
+        )
+
+        # Patch append_inbox so we don't try to write to state.
+        appended: list[InboxEvent] = []
+        monkeypatch.setattr(
+            "jarvis.state.append_inbox",
+            lambda ev: appended.append(ev) or ev,
+        )
+
+        notifier = MagicMock()
+
+        fired = triggers.scan_periodic({}, notifier=notifier)
+
+        # At least one fire for R4 (crit)
+        assert any(f.rule_name == "forge_run_failed" for f in fired)
+        # Notifier was pushed at priority=2 for the crit event
+        notifier.push.assert_called()
+        # Inspect the call args for priority
+        crit_calls = [
+            c for c in notifier.push.call_args_list
+            if (c.kwargs.get("priority") == 2 or (len(c.args) >= 3 and c.args[2] == 2))
+        ]
+        assert crit_calls, "expected at least one crit-priority push"
+
+    def test_scan_periodic_without_notifier_is_quiet(self, tmp_path, monkeypatch):
+        """If no notifier is passed, scan_periodic still works (back-compat)."""
+        from jarvis.core import triggers
+
+        monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
+        monkeypatch.setattr(triggers, "_dead_letter_path", lambda: tmp_path / "no_dl.jsonl")
+        monkeypatch.setattr(triggers, "_exams_path", lambda: tmp_path / "no_exams.jsonl")
+        monkeypatch.setenv("JARVIS_STATE_DIR", str(tmp_path))
+
+        monkeypatch.setattr(
+            "jarvis.state.append_inbox",
+            lambda ev: ev,
+        )
+
+        # Old-style call without notifier kwarg must still work.
+        fired = triggers.scan_periodic({})
+        assert fired == []  # nothing in the fixture files

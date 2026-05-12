@@ -562,18 +562,36 @@ class AtlasOrchestrator:
         )
 
     def guardian_check(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
-        """Hard risk gate. Veto power. Live mode triggers stricter rules."""
+        """Hard risk gate. Veto power. Live mode triggers stricter rules.
+
+        On any rejection (``approved=False`` with non-empty ``violations``), emit a
+        crit ``InboxEvent`` so the violation surfaces on the dashboard, voice fact
+        sheet, and morning brief. Without this, guardian rejections only live
+        inside the returned ``AgentResponse.result`` and disappear silently.
+        """
         degraded = self._is_offline()
         if not self._use_mock() and not degraded:
             raw = None
             with contextlib.suppress(Exception):
                 raw = self.bridge.pipeline_guardian_check(signal_id=strategy_id)
             if raw is not None and ("status" in raw or "correlation_id" in raw):
-                return _parse_pipeline_envelope(
+                resp = _parse_pipeline_envelope(
                     raw, "atlas.guardian", "risk_check", "approved",
                     {"strategy_id": strategy_id, "mode": mode, "approved": True, "violations": []},
                     base_confidence=0.95,
                 )
+                # _parse_pipeline_envelope merges fallback_result LAST, which
+                # masks rejection fields coming back from ATLAS. Pull approved
+                # + violations directly from the raw payload so the inbox
+                # emission sees the real verdict.
+                raw_payload = raw.get("result") if isinstance(raw.get("result"), dict) else {}
+                raw_approved = raw_payload.get("approved", raw.get("approved", True))
+                raw_violations = raw_payload.get("violations", raw.get("violations", []))
+                self._maybe_emit_guardian_violation(
+                    strategy_id,
+                    {"approved": raw_approved, "violations": raw_violations},
+                )
+                return resp
         violations: list[str] = []
         if mode == "live":
             violations.append("live mode requires explicit operator confirmation")
@@ -586,6 +604,7 @@ class AtlasOrchestrator:
         }
         if degraded:
             result["meta"] = _DEGRADED_META
+        self._maybe_emit_guardian_violation(strategy_id, result)
         return AgentResponse(
             agent="atlas.guardian",
             intent="risk_check",
@@ -595,6 +614,30 @@ class AtlasOrchestrator:
             follow_ups=["confirm to override and run live"] if not approved else [],
             confidence=0.95,
         )
+
+    @staticmethod
+    def _maybe_emit_guardian_violation(strategy_id: str, result: dict) -> None:
+        """If ``result`` is a guardian rejection, surface as crit ``InboxEvent``.
+
+        No-op when approved or when violations list is empty. Inbox-write
+        failures are swallowed: the guardian decision is still returned to the
+        caller even if the dashboard never sees it.
+        """
+        if result.get("approved"):
+            return
+        violations = result.get("violations") or []
+        if not violations:
+            return
+        # Lazy imports keep the atlas package decoupled from the trigger / state
+        # layers at module-load time.
+        from jarvis.core.triggers import build_guardian_violation_event
+        from jarvis.state import append_inbox
+
+        event = build_guardian_violation_event(strategy_id, list(violations))
+        if event is None:
+            return
+        with contextlib.suppress(Exception):
+            append_inbox(event)
 
     def trader_execute(self, strategy_id: str, mode: str = "paper") -> AgentResponse:
         """Execution dispatch.

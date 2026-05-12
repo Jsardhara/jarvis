@@ -205,8 +205,30 @@ class Scholar:
 
     _study_svc: Any = None  # lazy StudyService instance
 
-    def __init__(self, tempo: Any = None) -> None:
+    def __init__(
+        self,
+        tempo: Any = None,
+        on_exam_scheduled: Any = None,
+    ) -> None:
+        """Construct a Scholar agent.
+
+        ``on_exam_scheduled`` — optional callable invoked with the persisted
+        session dict after :meth:`exam_session` succeeds. Used by the registry
+        to wire R1 (auto-block the exam slot via ``tempo.add``). Kept as a
+        plain ``Callable`` so Scholar stays decoupled from the trigger / tempo
+        layers; the registry can swap it for a no-op in tests.
+        """
         self._tempo = tempo
+        self._on_exam_scheduled = on_exam_scheduled
+
+    def set_on_exam_scheduled(self, callback: Any) -> None:
+        """Late-bind the on_exam_scheduled callback.
+
+        The registry uses this so it can build all agents first, then wire
+        cross-agent callbacks (Scholar wants a reference to Tempo, which the
+        registry only has after construction completes).
+        """
+        self._on_exam_scheduled = callback
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
@@ -554,6 +576,15 @@ class Scholar:
         }
         with _exams_path().open("a") as fh:
             fh.write(json.dumps(session) + "\n")
+
+        # R1 — fire on-exam-scheduled callback so a tempo task auto-blocks the
+        # slot on the calendar. Failure of the callback never blocks exam
+        # creation: the session is already persisted to disk.
+        if self._on_exam_scheduled is not None:
+            try:
+                self._on_exam_scheduled(session)
+            except Exception as exc:  # noqa: BLE001 — never fail the exam_session call
+                log.warning("on_exam_scheduled callback failed: %s", exc)
 
         return AgentResponse(
             agent="scholar",

@@ -1432,10 +1432,21 @@ def make_app(
         return {"data": [asdict(h) for h in hits], "error": None}
 
     # Wire inbox listener so every append_inbox call fans out to trigger rules.
+    # The notifier is injected so atlas/forge crit events surface as pushes
+    # (priority=2) from this process too — guardian violations triggered by
+    # /api/dispatch or /api/jarvis/chat are visible immediately on phone/desktop
+    # without waiting for the dashboard to refresh.
     from jarvis.core.triggers import fire_for_event as _fire_for_event
     from jarvis.core.triggers import list_recent_fires as _list_recent_fires
 
-    register_inbox_listener(lambda e: _fire_for_event(reg, e))
+    _trigger_notifier: Any | None = None
+    try:
+        from jarvis.apps.sentinel.notifier import default_notifier as _default_notifier
+        _trigger_notifier = _default_notifier()
+    except Exception:  # pragma: no cover — degrade to no-op
+        log.debug("api: notifier unavailable; trigger pushes will fall back to noop")
+
+    register_inbox_listener(lambda e: _fire_for_event(reg, e, notifier=_trigger_notifier))
 
     @app.get("/api/triggers/recent")
     async def triggers_recent(limit: int = 50) -> dict[str, Any]:
