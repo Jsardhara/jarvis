@@ -1,5 +1,7 @@
 # State + secrets
-state/
+# Anchor `state/` to the repo root so it ignores ./state/ (runtime data) but
+# does NOT match jarvis/state/ (the persistence-layer Python package).
+/state/
 .env
 .env.local
 *.secret
@@ -22,9 +24,9 @@ node_modules/
 dist/
 build/
 
-# Voice runtime
-voice/models/
-voice/recordings/
+# Voice runtime — anchored so it doesn't shadow jarvis/apps/voice/ source.
+/voice/models/
+/voice/recordings/
 
 # OS
 .DS_Store
