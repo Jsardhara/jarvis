@@ -116,26 +116,54 @@ pytest --cov=jarvis --cov-fail-under=80
 
 ## Layout
 
+Reorganized 2026-05-12 — see [ARCHITECTURE.md](ARCHITECTURE.md) and [REORG_PLAN.md](REORG_PLAN.md) for the rationale.
+
 ```
 jarvis/
 ├── .claude/
-│   ├── CLAUDE.md          # project rules + persona + routing
-│   ├── settings.json      # MCP enable list, hooks
-│   └── agents/            # 5 runtime + dev-side jarvis-* agents
+│   ├── CLAUDE.md             # project rules + persona + routing
+│   ├── settings.json         # MCP enable list, hooks
+│   └── agents/               # 5 runtime + dev-side jarvis-* agents
 ├── jarvis/
-│   ├── orchestrator.py    # intent router
-│   ├── subsystems/        # tempo, scholar, lens, forge, atlas, providers
-│   ├── voice/             # wake, stt, tts, cheap_handler, fillers
-│   ├── daemon/            # sentinel, routines, atlas_decision
-│   ├── personas/          # jarvis_soul.md (full + lite)
-│   └── web/               # FastAPI api.py + atlas_proxy.py
-├── web/                   # Next.js 15 dashboard (Mission Control)
-├── scripts/launchers/     # Windows .bat autostart shims
+│   ├── __init__.py
+│   ├── agent.py              # JarvisChat — top-level entrypoint
+│   ├── config.py             # env-driven settings
+│   ├── contract.py           # AgentResponse + InboxEvent + Task envelopes
+│   ├── search.py             # cross-source semantic + keyword search
+│   ├── core/                 # pure orchestration (no IO)
+│   │   ├── orchestrator.py classify.py router.py authority.py
+│   │   └── supervisor.py verify.py triggers.py
+│   ├── llm/                  # Claude/LLM glue
+│   │   ├── client.py queue.py model_router.py cost.py
+│   ├── state/                # persistence + memory + exports
+│   │   ├── __init__.py       # tasks/inbox/agent_log/confirmations API
+│   │   ├── memory.py memory_index.py
+│   │   └── briefing.py chat_turns.py exports.py
+│   ├── agents/               # per-agent packages (was subsystems/)
+│   │   ├── registry.py providers.py
+│   │   ├── tempo/            # agent.py stack.py providers/{gmail_imap,drexel_oauth,icloud,multi_mail}.py
+│   │   ├── scholar/          # agent.py study.py db.py
+│   │   ├── lens/             # agent.py link_handler.py news_provider.py
+│   │   ├── forge/            # agent.py daily.py github.py runner.py
+│   │   └── atlas/            # agent.py ws_client.py budget.py
+│   ├── apps/                 # deployable processes
+│   │   ├── api/              # FastAPI: app.py + atlas_proxy.py (was jarvis/web/)
+│   │   ├── sentinel/         # daemon: scheduler.py + routines + cron jobs (was jarvis/daemon/)
+│   │   └── voice/            # wake → STT → orchestrator → TTS (was jarvis/voice/)
+│   ├── personas/             # jarvis_soul.md (full + lite)
+│   └── tools/                # desktop_mcp.py
+├── web/                      # Next.js 15 dashboard (Mission Control)
+├── scripts/
+│   ├── install-services.ps1
+│   ├── launchers/            # Windows .bat autostart shims
+│   ├── ops/                  # restart, stop, ship-bug-check
+│   ├── tunnel/               # phone-setup, tailscale-serve
+│   └── dev/                  # test_daily_forge, voice_sample
 ├── docs/
-│   ├── setup/phone.md     # phone PWA + Tailscale + ntfy
-│   └── design/            # imports + dashboard spec
-├── tests/                 # pytest, 149 tests
-└── state/                 # runtime (gitignored): inbox.jsonl, logs, db
+│   ├── setup/phone.md        # phone PWA + Tailscale + ntfy
+│   └── design/               # imports + dashboard spec
+├── tests/                    # pytest, flat layout
+└── state/                    # runtime (gitignored): inbox.jsonl, logs, db
 ```
 
 ---
@@ -163,4 +191,5 @@ jarvis/
 
 - UI/UX dashboard redesign (next session)
 - Live-trade flip docs (deferred until operator signals real-money go)
-- `web/api.py` split (currently 1501 lines, exceeds size limit)
+- **Phase 2 reorg follow-up**: split `apps/api/app.py` (1524 lines) into per-domain routers, and `agents/atlas/agent.py` (1003 lines) into `bridge.py + orchestrator.py + pipeline.py + mocks.py`. Deferred from this PR — see [REORG_PLAN.md §2](REORG_PLAN.md).
+- `src/` layout candidate — explicit boundary for editable installs; deferred (single-operator project, marginal upside)
