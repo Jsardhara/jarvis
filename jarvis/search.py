@@ -348,7 +348,7 @@ def _scan_forge_runs(query: str, limit: int) -> list[SearchHit]:
 
 def _semantic_chat(query: str, limit: int) -> list[SearchHit]:
     try:
-        from jarvis import memory_index
+        from jarvis.state import memory_index
 
         results = memory_index.search(query, top_k=limit)
     except Exception as exc:

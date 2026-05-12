@@ -6,9 +6,9 @@
 # needed (this is the user-scoped startup folder, not All Users).
 #
 # Tasks installed:
-#   jarvis-api.bat        - python -m uvicorn jarvis.web.api:app --host 0.0.0.0 --port 8765
-#   jarvis-sentinel.bat   - python -m jarvis.daemon.sentinel
-#   jarvis-voice.bat      - python -m jarvis.voice  (gated on VOICE_ENABLED=true in .env)
+#   jarvis-api.bat        - python -m uvicorn jarvis.apps.api.app:app --host 0.0.0.0 --port 8765
+#   jarvis-sentinel.bat   - python -m jarvis.apps.sentinel
+#   jarvis-voice.bat      - python -m jarvis.apps.voice  (gated on VOICE_ENABLED=true in .env)
 #   jarvis-dashboard.bat  - pnpm dev (or pnpm start if -Mode prod) inside web/
 #
 # Usage:
@@ -44,19 +44,19 @@ $tasks = @(
     @{
         Name    = 'jarvis-api.bat'
         WorkDir = $projectRoot
-        Cmd     = "python -m uvicorn jarvis.web.api:app --host 0.0.0.0 --port $ApiPort"
+        Cmd     = "python -m uvicorn jarvis.apps.api.app:app --host 0.0.0.0 --port $ApiPort"
         Log     = Join-Path $logDir 'api.log'
     },
     @{
         Name    = 'jarvis-sentinel.bat'
         WorkDir = $projectRoot
-        Cmd     = 'python -m jarvis.daemon.sentinel'
+        Cmd     = 'python -m jarvis.apps.sentinel'
         Log     = Join-Path $logDir 'sentinel.log'
     },
     @{
         Name    = 'jarvis-voice.bat'
         WorkDir = $projectRoot
-        Cmd     = 'python -m jarvis.voice'
+        Cmd     = 'python -m jarvis.apps.voice'
         Log     = Join-Path $logDir 'voice.log'
     },
     @{
