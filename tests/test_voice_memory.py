@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.voice import conversation_memory as cm
+from jarvis.apps.voice import conversation_memory as cm
 
 
 @pytest.fixture(autouse=True)

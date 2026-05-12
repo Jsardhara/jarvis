@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from jarvis.contract import AgentResponse, InboxEvent, Task
-from jarvis.orchestrator import Orchestrator
+from jarvis.core.orchestrator import Orchestrator
 from jarvis.state import add_task, append_inbox
 
 

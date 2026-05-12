@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.authority import AuthorityError, check_authority, requires_confirm
+from jarvis.core.authority import AuthorityError, check_authority, requires_confirm
 
 
 def test_tier_1_always_requires_confirm():

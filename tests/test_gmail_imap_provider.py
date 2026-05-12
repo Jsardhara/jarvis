@@ -5,7 +5,7 @@ from email.message import EmailMessage
 
 import pytest
 
-from jarvis.subsystems.gmail_imap_provider import GmailConfig, GmailIMAPProvider
+from jarvis.agents.tempo.providers.gmail_imap import GmailConfig, GmailIMAPProvider
 
 
 def _make_msg(subject: str, body: str, from_addr: str = "alice@example.com") -> bytes:

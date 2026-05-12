@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jarvis.subsystems.icloud_provider import (
+from jarvis.agents.tempo.providers.icloud import (
     ICloudCalDAVError,
     ICloudConfig,
     ICloudProvider,

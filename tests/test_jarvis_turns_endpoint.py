@@ -10,10 +10,10 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis import chat_turns  # noqa: E402
-from jarvis.chat_turns import ChatTurnRecord, append_turn  # noqa: E402
+from jarvis.state import chat_turns  # noqa: E402
+from jarvis.state.chat_turns import ChatTurnRecord, append_turn  # noqa: E402
 from jarvis.contract import TraceEvent  # noqa: E402
-from jarvis.web.api import make_app  # noqa: E402
+from jarvis.apps.api.app import make_app  # noqa: E402
 
 
 @pytest.fixture
@@ -139,7 +139,7 @@ def test_turns_scoped_by_bearer_user_id(
     monkeypatch.setenv("JARVIS_API_TOKEN", "shared-token")
 
     # Store under the user_id derived from "shared-token"
-    from jarvis.chat_turns import user_id_from_token
+    from jarvis.state.chat_turns import user_id_from_token
 
     uid = user_id_from_token("shared-token")
     append_turn(

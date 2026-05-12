@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from jarvis.daemon.sentinel import _atlas_health_last, atlas_health_tick
+from jarvis.apps.sentinel.scheduler import _atlas_health_last, atlas_health_tick
 
 
 def _reset_health_state():
@@ -120,7 +120,7 @@ def test_atlas_health_job_registered_in_scheduler():
     """build_scheduler registers atlas_health job with 60s interval."""
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    from jarvis.daemon.sentinel import build_scheduler
+    from jarvis.apps.sentinel.scheduler import build_scheduler
 
     sched = build_scheduler(BackgroundScheduler(timezone="UTC"))
     job_ids = {j.id for j in sched.get_jobs()}

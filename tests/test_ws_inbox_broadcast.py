@@ -119,7 +119,7 @@ def test_ws_receives_inbox_event():
 
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     client = TestClient(app)
@@ -136,7 +136,7 @@ def test_make_app_registers_inbox_listener():
     """make_app registers _push_inbox_event as an inbox listener."""
     pytest.importorskip("fastapi")
     from jarvis.state import _inbox_listeners
-    from jarvis.web.api import _push_inbox_event, make_app
+    from jarvis.apps.api.app import _push_inbox_event, make_app
 
     make_app()
     assert _push_inbox_event in _inbox_listeners

@@ -15,9 +15,9 @@ from unittest.mock import AsyncMock  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis.orchestrator import Orchestrator  # noqa: E402
+from jarvis.core.orchestrator import Orchestrator  # noqa: E402
 from jarvis.state import read_confirmations  # noqa: E402
-from jarvis.web.api import make_app  # noqa: E402
+from jarvis.apps.api.app import make_app  # noqa: E402
 
 # ── helpers ────────────────────────────────────────────────────────────────
 

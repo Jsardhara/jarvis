@@ -9,11 +9,11 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis.web.api import make_app  # noqa: E402
+from jarvis.apps.api.app import make_app  # noqa: E402
 
 
 def _make_app_with_bridge(bridge: MagicMock, mode: str = "live") -> TestClient:
-    from jarvis.subsystems.atlas import AtlasOrchestrator
+    from jarvis.agents.atlas.agent import AtlasOrchestrator
 
     orchestrator = AtlasOrchestrator(bridge=bridge, mode=mode)
     app = make_app()
@@ -60,7 +60,7 @@ def _make_sse_mocks(sse_chunks: list[bytes]) -> tuple[Any, MagicMock]:
 
 
 def _inject_atlas_live(app: Any, bridge: MagicMock) -> None:
-    from jarvis.subsystems.atlas import AtlasOrchestrator
+    from jarvis.agents.atlas.agent import AtlasOrchestrator
 
     atlas_desc = app.state.registry.get("atlas")
     if atlas_desc is not None:
@@ -81,7 +81,7 @@ def test_sse_stream_chunks_forwarded_in_order() -> None:
 
     mock_cls, _ = _make_sse_mocks(sse_chunks)
 
-    with patch("jarvis.web.atlas_proxy.httpx.AsyncClient", mock_cls):
+    with patch("jarvis.apps.api.atlas_proxy.httpx.AsyncClient", mock_cls):
         app = make_app()
         _inject_atlas_live(app, bridge)
         client = TestClient(app)
@@ -121,7 +121,7 @@ def test_sse_bearer_not_exposed_in_response() -> None:
 
     mock_cls, _ = _make_sse_mocks(sse_chunks)
 
-    with patch("jarvis.web.atlas_proxy.httpx.AsyncClient", mock_cls):
+    with patch("jarvis.apps.api.atlas_proxy.httpx.AsyncClient", mock_cls):
         app = make_app()
         _inject_atlas_live(app, bridge)
         client = TestClient(app)

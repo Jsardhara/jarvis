@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import httpx
 
-from jarvis.daemon.notifier import NoopNotifier
-from jarvis.daemon.routines import (
+from jarvis.apps.sentinel.notifier import NoopNotifier
+from jarvis.apps.sentinel.routines import (
     DRAWDOWN_ALERT_PCT,
     atlas_tick,
     calendar_tick,
@@ -14,11 +14,11 @@ from jarvis.daemon.routines import (
     scholar_tick,
 )
 from jarvis.state import read_inbox
-from jarvis.subsystems.atlas import AtlasBridge, AtlasOrchestrator
-from jarvis.subsystems.lens import Lens
-from jarvis.subsystems.providers import MockOutlook, MockSearch
-from jarvis.subsystems.scholar import Scholar
-from jarvis.subsystems.tempo import Tempo
+from jarvis.agents.atlas.agent import AtlasBridge, AtlasOrchestrator
+from jarvis.agents.lens.agent import Lens
+from jarvis.agents.providers import MockOutlook, MockSearch
+from jarvis.agents.scholar.agent import Scholar
+from jarvis.agents.tempo.agent import Tempo
 
 
 def _silent_atlas() -> AtlasBridge:
@@ -100,7 +100,7 @@ def test_scholar_tick_records_count():
 
 
 def test_morning_digest_pushes_summary():
-    from jarvis.subsystems.registry import build_default_registry
+    from jarvis.agents.registry import build_default_registry
 
     notifier = NoopNotifier()
     reg = build_default_registry()
@@ -115,8 +115,8 @@ def test_morning_digest_pushes_summary():
 def test_heartbeat_tick_writes_inbox():
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    from jarvis.daemon.routines import heartbeat_tick
-    from jarvis.daemon.sentinel import build_scheduler
+    from jarvis.apps.sentinel.routines import heartbeat_tick
+    from jarvis.apps.sentinel.scheduler import build_scheduler
 
     sched = build_scheduler(BackgroundScheduler(timezone="UTC"))
     notifier = NoopNotifier()
@@ -133,8 +133,8 @@ def test_heartbeat_tick_writes_inbox():
 def test_heartbeat_tick_ref_contains_known_job_ids():
     from apscheduler.schedulers.background import BackgroundScheduler
 
-    from jarvis.daemon.routines import heartbeat_tick
-    from jarvis.daemon.sentinel import build_scheduler
+    from jarvis.apps.sentinel.routines import heartbeat_tick
+    from jarvis.apps.sentinel.scheduler import build_scheduler
 
     sched = build_scheduler(BackgroundScheduler(timezone="UTC"))
     heartbeat_tick(sched, NoopNotifier())
@@ -149,7 +149,7 @@ def test_heartbeat_tick_ref_contains_known_job_ids():
 
 def test_inspect_agent_log_returns_entries():
     from jarvis.contract import AgentLogEntry
-    from jarvis.daemon.routines import inspect_agent_log
+    from jarvis.apps.sentinel.routines import inspect_agent_log
     from jarvis.state import append_agent_log
 
     append_agent_log(AgentLogEntry(request_id="r1", agent="tempo", action="triage", status="ok"))
@@ -163,7 +163,7 @@ def test_inspect_agent_log_returns_entries():
 
 def test_inspect_agent_log_filters_by_agent():
     from jarvis.contract import AgentLogEntry
-    from jarvis.daemon.routines import inspect_agent_log
+    from jarvis.apps.sentinel.routines import inspect_agent_log
     from jarvis.state import append_agent_log
 
     append_agent_log(AgentLogEntry(request_id="r3", agent="tempo", action="triage", status="ok"))
@@ -176,7 +176,7 @@ def test_inspect_agent_log_filters_by_agent():
 # --- announce_agent tests (b) ---
 
 def test_announce_agent_writes_session_memory():
-    from jarvis.daemon.routines import announce_agent
+    from jarvis.apps.sentinel.routines import announce_agent
 
     session: dict = {}
     new_session = announce_agent("tempo", session)
@@ -185,7 +185,7 @@ def test_announce_agent_writes_session_memory():
 
 
 def test_announce_agent_idempotent_second_call():
-    from jarvis.daemon.routines import announce_agent
+    from jarvis.apps.sentinel.routines import announce_agent
 
     session: dict = {}
     s1 = announce_agent("tempo", session)
@@ -195,7 +195,7 @@ def test_announce_agent_idempotent_second_call():
 
 
 def test_announce_agent_tracks_multiple_agents():
-    from jarvis.daemon.routines import announce_agent
+    from jarvis.apps.sentinel.routines import announce_agent
 
     session: dict = {}
     s1 = announce_agent("tempo", session)
@@ -205,20 +205,20 @@ def test_announce_agent_tracks_multiple_agents():
 
 def test_announce_agent_writes_daily_memory(tmp_path, monkeypatch):
     from jarvis.config import Settings
-    from jarvis.daemon.routines import announce_agent
+    from jarvis.apps.sentinel.routines import announce_agent
 
     fake = Settings(
         project_root=tmp_path,
         state_dir=tmp_path,
         atlas_api="http://localhost:8000",
     )
-    monkeypatch.setattr("jarvis.memory._config.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory._config.get_settings", lambda: fake)
     session: dict = {}
     announce_agent("lens", session)
 
-    from jarvis.memory import read_daily
+    from jarvis.state.memory import read_daily
     # read_daily also calls get_settings, so patch it there too
-    monkeypatch.setattr("jarvis.memory._config.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory._config.get_settings", lambda: fake)
     content = read_daily()
     assert "lens online" in content
 
@@ -226,7 +226,7 @@ def test_announce_agent_writes_daily_memory(tmp_path, monkeypatch):
 # --- _verification_health + morning_digest (d) tests ---
 
 def test_verification_health_empty_log():
-    from jarvis.daemon.routines import _verification_health
+    from jarvis.apps.sentinel.routines import _verification_health
 
     health = _verification_health(hours=24)
     assert health == {"verified": 0.0, "inference": 0.0, "unknown": 0.0}
@@ -237,7 +237,7 @@ def test_verification_health_counts_statuses(tmp_path, monkeypatch):
     from datetime import UTC, datetime
 
     from jarvis.config import Settings
-    from jarvis.daemon.routines import _verification_health
+    from jarvis.apps.sentinel.routines import _verification_health
 
     fake = Settings(
         project_root=tmp_path,
@@ -245,7 +245,7 @@ def test_verification_health_counts_statuses(tmp_path, monkeypatch):
         atlas_api="http://localhost:8000",
     )
     monkeypatch.setattr("jarvis.state.get_settings", lambda: fake)
-    monkeypatch.setattr("jarvis.daemon.routines.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.apps.sentinel.routines.get_settings", lambda: fake)
     log_path = tmp_path / "agent_log.jsonl"
     now = datetime.now(UTC).isoformat()
     with log_path.open("w", encoding="utf-8") as f:
@@ -264,7 +264,7 @@ def test_verification_health_counts_statuses(tmp_path, monkeypatch):
 
 
 def test_morning_digest_includes_verification_health():
-    from jarvis.subsystems.registry import build_default_registry
+    from jarvis.agents.registry import build_default_registry
 
     notifier = NoopNotifier()
     reg = build_default_registry()

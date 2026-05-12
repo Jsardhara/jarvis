@@ -10,7 +10,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from jarvis.contract import AgentResponse
-from jarvis.web.api import make_app
+from jarvis.apps.api.app import make_app
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
@@ -47,7 +47,7 @@ def _make_client_with_mocks(
     scholar_response: AgentResponse | None = None,
 ) -> TestClient:
     """Build a TestClient whose registry has mocked lens + scholar instances."""
-    from jarvis.subsystems.registry import AgentDescriptor, build_default_registry
+    from jarvis.agents.registry import AgentDescriptor, build_default_registry
 
     reg = build_default_registry()
 

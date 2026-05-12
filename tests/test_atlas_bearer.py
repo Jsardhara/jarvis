@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from jarvis.subsystems.atlas import AtlasBridge
+from jarvis.agents.atlas.agent import AtlasBridge
 
 
 def test_bearer_token_injected_in_get(monkeypatch):

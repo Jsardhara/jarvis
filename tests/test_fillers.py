@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-from jarvis.voice import fillers
+from jarvis.apps.voice import fillers
 
 
 def test_pick_filler_returns_none_when_cache_empty(tmp_path: Path):

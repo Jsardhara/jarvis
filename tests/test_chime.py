@@ -7,7 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 
-from jarvis.voice import chime
+from jarvis.apps.voice import chime
 
 
 def test_synth_chime_returns_valid_wav_bytes():

@@ -1,4 +1,4 @@
-"""Tests for jarvis.subsystems.budget."""
+"""Tests for jarvis.agents.atlas.budget."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from jarvis.subsystems import budget
+from jarvis.agents.atlas import budget
 
 
 @pytest.fixture

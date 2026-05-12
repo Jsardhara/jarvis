@@ -9,8 +9,8 @@ from datetime import timedelta
 
 import pytest
 
-from jarvis.voice import conversation_memory, proactive
-from jarvis.voice.cheap_patterns import match
+from jarvis.apps.voice import conversation_memory, proactive
+from jarvis.apps.voice.cheap_patterns import match
 
 
 @pytest.fixture(autouse=True)

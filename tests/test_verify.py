@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from jarvis.contract import AgentResponse
-from jarvis.verify import (
+from jarvis.core.verify import (
     make_verification,
     verify_atlas,
     verify_default,

@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from jarvis.subsystems.atlas import AtlasBridge, AtlasOrchestrator
+from jarvis.agents.atlas.agent import AtlasBridge, AtlasOrchestrator
 
 
 def test_mock_mode_never_hits_network(monkeypatch):
@@ -61,9 +61,9 @@ def test_live_mode_returns_none_on_failure_no_mock_fallback(monkeypatch):
     """mode=live: portfolio raises AtlasUnavailableError on failure (no silent mock fallback)."""
     monkeypatch.setenv("JARVIS_ATLAS_MODE", "live")
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
-    from jarvis.subsystems.atlas import AtlasUnavailableError
+    from jarvis.agents.atlas.agent import AtlasUnavailableError
 
     with respx.mock(base_url="http://atlas-live-fail:8000", assert_all_called=False) as mock:
         mock.get("/api/health").mock(side_effect=httpx.ConnectError("refused"))

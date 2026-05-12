@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jarvis.subsystems import forge_daily, forge_github
+from jarvis.agents.forge import daily as forge_daily
+from jarvis.agents.forge import github as forge_github
 
 
 # ---------------------------------------------------------------------------

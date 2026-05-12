@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from jarvis.daemon.sentinel import build_scheduler
+from jarvis.apps.sentinel.scheduler import build_scheduler
 
 
 def test_build_scheduler_registers_all_jobs():

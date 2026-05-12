@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.subsystems.tempo_stack import TempoStack, build_default_tempo_stack
+from jarvis.agents.tempo.stack import TempoStack, build_default_tempo_stack
 
 
 class _FakeCalendar:

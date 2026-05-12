@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from jarvis.voice import silence
+from jarvis.apps.voice import silence
 
 
 def _sine_frame(amplitude: float, freq_hz: float = 440.0, duration_s: float = 0.03,

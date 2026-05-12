@@ -6,7 +6,7 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis.web.api import make_app
+from jarvis.apps.api.app import make_app
 
 
 def _make_client_with_mock_chat():

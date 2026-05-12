@@ -47,7 +47,7 @@ def fake_edge_tts(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 
 
 def test_synthesize_returns_concatenated_audio_bytes(fake_edge_tts):
-    from jarvis.voice.edge_tts_provider import EdgeTTSProvider
+    from jarvis.apps.voice.edge_tts_provider import EdgeTTSProvider
 
     provider = EdgeTTSProvider(voice="en-US-AndrewMultilingualNeural")
     out = provider.synthesize("hello world")
@@ -57,7 +57,7 @@ def test_synthesize_returns_concatenated_audio_bytes(fake_edge_tts):
 
 
 def test_synthesize_empty_input_returns_empty_bytes(fake_edge_tts):
-    from jarvis.voice.edge_tts_provider import EdgeTTSProvider
+    from jarvis.apps.voice.edge_tts_provider import EdgeTTSProvider
 
     provider = EdgeTTSProvider()
     assert provider.synthesize("") == b""
@@ -66,7 +66,7 @@ def test_synthesize_empty_input_returns_empty_bytes(fake_edge_tts):
 
 
 def test_voice_rate_volume_pitch_pass_through(fake_edge_tts):
-    from jarvis.voice.edge_tts_provider import EdgeTTSProvider
+    from jarvis.apps.voice.edge_tts_provider import EdgeTTSProvider
 
     provider = EdgeTTSProvider(
         voice="en-GB-RyanNeural", rate="+10%", volume="-5%", pitch="+2Hz",
@@ -80,7 +80,7 @@ def test_voice_rate_volume_pitch_pass_through(fake_edge_tts):
 
 
 def test_synthesize_skips_non_audio_events(fake_edge_tts):
-    from jarvis.voice.edge_tts_provider import EdgeTTSProvider
+    from jarvis.apps.voice.edge_tts_provider import EdgeTTSProvider
 
     out = EdgeTTSProvider().synthesize("ignore boundaries")
     # Fake yielded WordBoundary too; it should not be in output bytes.
@@ -90,7 +90,7 @@ def test_synthesize_skips_non_audio_events(fake_edge_tts):
 
 @pytest.mark.asyncio
 async def test_list_voices_filters_by_language(fake_edge_tts):
-    from jarvis.voice.edge_tts_provider import list_voices
+    from jarvis.apps.voice.edge_tts_provider import list_voices
 
     en_voices = await list_voices(language="en")
     assert len(en_voices) == 2
@@ -98,7 +98,7 @@ async def test_list_voices_filters_by_language(fake_edge_tts):
 
 
 def test_synthesize_raises_helpful_error_when_lib_missing(monkeypatch):
-    from jarvis.voice.edge_tts_provider import EdgeTTSProvider
+    from jarvis.apps.voice.edge_tts_provider import EdgeTTSProvider
 
     monkeypatch.setitem(sys.modules, "edge_tts", None)
     with pytest.raises(RuntimeError, match="edge-tts not installed"):

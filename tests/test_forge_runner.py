@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jarvis.subsystems.forge_runner import ForgeRun, WorktreeRunner
+from jarvis.agents.forge.runner import ForgeRun, WorktreeRunner
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -123,7 +123,7 @@ def test_execute_creates_worktree_branch(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc1234\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="add dark mode")
 
@@ -140,7 +140,7 @@ def test_execute_invokes_claude_with_prompt(tmp_path: Path, monkeypatch: pytest.
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="deadbeef\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         runner.execute(repo=str(tmp_path), task="implement feature Y")
 
@@ -154,7 +154,7 @@ def test_execute_returns_completed_run(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="deadbeef\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="fix bug")
 
@@ -167,7 +167,7 @@ def test_execute_tears_down_worktree_by_default(tmp_path: Path, monkeypatch: pyt
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         runner.execute(repo=str(tmp_path), task="refactor")
 
@@ -180,7 +180,7 @@ def test_execute_keeps_worktree_when_flag_set(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         runner.execute(repo=str(tmp_path), task="refactor", keep_worktree=True)
 
@@ -192,7 +192,7 @@ def test_execute_pushes_when_requested(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="ship", push=True)
 
@@ -205,7 +205,7 @@ def test_execute_does_not_push_by_default(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="quiet")
 
@@ -236,7 +236,7 @@ def test_execute_returns_failed_run_on_claude_nonzero(
             result.stderr = ""
         return result
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="bad task")
 
@@ -261,7 +261,7 @@ def test_execute_rejects_dirty_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         result.stderr = ""
         return result
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="attempt")
 
@@ -277,7 +277,7 @@ def test_list_runs_returns_recent_records(tmp_path: Path, monkeypatch: pytest.Mo
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         r1 = runner.execute(repo=str(tmp_path), task="task one")
         r2 = runner.execute(repo=str(tmp_path), task="task two")
@@ -292,7 +292,7 @@ def test_list_runs_respects_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         for i in range(5):
             runner.execute(repo=str(tmp_path), task=f"task {i}")
@@ -305,7 +305,7 @@ def test_get_run_returns_correct_record(tmp_path: Path, monkeypatch: pytest.Monk
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         original = runner.execute(repo=str(tmp_path), task="find me")
 
@@ -326,7 +326,7 @@ def test_runs_persisted_to_jsonl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="sha123\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         runner = WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
         run = runner.execute(repo=str(tmp_path), task="persist me")
 
@@ -359,7 +359,7 @@ def test_gitignore_updated_with_forge_worktrees(
     monkeypatch.setattr("shutil.which", lambda _bin: "/usr/bin/claude")
     mock_run = _make_run_mock(stdout="abc\n")
 
-    with patch("jarvis.subsystems.forge_runner.subprocess.run", side_effect=mock_run):
+    with patch("jarvis.agents.forge.runner.subprocess.run", side_effect=mock_run):
         WorktreeRunner(repo_root=tmp_path, claude_bin="claude")
 
     gitignore = tmp_path / ".gitignore"

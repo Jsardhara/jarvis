@@ -9,10 +9,10 @@ import httpx
 import pytest
 
 from jarvis.contract import InboxEvent
-from jarvis.daemon import routines
-from jarvis.daemon.notifier import NoopNotifier
-from jarvis.daemon.routines import atlas_daily_rollup
-from jarvis.subsystems.atlas import AtlasBridge, AtlasOrchestrator
+from jarvis.apps.sentinel import routines
+from jarvis.apps.sentinel.notifier import NoopNotifier
+from jarvis.apps.sentinel.routines import atlas_daily_rollup
+from jarvis.agents.atlas.agent import AtlasBridge, AtlasOrchestrator
 
 
 def _silent_atlas() -> AtlasBridge:
@@ -28,7 +28,7 @@ def _orch() -> AtlasOrchestrator:
 
 def _seed_inbox(monkeypatch: pytest.MonkeyPatch, events: list[InboxEvent]) -> None:
     monkeypatch.setattr(
-        "jarvis.daemon.routines.read_inbox",
+        "jarvis.apps.sentinel.routines.read_inbox",
         lambda limit=500: events,
     )
 

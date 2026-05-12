@@ -1,9 +1,9 @@
-"""Tests for jarvis.model_router.decide_model."""
+"""Tests for jarvis.llm.model_router.decide_model."""
 from __future__ import annotations
 
 import pytest
 
-from jarvis.model_router import (
+from jarvis.llm.model_router import (
     DEFAULT_OPUS_ID,
     DEFAULT_SONNET_ID,
     RouteDecision,

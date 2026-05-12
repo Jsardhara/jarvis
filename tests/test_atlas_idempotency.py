@@ -4,13 +4,13 @@ from __future__ import annotations
 import httpx
 import respx
 
-from jarvis.subsystems.atlas import AtlasBridge
+from jarvis.agents.atlas.agent import AtlasBridge
 
 
 def test_same_key_used_across_retries(monkeypatch):
     """A single logical _post call reuses the same idempotency key across retries."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     seen_keys: list[str] = []
     call_count = 0
@@ -39,7 +39,7 @@ def test_same_key_used_across_retries(monkeypatch):
 def test_different_calls_get_different_keys(monkeypatch):
     """Two separate _post calls each get a distinct idempotency key."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     seen_keys: list[str] = []
 
@@ -61,7 +61,7 @@ def test_different_calls_get_different_keys(monkeypatch):
 def test_caller_supplied_key_is_preserved_across_retries(monkeypatch):
     """When caller supplies idempotency_key, that exact key is reused on retries."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     fixed_key = "fixed-key-abc123"
     seen_keys: list[str] = []

@@ -15,7 +15,7 @@ import json
 import pytest
 
 from jarvis.config import Settings
-from jarvis.memory import OperatorPreferences, load_preferences, save_preferences
+from jarvis.state.memory import OperatorPreferences, load_preferences, save_preferences
 
 # ── unit tests ─────────────────────────────────────────────────────────────
 
@@ -23,7 +23,7 @@ from jarvis.memory import OperatorPreferences, load_preferences, save_preference
 def test_load_preferences_returns_defaults_if_missing(tmp_path, monkeypatch):
     """load_preferences returns a default OperatorPreferences when file absent."""
     fake = Settings(project_root=tmp_path, state_dir=tmp_path, atlas_api="http://x")
-    monkeypatch.setattr("jarvis.memory.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory.get_settings", lambda: fake)
 
     prefs = load_preferences()
     assert isinstance(prefs, OperatorPreferences)
@@ -35,7 +35,7 @@ def test_load_preferences_returns_defaults_if_missing(tmp_path, monkeypatch):
 def test_save_and_load_roundtrip(tmp_path, monkeypatch):
     """Saved preferences can be loaded back identically."""
     fake = Settings(project_root=tmp_path, state_dir=tmp_path, atlas_api="http://x")
-    monkeypatch.setattr("jarvis.memory.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory.get_settings", lambda: fake)
 
     prefs = OperatorPreferences(
         important_senders=("alice@example.com", "bob@example.com"),
@@ -52,7 +52,7 @@ def test_save_and_load_roundtrip(tmp_path, monkeypatch):
 def test_save_preferences_writes_json_file(tmp_path, monkeypatch):
     """save_preferences creates a preferences.json in state_dir."""
     fake = Settings(project_root=tmp_path, state_dir=tmp_path, atlas_api="http://x")
-    monkeypatch.setattr("jarvis.memory.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory.get_settings", lambda: fake)
 
     prefs = OperatorPreferences(scholar_lead_time_days=3)
     save_preferences(prefs)
@@ -66,7 +66,7 @@ def test_save_preferences_writes_json_file(tmp_path, monkeypatch):
 def test_save_is_atomic_on_repeated_writes(tmp_path, monkeypatch):
     """Second save overwrites cleanly — no duplicate keys."""
     fake = Settings(project_root=tmp_path, state_dir=tmp_path, atlas_api="http://x")
-    monkeypatch.setattr("jarvis.memory.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory.get_settings", lambda: fake)
 
     save_preferences(OperatorPreferences(scholar_lead_time_days=5))
     save_preferences(OperatorPreferences(scholar_lead_time_days=10))
@@ -84,11 +84,11 @@ def api_client(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from jarvis.config import Settings
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     fake = Settings(project_root=tmp_path, state_dir=tmp_path, atlas_api="http://x")
     monkeypatch.setattr("jarvis.state.get_settings", lambda: fake)
-    monkeypatch.setattr("jarvis.memory.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.state.memory.get_settings", lambda: fake)
     monkeypatch.setattr("jarvis.config.get_settings", lambda: fake)
 
     return TestClient(make_app())

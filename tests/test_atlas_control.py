@@ -11,7 +11,7 @@ import json
 import httpx
 import pytest
 
-from jarvis.subsystems.atlas import (
+from jarvis.agents.atlas.agent import (
     AtlasBridge,
     AtlasOrchestrator,
     AtlasUnavailableError,

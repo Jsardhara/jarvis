@@ -1,4 +1,4 @@
-"""Tests for jarvis.briefing — morning briefing aggregator."""
+"""Tests for jarvis.state.briefing — morning briefing aggregator."""
 from __future__ import annotations
 
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.briefing import (
+from jarvis.state.briefing import (
     _build_system_section,
     _next_exam_within_days,
     _top_weak_topics,
@@ -301,7 +301,7 @@ def test_api_briefing_endpoint(isolated_state: Path) -> None:
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     client = TestClient(make_app())
     r = client.get("/api/briefing")
@@ -319,7 +319,7 @@ def test_api_briefing_envelope_shape(isolated_state: Path) -> None:
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     client = TestClient(make_app())
     r = client.get("/api/briefing")

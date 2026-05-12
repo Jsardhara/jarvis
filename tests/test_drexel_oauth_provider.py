@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jarvis.subsystems.drexel_oauth_provider import (
+from jarvis.agents.tempo.providers.drexel_oauth import (
     DrexelConfig,
     DrexelOAuthError,
     DrexelOAuthProvider,

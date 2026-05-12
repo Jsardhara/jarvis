@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from jarvis.contract import InboxEvent, Task
 from jarvis.state import add_task, append_inbox
-from jarvis.web.api import make_app
+from jarvis.apps.api.app import make_app
 
 
 @pytest.fixture
@@ -212,8 +212,8 @@ def test_atlas_snapshot_positions_is_list(client):
 
 def test_atlas_snapshot_degraded_true_when_atlas_raises():
     """If atlas.call raises inside _atlas_snapshot_data, degraded=True is returned."""
-    from jarvis.subsystems.registry import AgentDescriptor, build_default_registry
-    from jarvis.web.api import make_app
+    from jarvis.agents.registry import AgentDescriptor, build_default_registry
+    from jarvis.apps.api.app import make_app
 
     class _RaisingDescriptor(AgentDescriptor):
         def call(self, action, args=None):
@@ -235,8 +235,8 @@ def test_atlas_snapshot_degraded_true_when_atlas_raises():
 
 def test_atlas_snapshot_no_atlas_in_registry():
     """When atlas is absent from registry the snapshot still returns 200 degraded."""
-    from jarvis.subsystems.registry import build_default_registry
-    from jarvis.web.api import make_app
+    from jarvis.agents.registry import build_default_registry
+    from jarvis.apps.api.app import make_app
 
     reg = {k: v for k, v in build_default_registry().items() if k != "atlas"}
     c = TestClient(make_app(registry=reg))
@@ -249,25 +249,25 @@ def test_atlas_snapshot_no_atlas_in_registry():
 
 
 def test_summarize_result_count_key():
-    from jarvis.web.api import _summarize_result
+    from jarvis.apps.api.app import _summarize_result
 
     assert _summarize_result({"count": 7}) == "count=7"
 
 
 def test_summarize_result_total_key():
-    from jarvis.web.api import _summarize_result
+    from jarvis.apps.api.app import _summarize_result
 
     assert _summarize_result({"total": 3}) == "total=3"
 
 
 def test_summarize_result_portfolio_value():
-    from jarvis.web.api import _summarize_result
+    from jarvis.apps.api.app import _summarize_result
 
     assert _summarize_result({"portfolio": {"total_value_usd": 10000.0}}) == "value=$10000"
 
 
 def test_summarize_result_empty():
-    from jarvis.web.api import _summarize_result
+    from jarvis.apps.api.app import _summarize_result
 
     assert _summarize_result({}) == ""
 
@@ -314,9 +314,9 @@ def test_dispatch_captures_confirmation_when_response_needs_confirm():
     """
     from unittest.mock import AsyncMock
 
-    from jarvis.orchestrator import Orchestrator
+    from jarvis.core.orchestrator import Orchestrator
     from jarvis.state import read_confirmations
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     mock_dispatch_result = {
         "request_id": "testid",

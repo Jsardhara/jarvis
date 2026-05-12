@@ -1,7 +1,7 @@
 """Forge code-delegation workflow tests."""
 from __future__ import annotations
 
-from jarvis.subsystems.forge import STAGES, Forge, MockRunner
+from jarvis.agents.forge.agent import STAGES, Forge, MockRunner
 
 
 def test_execute_runs_all_stages_except_pr_when_no_push():

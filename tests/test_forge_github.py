@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.subsystems import forge_github
-from jarvis.subsystems.forge_github import (
+from jarvis.agents.forge import github as forge_github
+from jarvis.agents.forge.github import (
     GitHubContext,
     REPO_NAME,
     ensure_mono_repo_clone,

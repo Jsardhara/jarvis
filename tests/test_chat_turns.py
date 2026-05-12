@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.chat_turns import (
+from jarvis.state.chat_turns import (
     ChatTurnRecord,
     append_turn,
     read_recent,

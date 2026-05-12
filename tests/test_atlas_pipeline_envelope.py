@@ -4,7 +4,7 @@ from __future__ import annotations
 import httpx
 import respx
 
-from jarvis.subsystems.atlas import AtlasBridge, AtlasOrchestrator, _parse_pipeline_envelope
+from jarvis.agents.atlas.agent import AtlasBridge, AtlasOrchestrator, _parse_pipeline_envelope
 
 
 def test_parse_envelope_ok_status():
@@ -67,7 +67,7 @@ def test_parse_envelope_none_input():
 def test_oracle_scan_parses_live_envelope(monkeypatch):
     """oracle_scan calls /pipeline/oracle-scan and parses the envelope."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     envelope = {
         "status": "ok",
@@ -92,7 +92,7 @@ def test_oracle_scan_parses_live_envelope(monkeypatch):
 def test_trader_execute_202_surfaces_follow_up(monkeypatch):
     """HTTP 202 from trader-execute surfaces poll follow_up in AgentResponse."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     envelope_202 = {
         "status": "timeout",

@@ -1,4 +1,4 @@
-"""Tests for jarvis.memory_index — semantic chat memory.
+"""Tests for jarvis.state.memory_index — semantic chat memory.
 
 Sentence-transformers is *not* loaded during these tests.  All embedding
 calls are monkeypatched to return small 4-dimensional fake vectors so the
@@ -19,7 +19,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _patch_st_available(monkeypatch):
     """Mark sentence-transformers as *available* but intercept encode()."""
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     monkeypatch.setattr(mi, "_ST_AVAILABLE", True)
 
@@ -31,7 +31,7 @@ def fake_embed(monkeypatch):
     The vector for a string is derived from its length so different texts
     produce different (but reproducible) vectors.
     """
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     def _fake_embed(text: str) -> list[float]:
         n = len(text)
@@ -47,7 +47,7 @@ def fake_embed(monkeypatch):
 @pytest.fixture()
 def tmp_index(tmp_path, monkeypatch):
     """Point the index at a temp file for isolation."""
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     idx_file = tmp_path / "test_index.jsonl"
     monkeypatch.setattr(mi, "_get_index_path", lambda: idx_file)
@@ -58,7 +58,7 @@ def tmp_index(tmp_path, monkeypatch):
 
 
 def test_embed_returns_none_when_st_unavailable(monkeypatch):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     monkeypatch.setattr(mi, "_ST_AVAILABLE", False)
     result = mi.embed("hello world")
@@ -66,7 +66,7 @@ def test_embed_returns_none_when_st_unavailable(monkeypatch):
 
 
 def test_fake_embed_returns_4dim_vector(fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     vec = mi.embed("hello")
     assert vec is not None
@@ -74,7 +74,7 @@ def test_fake_embed_returns_4dim_vector(fake_embed):
 
 
 def test_embed_returns_list_of_floats(fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     vec = mi.embed("some text here")
     assert vec is not None
@@ -85,7 +85,7 @@ def test_embed_returns_list_of_floats(fake_embed):
 
 
 def test_append_turn_writes_parseable_jsonl(tmp_index, fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     turn = mi.IndexedTurn(
         turn_id="abc123",
@@ -106,7 +106,7 @@ def test_append_turn_writes_parseable_jsonl(tmp_index, fake_embed):
 
 
 def test_append_turn_accumulates_lines(tmp_index, fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     for i in range(5):
         turn = mi.IndexedTurn(
@@ -126,14 +126,14 @@ def test_append_turn_accumulates_lines(tmp_index, fake_embed):
 
 
 def test_cosine_identical_vectors():
-    from jarvis.memory_index import _cosine
+    from jarvis.state.memory_index import _cosine
 
     v = [0.5, 0.5, 0.5, 0.5]
     assert abs(_cosine(v, v) - 1.0) < 1e-6
 
 
 def test_cosine_orthogonal_vectors():
-    from jarvis.memory_index import _cosine
+    from jarvis.state.memory_index import _cosine
 
     a = [1.0, 0.0, 0.0, 0.0]
     b = [0.0, 1.0, 0.0, 0.0]
@@ -141,7 +141,7 @@ def test_cosine_orthogonal_vectors():
 
 
 def test_cosine_zero_vector():
-    from jarvis.memory_index import _cosine
+    from jarvis.state.memory_index import _cosine
 
     assert _cosine([0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]) == 0.0
 
@@ -163,7 +163,7 @@ def _seed_index(mi: Any, texts: list[str], tmp_index: Path, fake_embed: Any) -> 
 
 
 def test_search_returns_hits_ranked_by_similarity(tmp_index, fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     texts = [
         "short",                # short text
@@ -182,7 +182,7 @@ def test_search_returns_hits_ranked_by_similarity(tmp_index, fake_embed):
 
 
 def test_search_returns_empty_when_no_embeddings(tmp_index, fake_embed, monkeypatch):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     # Write a turn with no embedding
     turn = mi.IndexedTurn(
@@ -199,7 +199,7 @@ def test_search_returns_empty_when_no_embeddings(tmp_index, fake_embed, monkeypa
 
 
 def test_search_returns_empty_on_missing_index(tmp_index):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     # Index file does not exist
     assert not tmp_index.exists()
@@ -208,7 +208,7 @@ def test_search_returns_empty_on_missing_index(tmp_index):
 
 
 def test_search_respects_top_k(tmp_index, fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     for i in range(10):
         mi.append_turn(
@@ -229,7 +229,7 @@ def test_search_respects_top_k(tmp_index, fake_embed):
 
 
 def test_search_window_excludes_old_turns(tmp_index, fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     old_ts = (datetime.now(UTC) - timedelta(days=100)).isoformat()
     recent_ts = datetime.now(UTC).isoformat()
@@ -260,7 +260,7 @@ def test_search_window_excludes_old_turns(tmp_index, fake_embed):
 
 
 def test_search_window_returns_empty_when_all_old(tmp_index, fake_embed):
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     old_ts = (datetime.now(UTC) - timedelta(days=200)).isoformat()
     mi.append_turn(
@@ -281,14 +281,14 @@ def test_search_window_returns_empty_when_all_old(tmp_index, fake_embed):
 
 
 def test_turn_id_is_stable():
-    from jarvis.memory_index import turn_id_from_dict
+    from jarvis.state.memory_index import turn_id_from_dict
 
     entry = {"role": "user", "text": "hello", "ts": "2024-01-01T00:00:00+00:00"}
     assert turn_id_from_dict(entry) == turn_id_from_dict(entry)
 
 
 def test_turn_id_differs_for_different_texts():
-    from jarvis.memory_index import turn_id_from_dict
+    from jarvis.state.memory_index import turn_id_from_dict
 
     a = turn_id_from_dict({"role": "user", "text": "hello"})
     b = turn_id_from_dict({"role": "user", "text": "world"})
@@ -300,8 +300,8 @@ def test_turn_id_differs_for_different_texts():
 
 def test_semantic_search_returns_correct_shape(tmp_index, fake_embed, monkeypatch):
     """JarvisChat.semantic_search returns list[dict] with expected keys."""
-    import jarvis.memory_index as mi
-    from jarvis.jarvis_agent import JarvisChat
+    import jarvis.state.memory_index as mi
+    from jarvis.agent import JarvisChat
 
     # Pre-populate index
     mi.append_turn(
@@ -329,7 +329,7 @@ def test_semantic_search_returns_correct_shape(tmp_index, fake_embed, monkeypatc
 
 def test_semantic_search_returns_empty_on_empty_index(tmp_index):
     """No results when index is empty — no crash."""
-    from jarvis.jarvis_agent import JarvisChat
+    from jarvis.agent import JarvisChat
 
     chat = JarvisChat(registry={})
     results = chat.semantic_search("hello")
@@ -338,11 +338,11 @@ def test_semantic_search_returns_empty_on_empty_index(tmp_index):
 
 def test_semantic_search_empty_on_embed_failure(tmp_index, monkeypatch):
     """When embed returns None, semantic_search returns []."""
-    import jarvis.memory_index as mi
+    import jarvis.state.memory_index as mi
 
     monkeypatch.setattr(mi, "embed", lambda text: None)
 
-    from jarvis.jarvis_agent import JarvisChat
+    from jarvis.agent import JarvisChat
 
     chat = JarvisChat(registry={})
     results = chat.semantic_search("anything")

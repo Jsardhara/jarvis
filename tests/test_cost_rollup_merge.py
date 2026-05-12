@@ -10,7 +10,7 @@ fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from jarvis.config import Settings
-from jarvis.web.api import _merge_cost_rollups
+from jarvis.apps.api.app import _merge_cost_rollups
 
 # ---------------------------------------------------------------------------
 # Unit tests for _merge_cost_rollups
@@ -141,7 +141,7 @@ def test_cost_rollup_endpoint_returns_flat_by_agent(tmp_path: Path, monkeypatch)
     from jarvis.config import get_settings
 
     fake = Settings(project_root=tmp_path, state_dir=tmp_path, atlas_api="http://localhost:8000")
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
     get_settings.cache_clear()
 
     # Write one Jarvis cost entry
@@ -157,7 +157,7 @@ def test_cost_rollup_endpoint_returns_flat_by_agent(tmp_path: Path, monkeypatch)
     }
     log_path.write_text(json.dumps(entry) + "\n", encoding="utf-8")
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     client = TestClient(app)

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 import pytest
 
-from jarvis.voice import speech
+from jarvis.apps.voice import speech
 
 
 @pytest.mark.parametrize(

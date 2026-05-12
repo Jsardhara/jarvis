@@ -13,7 +13,7 @@ def authed_client(monkeypatch: Any) -> TestClient:
     monkeypatch.setenv("JARVIS_API_TOKEN", "secret-token-123")
     monkeypatch.delenv("MC_API_TOKEN", raising=False)
     # Reload api module so the middleware picks up the env var.
-    from jarvis.web import api as api_module
+    from jarvis.apps.api import app as api_module
 
     app = api_module.make_app()
     return TestClient(app)
@@ -24,7 +24,7 @@ def open_client(monkeypatch: Any) -> TestClient:
     """Build a TestClient with no auth token configured (open access)."""
     monkeypatch.delenv("JARVIS_API_TOKEN", raising=False)
     monkeypatch.delenv("MC_API_TOKEN", raising=False)
-    from jarvis.web import api as api_module
+    from jarvis.apps.api import app as api_module
 
     app = api_module.make_app()
     return TestClient(app)
@@ -67,7 +67,7 @@ def test_mc_api_token_fallback(monkeypatch: Any) -> None:
     """When JARVIS_API_TOKEN is unset but MC_API_TOKEN is set, MC_API_TOKEN gates the API."""
     monkeypatch.delenv("JARVIS_API_TOKEN", raising=False)
     monkeypatch.setenv("MC_API_TOKEN", "mc-secret")
-    from jarvis.web import api as api_module
+    from jarvis.apps.api import app as api_module
 
     client = TestClient(api_module.make_app())
     assert client.get("/api/inbox").status_code == 401

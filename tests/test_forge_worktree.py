@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from jarvis.subsystems.forge import Forge, WorktreeRunner
+from jarvis.agents.forge.agent import Forge, WorktreeRunner
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def _fake_run_factory():
 
 def test_worktree_runner_creates_isolated_branch(fake_subagent):
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -70,7 +70,7 @@ def test_worktree_runner_creates_isolated_branch(fake_subagent):
 
 def test_worktree_runner_runs_subagent_in_worktree(fake_subagent):
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -90,7 +90,7 @@ def test_worktree_runner_runs_subagent_in_worktree(fake_subagent):
 
 def test_worktree_runner_does_not_push_without_confirmation(fake_subagent, fake_pr_creator):
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -109,7 +109,7 @@ def test_worktree_runner_does_not_push_without_confirmation(fake_subagent, fake_
 
 def test_worktree_runner_pushes_after_confirmed(fake_subagent, fake_pr_creator):
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -128,7 +128,7 @@ def test_worktree_runner_pushes_after_confirmed(fake_subagent, fake_pr_creator):
 
 def test_worktree_runner_creates_pr_when_pushed(fake_subagent, fake_pr_creator):
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -149,7 +149,7 @@ def test_worktree_runner_cleans_up_on_failure(fake_subagent):
     fake_run = _fake_run_factory()
     fake_subagent.side_effect = RuntimeError("model crashed")
 
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -180,7 +180,7 @@ def test_worktree_runner_swallows_cleanup_failure(fake_subagent):
         result.returncode = 0
         return result
 
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -198,7 +198,7 @@ def test_worktree_runner_swallows_cleanup_failure(fake_subagent):
 def test_forge_uses_worktree_runner_when_constructed_with_one(fake_subagent, fake_pr_creator):
     """Forge.execute should delegate to WorktreeRunner.run for each stage."""
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,
@@ -217,7 +217,7 @@ def test_forge_uses_worktree_runner_when_constructed_with_one(fake_subagent, fak
 def test_forge_push_pending_action_when_push_requested(fake_subagent, fake_pr_creator):
     """push=True must surface `push_pending` + needs_confirm — actual push happens after confirm."""
     fake_run = _fake_run_factory()
-    with patch("jarvis.subsystems.forge.subprocess.run", side_effect=fake_run):
+    with patch("jarvis.agents.forge.agent.subprocess.run", side_effect=fake_run):
         runner = WorktreeRunner(
             repo_path="C:/repos/x",
             subagent=fake_subagent,

@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from jarvis.voice import audio_io
+from jarvis.apps.voice import audio_io
 
 
 def test_collect_until_silence_stops_after_silence_threshold(monkeypatch):
@@ -23,7 +23,7 @@ def test_collect_until_silence_stops_after_silence_threshold(monkeypatch):
         counter["calls"] += 1
         return counter["calls"] <= 10
 
-    monkeypatch.setattr("jarvis.voice.silence.is_voiced", _fake_is_voiced)
+    monkeypatch.setattr("jarvis.apps.voice.silence.is_voiced", _fake_is_voiced)
     chunks = (b"x" * audio_io.FRAME_BYTES for _ in range(200))
     out = audio_io.collect_until_silence(
         chunks, silence_ms=120, frame_ms=30, max_ms=15_000,
@@ -35,7 +35,7 @@ def test_collect_until_silence_stops_after_silence_threshold(monkeypatch):
 def test_collect_until_silence_stops_at_max_ms_safety(monkeypatch):
     """Always-voiced input — collector stops when max_ms reached, not before."""
     monkeypatch.setattr(
-        "jarvis.voice.silence.is_voiced", lambda frame, threshold=500.0: True,
+        "jarvis.apps.voice.silence.is_voiced", lambda frame, threshold=500.0: True,
     )
     chunks = (b"x" * audio_io.FRAME_BYTES for _ in range(10_000))
     out = audio_io.collect_until_silence(

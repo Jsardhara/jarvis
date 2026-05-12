@@ -7,7 +7,7 @@ import json
 import pytest
 
 from jarvis.contract import TraceEvent
-from jarvis.subsystems.atlas_ws_client import AtlasWsClient, _atlas_event_to_trace
+from jarvis.agents.atlas.ws_client import AtlasWsClient, _atlas_event_to_trace
 
 # ---------------------------------------------------------------------------
 # Unit tests — no network
@@ -100,7 +100,7 @@ async def test_reconnects_with_backoff(monkeypatch):
         if len(slept) >= 2:
             client._stopped = True
 
-    monkeypatch.setattr("jarvis.subsystems.atlas_ws_client.asyncio.sleep", _mock_sleep)
+    monkeypatch.setattr("jarvis.agents.atlas.ws_client.asyncio.sleep", _mock_sleep)
 
     async def sink(ev: TraceEvent) -> None:
         pass

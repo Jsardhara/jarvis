@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, UTC
 from pathlib import Path
 
 
-from jarvis.voice import context_cache
+from jarvis.apps.voice import context_cache
 
 
 def test_load_returns_empty_when_file_missing(tmp_path: Path):

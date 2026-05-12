@@ -1,8 +1,8 @@
 """Tests for Tempo search_mail + list_recent_mail (read+unread coverage)."""
 from __future__ import annotations
 
-from jarvis.subsystems.providers import MockOutlook
-from jarvis.subsystems.tempo import Tempo
+from jarvis.agents.providers import MockOutlook
+from jarvis.agents.tempo.agent import Tempo
 
 
 def _seed() -> list[dict]:

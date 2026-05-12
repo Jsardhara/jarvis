@@ -14,7 +14,7 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis.web.api import make_app  # noqa: E402
+from jarvis.apps.api.app import make_app  # noqa: E402
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ def _mock_bridge(responses: dict[str, Any]) -> MagicMock:
 
 def _make_app_with_bridge(bridge: MagicMock, mode: str = "live") -> TestClient:
     """Build TestClient with a patched AtlasOrchestrator.bridge."""
-    from jarvis.subsystems.atlas import AtlasOrchestrator
+    from jarvis.agents.atlas.agent import AtlasOrchestrator
 
     orchestrator = AtlasOrchestrator(bridge=bridge, mode=mode)
     app = make_app()

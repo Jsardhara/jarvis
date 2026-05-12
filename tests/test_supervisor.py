@@ -1,4 +1,4 @@
-"""Tests for jarvis.supervisor — retry, dead-letter, inbox crit events."""
+"""Tests for jarvis.core.supervisor — retry, dead-letter, inbox crit events."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from jarvis.contract import AgentResponse, InboxEvent
-from jarvis.supervisor import (
+from jarvis.core.supervisor import (
     SupervisedFailure,
     read_dead_letter,
     supervise_call,
@@ -33,7 +33,7 @@ def _make_reg(agent: str, *, call_fn=None, call_text_fn=None) -> dict:
 @pytest.fixture()
 def tmp_state(tmp_path: Path, monkeypatch):
     """Redirect state_dir to a temp directory and clear the lru_cache."""
-    import jarvis.supervisor as sup_mod
+    import jarvis.core.supervisor as sup_mod
     from jarvis.config import get_settings
 
     monkeypatch.setenv("JARVIS_STATE_DIR", str(tmp_path))
@@ -62,7 +62,7 @@ def test_transient_connection_error_retried_then_succeeds(tmp_state):
     reg = _make_reg("tempo", call_fn=_flaky)
     inbox_cb = MagicMock()
 
-    with patch("jarvis.supervisor.time.sleep"):
+    with patch("jarvis.core.supervisor.time.sleep"):
         result = supervise_call(reg, "tempo", "triage", {}, on_inbox_event=inbox_cb)
 
     assert result.action == "done"
@@ -118,7 +118,7 @@ def test_runtime_error_retried_once_then_dead_letter(tmp_state):
     reg = _make_reg("lens", call_fn=_runtime)
     inbox_cb = MagicMock()
 
-    with patch("jarvis.supervisor.time.sleep"), pytest.raises(SupervisedFailure) as exc_info:
+    with patch("jarvis.core.supervisor.time.sleep"), pytest.raises(SupervisedFailure) as exc_info:
         supervise_call(reg, "lens", "quick_search", {}, on_inbox_event=inbox_cb)
 
     # 1 initial + 2 retries = 3 total calls
@@ -144,7 +144,7 @@ def test_dead_letter_file_is_append_only_and_parseable_jsonl(tmp_state):
     reg1 = _make_reg("tempo", call_fn=_bad)
     reg2 = _make_reg("atlas", call_fn=_bad2)
 
-    with patch("jarvis.supervisor.time.sleep"):
+    with patch("jarvis.core.supervisor.time.sleep"):
         with pytest.raises(SupervisedFailure):
             supervise_call(reg1, "tempo", "triage", {})
         with pytest.raises(SupervisedFailure):

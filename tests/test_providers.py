@@ -1,7 +1,7 @@
 """Unit tests for MockOutlook and MockSearch providers."""
 from __future__ import annotations
 
-from jarvis.subsystems.providers import MockOutlook, MockSearch
+from jarvis.agents.providers import MockOutlook, MockSearch
 
 # --- MockOutlook: mail ---
 

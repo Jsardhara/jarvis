@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import httpx
 
-from jarvis.daemon.notifier import (
+from jarvis.apps.sentinel.notifier import (
     NoopNotifier,
     NtfyNotifier,
     PushoverNotifier,

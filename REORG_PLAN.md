@@ -1,6 +1,12 @@
 # Jarvis Repo Reorganization — Proposal
 
-**Status:** draft, awaiting operator approval. No files moved yet.
+**Status:** APPROVED, executing on `refactor/reorg`. C1 committed.
+
+**Scope adjustments after start:**
+- **`src/` layout deferred** — keeping `jarvis/` at repo root. Avoids editable-install friction. Phase 2 candidate.
+- **C2 (api.py split) and C3 (atlas.py split) deferred** — both require extracting closures / module-level refactoring that exceeds "move + light cleanup". The 800-line violation is pre-existing; this PR keeps the rule violations but reorganizes everything around them. Splits go in a follow-up PR with their own test pass.
+
+
 **Branch (to create on approval):** `refactor/reorg`
 **Scope:** Python package layout, large-file splits, service launchers, CI. **Not** touched: `web/` (Next.js dashboard), `state/`, `docs/`, `.git/`, ATLAS project.
 

@@ -244,8 +244,8 @@ def test_semantic_chat_hits_returned(monkeypatch) -> None:
     """When memory_index.search returns canned results they appear as chat hits."""
     from jarvis.search import search_all
 
-    from jarvis import memory_index
-    from jarvis.memory_index import IndexedTurn
+    from jarvis.state import memory_index
+    from jarvis.state.memory_index import IndexedTurn
 
     canned_turn = IndexedTurn(
         turn_id="turn001",
@@ -271,8 +271,8 @@ def test_semantic_chat_hits_returned(monkeypatch) -> None:
 def test_semantic_chat_href_contains_turn_id(monkeypatch) -> None:
     from jarvis.search import search_all
 
-    from jarvis import memory_index
-    from jarvis.memory_index import IndexedTurn
+    from jarvis.state import memory_index
+    from jarvis.state.memory_index import IndexedTurn
 
     canned_turn = IndexedTurn(
         turn_id="turn999",
@@ -299,8 +299,8 @@ def test_dedup_keeps_higher_score(monkeypatch) -> None:
     """Same (kind, id) from two sources keeps the higher-scored hit."""
     from jarvis.search import search_all
 
-    from jarvis import memory_index
-    from jarvis.memory_index import IndexedTurn
+    from jarvis.state import memory_index
+    from jarvis.state.memory_index import IndexedTurn
 
     # Seed a chat turn that matches keyword AND appears in semantic results
     canned_turn = IndexedTurn(
@@ -420,8 +420,8 @@ def test_scores_in_valid_range() -> None:
 def test_results_sorted_by_score_desc(monkeypatch) -> None:
     from jarvis.search import search_all
 
-    from jarvis import memory_index
-    from jarvis.memory_index import IndexedTurn
+    from jarvis.state import memory_index
+    from jarvis.state.memory_index import IndexedTurn
 
     canned = IndexedTurn(
         turn_id="t1",

@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-from jarvis.daemon import voice_context_tick as tick_mod
+from jarvis.apps.sentinel import voice_context_tick as tick_mod
 
 
 def _ev(agent: str, ref: dict) -> SimpleNamespace:
@@ -23,7 +23,7 @@ def test_voice_context_tick_writes_fact_sheet(tmp_path: Path, monkeypatch):
                        "events": [{"subject": "Standup", "start": "10:00"}]}),
     ]
     monkeypatch.setattr(
-        "jarvis.daemon.voice_context_tick.read_inbox",
+        "jarvis.apps.sentinel.voice_context_tick.read_inbox",
         lambda limit=200: fixture_events,
         raising=False,
     )

@@ -39,7 +39,7 @@ _SYLLABUS_TEXT = b"Introduction to Calculus syllabus. Week 1: Limits. Week 2: De
 def scholar_env(tmp_path):
     """Isolated Scholar instance with tmp state dir and reset study DB."""
     os.environ["JARVIS_STATE_DIR"] = str(tmp_path)
-    from jarvis.subsystems.study_db import _reset_engine, init_db
+    from jarvis.agents.scholar.db import _reset_engine, init_db
 
     _reset_engine()
     init_db()
@@ -50,7 +50,7 @@ def scholar_env(tmp_path):
 
 @pytest.fixture()
 def scholar(scholar_env):
-    from jarvis.subsystems.scholar import Scholar
+    from jarvis.agents.scholar.agent import Scholar
 
     return Scholar()
 
@@ -68,19 +68,19 @@ def mock_tempo():
 
 
 def test_safe_filename_plain():
-    from jarvis.subsystems.scholar import _safe_filename
+    from jarvis.agents.scholar.agent import _safe_filename
 
     assert _safe_filename("Linear Algebra") == "Linear_Algebra"
 
 
 def test_safe_filename_special_chars():
-    from jarvis.subsystems.scholar import _safe_filename
+    from jarvis.agents.scholar.agent import _safe_filename
 
     assert _safe_filename("Calc 101: Advanced!") == "Calc_101_Advanced"
 
 
 def test_safe_filename_unicode():
-    from jarvis.subsystems.scholar import _safe_filename
+    from jarvis.agents.scholar.agent import _safe_filename
 
     result = _safe_filename("Álgebra Lineal")
     assert result  # not empty
@@ -89,13 +89,13 @@ def test_safe_filename_unicode():
 
 
 def test_safe_filename_empty():
-    from jarvis.subsystems.scholar import _safe_filename
+    from jarvis.agents.scholar.agent import _safe_filename
 
     assert _safe_filename("   ") == "untitled"
 
 
 def test_safe_filename_leading_trailing_underscores():
-    from jarvis.subsystems.scholar import _safe_filename
+    from jarvis.agents.scholar.agent import _safe_filename
 
     result = _safe_filename("!!course!!")
     assert not result.startswith("_")
@@ -110,8 +110,8 @@ def test_safe_filename_leading_trailing_underscores():
 def test_ingest_syllabus_returns_agent_response(scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -131,8 +131,8 @@ def test_ingest_syllabus_returns_agent_response(scholar, mock_tempo):
 def test_ingest_syllabus_result_fields(scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -159,8 +159,8 @@ def test_ingest_syllabus_result_fields(scholar, mock_tempo):
 def test_ingest_syllabus_persists_plan_to_state(scholar_env, scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -183,8 +183,8 @@ def test_ingest_syllabus_persists_plan_to_state(scholar_env, scholar, mock_tempo
 def test_ingest_syllabus_creates_flashcards(scholar_env, scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -199,7 +199,7 @@ def test_ingest_syllabus_creates_flashcards(scholar_env, scholar, mock_tempo):
     # Verify cards exist in DB
     from sqlalchemy import select
 
-    from jarvis.subsystems.study_db import StudyFlashcard, get_session
+    from jarvis.agents.scholar.db import StudyFlashcard, get_session
 
     with get_session() as session:
         cards = session.scalars(
@@ -216,8 +216,8 @@ def test_ingest_syllabus_creates_flashcards(scholar_env, scholar, mock_tempo):
 def test_ingest_syllabus_card_tags_include_course(scholar_env, scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -231,7 +231,7 @@ def test_ingest_syllabus_card_tags_include_course(scholar_env, scholar, mock_tem
 
     from sqlalchemy import select
 
-    from jarvis.subsystems.study_db import StudyFlashcard, get_session
+    from jarvis.agents.scholar.db import StudyFlashcard, get_session
 
     with get_session() as session:
         cards = session.scalars(
@@ -246,8 +246,8 @@ def test_ingest_syllabus_card_tags_include_course(scholar_env, scholar, mock_tem
 def test_ingest_syllabus_calls_tempo_add(scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -269,8 +269,8 @@ def test_ingest_syllabus_no_tempo_no_crash(scholar):
     """When tempo=None, tasks_created=0 and no exception raised."""
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -287,8 +287,8 @@ def test_ingest_syllabus_no_tempo_no_crash(scholar):
 def test_ingest_syllabus_fires_inbox_events(scholar_env, scholar, mock_tempo):
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = json.dumps(_PARSED_PLAN)
@@ -313,8 +313,8 @@ def test_ingest_syllabus_claude_json_fence_tolerance(scholar_env, scholar, mock_
     content_b64 = base64.b64encode(_SYLLABUS_TEXT).decode()
     fenced = f"```json\n{json.dumps(_PARSED_PLAN)}\n```"
 
-    with patch("jarvis.subsystems.scholar._query_claude") as mock_claude, patch(
-        "jarvis.subsystems.scholar_study._extract_text"
+    with patch("jarvis.agents.scholar.agent._query_claude") as mock_claude, patch(
+        "jarvis.agents.scholar.study._extract_text"
     ) as mock_extract:
         mock_extract.return_value = (_SYLLABUS_TEXT.decode(), 1)
         mock_claude.return_value = fenced
@@ -338,16 +338,16 @@ def test_registry_has_ingest_syllabus():
     """Scholar AgentDescriptor exposes ingest_syllabus action."""
     from unittest.mock import MagicMock, patch
 
-    with patch("jarvis.subsystems.registry._build_outlook"), patch(
-        "jarvis.subsystems.registry.build_default_tempo_stack"
-    ), patch("jarvis.subsystems.registry.AtlasBridge"), patch(
-        "jarvis.subsystems.registry.AtlasOrchestrator"
+    with patch("jarvis.agents.registry._build_outlook"), patch(
+        "jarvis.agents.registry.build_default_tempo_stack"
+    ), patch("jarvis.agents.registry.AtlasBridge"), patch(
+        "jarvis.agents.registry.AtlasOrchestrator"
     ) as mock_atlas_cls:
         mock_atlas = MagicMock()
         mock_atlas._health_check.return_value = False
         mock_atlas_cls.return_value = mock_atlas
 
-        from jarvis.subsystems.registry import build_default_registry
+        from jarvis.agents.registry import build_default_registry
 
         reg = build_default_registry()
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.router import classify
+from jarvis.core.router import classify
 
 
 @pytest.mark.parametrize("request_text,expected", [

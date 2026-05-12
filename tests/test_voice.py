@@ -5,11 +5,11 @@ import asyncio
 
 import httpx
 
-from jarvis.voice import loop as voice_loop
-from jarvis.voice.loop import _spoken_text, process_utterance
-from jarvis.voice.stt import DeepgramSTT, MockSTT
-from jarvis.voice.tts import ElevenLabsTTS, MockTTS
-from jarvis.voice.wake import MockWakeDetector
+from jarvis.apps.voice import loop as voice_loop
+from jarvis.apps.voice.loop import _spoken_text, process_utterance
+from jarvis.apps.voice.stt import DeepgramSTT, MockSTT
+from jarvis.apps.voice.tts import ElevenLabsTTS, MockTTS
+from jarvis.apps.voice.wake import MockWakeDetector
 
 
 def test_wake_detects_keyword():
@@ -143,7 +143,7 @@ def test_humanize_dispatch_uses_submit(monkeypatch):
         seen["model"] = model
         return "  Got it — anything else?  "
 
-    import jarvis.claude_queue as cq
+    import jarvis.llm.queue as cq
     monkeypatch.setattr(cq, "submit", fake_submit)
 
     out = voice_loop._humanize_dispatch({
@@ -159,7 +159,7 @@ def test_humanize_dispatch_swallows_errors(monkeypatch):
     def boom(**kwargs):
         raise RuntimeError("rate limited")
 
-    import jarvis.claude_queue as cq
+    import jarvis.llm.queue as cq
     monkeypatch.setattr(cq, "submit", boom)
 
     out = voice_loop._humanize_dispatch({"responses": {"tempo": {"action": "drafted"}}})

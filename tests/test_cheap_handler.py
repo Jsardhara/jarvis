@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from jarvis.voice import cheap_handler
+from jarvis.apps.voice import cheap_handler
 
 
 @pytest.mark.asyncio
@@ -25,7 +25,7 @@ async def test_local_time_query_skips_llm(monkeypatch):
         submitted.append(kwargs)
         return "should-not-fire"
 
-    monkeypatch.setattr("jarvis.claude_queue.submit", _spy, raising=False)
+    monkeypatch.setattr("jarvis.llm.queue.submit", _spy, raising=False)
     out = await cheap_handler.handle("what time is it")
     assert submitted == []
     body = out["responses"]["voice"]
@@ -37,7 +37,7 @@ async def test_local_time_query_skips_llm(monkeypatch):
 async def test_thanks_returns_silent_ack(monkeypatch):
     submitted = []
     monkeypatch.setattr(
-        "jarvis.claude_queue.submit",
+        "jarvis.llm.queue.submit",
         lambda **kw: submitted.append(kw) or "x",
         raising=False,
     )
@@ -54,7 +54,7 @@ async def test_status_query_uses_haiku(monkeypatch):
         captured.update(kwargs)
         return "PnL is up about one percent today."
 
-    monkeypatch.setattr("jarvis.claude_queue.submit", _fake_submit, raising=False)
+    monkeypatch.setattr("jarvis.llm.queue.submit", _fake_submit, raising=False)
     out = await cheap_handler.handle("what's my pnl today")
     assert captured["model"] == "claude-haiku-4-5"
     assert captured["user"] == "what's my pnl today"
@@ -70,7 +70,7 @@ async def test_explain_query_escalates_to_sonnet(monkeypatch):
         captured.update(kwargs)
         return "Because the trader was paused after a drawdown."
 
-    monkeypatch.setattr("jarvis.claude_queue.submit", _fake_submit, raising=False)
+    monkeypatch.setattr("jarvis.llm.queue.submit", _fake_submit, raising=False)
     out = await cheap_handler.handle("explain why pnl is down")
     assert captured["model"] == "claude-sonnet-4-6"
     assert "Because" in out["responses"]["voice"]["action"]
@@ -80,7 +80,7 @@ async def test_explain_query_escalates_to_sonnet(monkeypatch):
 async def test_code_keyword_escalates_to_sonnet(monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        "jarvis.claude_queue.submit",
+        "jarvis.llm.queue.submit",
         lambda **kw: captured.update(kw) or "Here's a refactor.",
         raising=False,
     )
@@ -93,7 +93,7 @@ async def test_dispatch_keyword_routes_to_jarvis_chat(monkeypatch):
     """State-changing utterances now hit the unified JarvisChat brain."""
     submitted = []
     monkeypatch.setattr(
-        "jarvis.claude_queue.submit",
+        "jarvis.llm.queue.submit",
         lambda **kw: submitted.append(kw) or "no",
         raising=False,
     )
@@ -132,7 +132,7 @@ async def test_dispatch_keyword_routes_to_jarvis_chat(monkeypatch):
 async def test_dispatch_falls_back_to_orchestrator_when_chat_raises(monkeypatch):
     """If JarvisChat.respond_single blows up, voice still answers via legacy path."""
     monkeypatch.setattr(
-        "jarvis.claude_queue.submit",
+        "jarvis.llm.queue.submit",
         lambda **kw: "x",
         raising=False,
     )
@@ -162,12 +162,12 @@ async def test_dispatch_falls_back_to_orchestrator_when_chat_raises(monkeypatch)
     import sys
     import types
 
-    fake_orch_mod = types.ModuleType("jarvis.orchestrator")
+    fake_orch_mod = types.ModuleType("jarvis.core.orchestrator")
     fake_orch_mod.Orchestrator = _FakeOrch  # type: ignore[attr-defined]
-    fake_reg_mod = types.ModuleType("jarvis.subsystems.registry")
+    fake_reg_mod = types.ModuleType("jarvis.agents.registry")
     fake_reg_mod.build_default_registry = lambda: {}  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "jarvis.orchestrator", fake_orch_mod)
-    monkeypatch.setitem(sys.modules, "jarvis.subsystems.registry", fake_reg_mod)
+    monkeypatch.setitem(sys.modules, "jarvis.core.orchestrator", fake_orch_mod)
+    monkeypatch.setitem(sys.modules, "jarvis.agents.registry", fake_reg_mod)
 
     try:
         out = await cheap_handler.handle("draft an email to the team about delays")
@@ -191,7 +191,7 @@ async def test_claude_failure_returns_apology_not_crash(monkeypatch):
     def _boom(**kwargs: Any) -> str:
         raise RuntimeError("rate-limited")
 
-    monkeypatch.setattr("jarvis.claude_queue.submit", _boom, raising=False)
+    monkeypatch.setattr("jarvis.llm.queue.submit", _boom, raising=False)
     out = await cheap_handler.handle("what's my pnl today")
     assert "trouble" in out["responses"]["voice"]["action"].lower()
 
@@ -200,7 +200,7 @@ async def test_claude_failure_returns_apology_not_crash(monkeypatch):
 async def test_repeat_replays_last_reply(monkeypatch):
     """'repeat' returns whatever was cached from the prior reply."""
     monkeypatch.setattr(
-        "jarvis.claude_queue.submit",
+        "jarvis.llm.queue.submit",
         lambda **kw: "PnL is up.",
         raising=False,
     )
@@ -218,7 +218,7 @@ async def test_haiku_call_passes_system_prompt(monkeypatch):
     """Brevity is now enforced by VOICE_SYSTEM_PROMPT, not a max_tokens cap."""
     captured = {}
     monkeypatch.setattr(
-        "jarvis.claude_queue.submit",
+        "jarvis.llm.queue.submit",
         lambda **kw: captured.update(kw) or "ok",
         raising=False,
     )

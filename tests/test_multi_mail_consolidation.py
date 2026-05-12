@@ -11,8 +11,8 @@ import os
 
 import pytest
 
-from jarvis.subsystems.multi_mail_provider import MailAccount, MultiMailProvider
-from jarvis.subsystems.tempo_stack import TempoStack, build_default_tempo_stack
+from jarvis.agents.tempo.providers.multi_mail import MailAccount, MultiMailProvider
+from jarvis.agents.tempo.stack import TempoStack, build_default_tempo_stack
 
 # ---------- fakes ----------
 
@@ -175,7 +175,7 @@ def test_provider_failure_isolated(caplog):
 
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="jarvis.subsystems.multi_mail_provider"):
+    with caplog.at_level(logging.WARNING, logger="jarvis.agents.tempo.providers.multi_mail"):
         items = multi.list_unread(max_results=10)
 
     assert len(items) == 1
@@ -226,8 +226,8 @@ def test_real_stack_builds_when_apple_and_gmail_env_set():
     stack = build_default_tempo_stack()
     assert isinstance(stack, TempoStack)
     # Mail surface is MultiMailProvider; calendar is ICloudProvider.
-    from jarvis.subsystems.icloud_provider import ICloudProvider
-    from jarvis.subsystems.multi_mail_provider import (
+    from jarvis.agents.tempo.providers.icloud import ICloudProvider
+    from jarvis.agents.tempo.providers.multi_mail import (
         MultiMailProvider,
     )
 

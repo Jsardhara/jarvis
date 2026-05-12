@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.voice import persona
+from jarvis.apps.voice import persona
 
 
 @pytest.mark.parametrize(

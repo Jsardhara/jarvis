@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from jarvis.subsystems.providers import MockOutlook
-from jarvis.subsystems.tempo import (
+from jarvis.agents.providers import MockOutlook
+from jarvis.agents.tempo.agent import (
     Tempo,
     _active_snoozes,
     _load_snoozes,
@@ -65,7 +65,7 @@ def tempo(outlook):
 
 
 def _patch_llm(monkeypatch, response: str = _LLM_RESPONSE):
-    monkeypatch.setattr("jarvis.llm.query_claude_sync", lambda *_a, **_kw: response)
+    monkeypatch.setattr("jarvis.llm.client.query_claude_sync", lambda *_a, **_kw: response)
 
 
 # ── triage_smart — basic bucketing ───────────────────────────────────────────
@@ -109,7 +109,7 @@ def test_triage_smart_idempotent_no_reclassify(monkeypatch, tempo, isolated_stat
         call_count["n"] += 1
         return _LLM_RESPONSE
 
-    monkeypatch.setattr("jarvis.llm.query_claude_sync", counting_llm)
+    monkeypatch.setattr("jarvis.llm.client.query_claude_sync", counting_llm)
 
     tempo.triage_smart()
     assert call_count["n"] == 1
@@ -124,13 +124,13 @@ def test_triage_smart_idempotent_no_reclassify(monkeypatch, tempo, isolated_stat
 
 def test_important_sender_forces_action_required(monkeypatch, tempo, isolated_state):
     # LLM would classify m2 as info_only, but boss@company.com is important
-    monkeypatch.setattr("jarvis.llm.query_claude_sync", lambda *a, **k: _LLM_RESPONSE)
+    monkeypatch.setattr("jarvis.llm.client.query_claude_sync", lambda *a, **k: _LLM_RESPONSE)
 
     # Patch load_preferences to return newsletter sender as important
-    from jarvis.memory import OperatorPreferences
+    from jarvis.state.memory import OperatorPreferences
 
     monkeypatch.setattr(
-        "jarvis.subsystems.tempo.load_preferences",
+        "jarvis.agents.tempo.agent.load_preferences",
         lambda: OperatorPreferences(important_senders=("digest.io",)),
     )
 
@@ -149,12 +149,12 @@ def test_important_sender_forces_action_required(monkeypatch, tempo, isolated_st
 
 def test_important_sender_no_false_overrides(monkeypatch, tempo, isolated_state):
     """Non-matching senders should not be overridden."""
-    monkeypatch.setattr("jarvis.llm.query_claude_sync", lambda *a, **k: _LLM_RESPONSE)
+    monkeypatch.setattr("jarvis.llm.client.query_claude_sync", lambda *a, **k: _LLM_RESPONSE)
 
-    from jarvis.memory import OperatorPreferences
+    from jarvis.state.memory import OperatorPreferences
 
     monkeypatch.setattr(
-        "jarvis.subsystems.tempo.load_preferences",
+        "jarvis.agents.tempo.agent.load_preferences",
         lambda: OperatorPreferences(important_senders=("vip@example.com",)),
     )
 
@@ -302,7 +302,7 @@ def test_active_snoozes_excludes_expired():
 def test_triage_smart_handles_bad_llm_response(monkeypatch, tempo, isolated_state):
     """When LLM returns unparseable content all items fall back to info_only."""
     monkeypatch.setattr(
-        "jarvis.llm.query_claude_sync",
+        "jarvis.llm.client.query_claude_sync",
         lambda *a, **k: "this is not json",
     )
 

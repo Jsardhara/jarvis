@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from jarvis.subsystems import link_handler
+from jarvis.agents.lens import link_handler
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ def _make_registry(
 class TestR1ExamScheduled:
     def test_fires_tempo_add_with_correct_args(self, tmp_path, monkeypatch):
         """Synthesise an exam_session result and assert tempo.add is called."""
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
 
@@ -80,7 +80,7 @@ class TestR1ExamScheduled:
 
     def test_deduplication_skips_second_fire(self, tmp_path, monkeypatch):
         """Firing the same (rule, source_key) twice within 24h skips the second."""
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
 
@@ -113,7 +113,7 @@ class TestR2ImminentExam:
             fh.write(json.dumps(session) + "\n")
 
     def test_returns_event_when_exam_within_24h(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         exams_file = tmp_path / "scholar_exams.jsonl"
         started_iso = (datetime.now(UTC) + timedelta(hours=12)).isoformat()
@@ -140,7 +140,7 @@ class TestR2ImminentExam:
         assert "Calculus" in ev.summary
 
     def test_no_event_when_exam_over_24h_away(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         exams_file = tmp_path / "scholar_exams.jsonl"
         started_iso = (datetime.now(UTC) + timedelta(hours=30)).isoformat()
@@ -162,7 +162,7 @@ class TestR2ImminentExam:
         assert events == []
 
     def test_dedup_skips_already_fired_exam(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         exams_file = tmp_path / "scholar_exams.jsonl"
         fired_file = tmp_path / "triggers_fired.jsonl"
@@ -193,7 +193,7 @@ class TestR2ImminentExam:
 
 class TestR3TasksDueToday:
     def test_returns_event_for_task_with_course_tag_due_today(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         today = datetime.now(UTC).date().isoformat()
         tasks = [
@@ -221,7 +221,7 @@ class TestR3TasksDueToday:
         assert "Submit HW3" in ev.summary
 
     def test_ignores_task_without_course_tag(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         today = datetime.now(UTC).date().isoformat()
         tasks = [
@@ -244,7 +244,7 @@ class TestR3TasksDueToday:
         assert events == []
 
     def test_ignores_task_not_due_today(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         tomorrow = (datetime.now(UTC).date() + timedelta(days=1)).isoformat()
         tasks = [
@@ -273,7 +273,7 @@ class TestR3TasksDueToday:
 
 class TestR4ForgeRunFailed:
     def test_returns_crit_event_when_dead_letter_present(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         dead_letter_file = tmp_path / "dead_letter.jsonl"
         record = {
@@ -302,7 +302,7 @@ class TestR4ForgeRunFailed:
         assert "build exploded" in ev.summary
 
     def test_returns_empty_when_no_dead_letter(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         monkeypatch.setattr(triggers, "_dead_letter_path", lambda: tmp_path / "dead_letter.jsonl")
         monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
@@ -318,7 +318,7 @@ class TestR4ForgeRunFailed:
 
 class TestR5GuardianViolation:
     def test_builds_crit_event_for_violation(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
 
@@ -334,7 +334,7 @@ class TestR5GuardianViolation:
         assert "live mode" in event.summary
 
     def test_returns_none_when_no_violations(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         monkeypatch.setattr(triggers, "_fired_path", lambda: tmp_path / "triggers_fired.jsonl")
 
@@ -349,7 +349,7 @@ class TestR5GuardianViolation:
 
 class TestScanPeriodic:
     def test_returns_list_of_fired_triggers(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         today = datetime.now(UTC).date().isoformat()
         tasks = [
@@ -384,7 +384,7 @@ class TestScanPeriodic:
 
 class TestListRecentFires:
     def test_reads_fired_jsonl(self, tmp_path, monkeypatch):
-        from jarvis import triggers
+        from jarvis.core import triggers
 
         fired_file = tmp_path / "triggers_fired.jsonl"
         record = {

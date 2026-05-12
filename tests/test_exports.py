@@ -166,7 +166,7 @@ class TestDailyDigest:
         """Digest with no data must still return a valid markdown string with a date header."""
         import re
 
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         today = datetime.date(2026, 4, 29)
         result = daily_digest(today)
@@ -178,7 +178,7 @@ class TestDailyDigest:
 
     def test_mixed_data_all_sections_render(self, isolated_state):
         """With seeded data every main section should appear."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         date_iso = "2026-04-29"
         target = datetime.date(2026, 4, 29)
@@ -200,7 +200,7 @@ class TestDailyDigest:
 
     def test_dispatches_count_and_status(self, isolated_state):
         """Activity section must report correct ok/error counts."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         date_iso = "2026-04-29"
         target = datetime.date(2026, 4, 29)
@@ -214,7 +214,7 @@ class TestDailyDigest:
 
     def test_confirmations_count(self, isolated_state):
         """Activity section must count approved + pending confirmations."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         date_iso = "2026-04-29"
         target = datetime.date(2026, 4, 29)
@@ -227,7 +227,7 @@ class TestDailyDigest:
 
     def test_scholar_section_course_and_problems(self, isolated_state):
         """Scholar section includes course name and problem stats."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         date_iso = "2026-04-29"
         target = datetime.date(2026, 4, 29)
@@ -240,7 +240,7 @@ class TestDailyDigest:
 
     def test_task_completed_and_open(self, isolated_state):
         """Tasks section lists both completed and open tasks."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         date_iso = "2026-04-29"
         target = datetime.date(2026, 4, 29)
@@ -255,7 +255,7 @@ class TestDailyDigest:
 
     def test_conversation_excerpts_render(self, isolated_state):
         """Conversations section shows excerpts from turn log."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         _seed_turn_log(isolated_state)
         result = daily_digest(datetime.date(2026, 4, 29))
@@ -265,7 +265,7 @@ class TestDailyDigest:
 
     def test_skips_scholar_section_when_no_data(self, isolated_state):
         """Scholar section is omitted when no problems or exams exist."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         result = daily_digest(datetime.date(2026, 4, 29))
 
@@ -274,7 +274,7 @@ class TestDailyDigest:
 
     def test_default_date_is_today(self, isolated_state):
         """Calling daily_digest() with no args uses today's UTC date."""
-        from jarvis.exports import daily_digest
+        from jarvis.state.exports import daily_digest
 
         today = datetime.date.today()
         result = daily_digest()
@@ -285,7 +285,7 @@ class TestDailyDigest:
 class TestWeeklyDigest:
     def test_spans_seven_day_window(self, isolated_state):
         """Weekly digest header must include start and end dates 6 days apart."""
-        from jarvis.exports import weekly_digest
+        from jarvis.state.exports import weekly_digest
 
         end = datetime.date(2026, 4, 29)
         start = end - datetime.timedelta(days=6)
@@ -296,7 +296,7 @@ class TestWeeklyDigest:
 
     def test_date_range_filter(self, isolated_state):
         """Entries outside the 7-day window must NOT appear in the digest."""
-        from jarvis.exports import weekly_digest
+        from jarvis.state.exports import weekly_digest
 
         # Seed entries outside the window (8 days before end)
         outside_date = "2026-04-21"  # 8 days before 2026-04-29
@@ -310,7 +310,7 @@ class TestWeeklyDigest:
 
     def test_date_range_includes_boundary(self, isolated_state):
         """Entries ON the end_date are included."""
-        from jarvis.exports import weekly_digest
+        from jarvis.state.exports import weekly_digest
 
         end = datetime.date(2026, 4, 29)
         _seed_agent_log(isolated_state, "2026-04-29", count=2)
@@ -322,7 +322,7 @@ class TestWeeklyDigest:
         """Weekly digest must start with # and have at least one ## section."""
         import re
 
-        from jarvis.exports import weekly_digest
+        from jarvis.state.exports import weekly_digest
 
         result = weekly_digest(datetime.date(2026, 4, 29))
 
@@ -331,7 +331,7 @@ class TestWeeklyDigest:
 
     def test_default_end_date_is_today(self, isolated_state):
         """weekly_digest() with no args ends today."""
-        from jarvis.exports import weekly_digest
+        from jarvis.state.exports import weekly_digest
 
         today = datetime.date.today()
         result = weekly_digest()

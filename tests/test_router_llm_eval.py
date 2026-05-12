@@ -6,7 +6,7 @@ acceptance gate for routing accuracy.
 """
 from __future__ import annotations
 
-from jarvis.router import classify
+from jarvis.core.router import classify
 
 EVAL_SAMPLES: list[tuple[str, str]] = [
     # tempo — mail

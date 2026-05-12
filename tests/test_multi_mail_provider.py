@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.subsystems.multi_mail_provider import MailAccount, MultiMailProvider
+from jarvis.agents.tempo.providers.multi_mail import MailAccount, MultiMailProvider
 
 
 class _FakeBackend:

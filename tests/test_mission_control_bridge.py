@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from jarvis.contract import AgentLogEntry, Confirmation, InboxEvent, Task
-from jarvis.daemon.mission_control_bridge import (
+from jarvis.apps.sentinel.mission_control_bridge import (
     _eisenhower,
     _inbox_to_message,
     _log_to_event,

@@ -98,11 +98,11 @@ def api_client(tmp_path: Path, monkeypatch):
     fake = _fake_settings(tmp_path)
     monkeypatch.setattr("jarvis.state.get_settings", lambda: fake)
     # Also patch inside api module
-    monkeypatch.setattr("jarvis.web.api.read_inbox", lambda limit=50: [])
+    monkeypatch.setattr("jarvis.apps.api.app.read_inbox", lambda limit=50: [])
 
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     return TestClient(app)
@@ -115,7 +115,7 @@ def test_api_get_watchlist_returns_defaults(tmp_path: Path, monkeypatch) -> None
 
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     client = TestClient(app)
@@ -133,7 +133,7 @@ def test_api_put_watchlist_saves_and_returns(tmp_path: Path, monkeypatch) -> Non
 
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     client = TestClient(app)
@@ -150,7 +150,7 @@ def test_api_watchlist_roundtrip(tmp_path: Path, monkeypatch) -> None:
 
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     client = TestClient(app)
@@ -166,7 +166,7 @@ def test_api_put_watchlist_rejects_non_list(tmp_path: Path, monkeypatch) -> None
 
     from fastapi.testclient import TestClient
 
-    from jarvis.web.api import make_app
+    from jarvis.apps.api.app import make_app
 
     app = make_app()
     client = TestClient(app)

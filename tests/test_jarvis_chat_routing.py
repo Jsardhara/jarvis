@@ -13,9 +13,9 @@ from typing import Any
 
 import pytest
 
-from jarvis import jarvis_agent
-from jarvis.jarvis_agent import JarvisChat, StreamEvent
-from jarvis.model_router import (
+from jarvis import agent as jarvis_agent
+from jarvis.agent import JarvisChat, StreamEvent
+from jarvis.llm.model_router import (
     DEFAULT_OPUS_ID,
     DEFAULT_SONNET_ID,
     RouteDecision,

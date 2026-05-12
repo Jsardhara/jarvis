@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.voice import proactive
+from jarvis.apps.voice import proactive
 
 
 class _StubTTS:

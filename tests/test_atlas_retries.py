@@ -4,14 +4,14 @@ from __future__ import annotations
 import httpx
 import respx
 
-from jarvis.subsystems.atlas import AtlasBridge
+from jarvis.agents.atlas.agent import AtlasBridge
 
 
 def test_get_retries_on_connect_error_then_succeeds(monkeypatch):
     """_get retries on ConnectError and succeeds on the 4th attempt."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
     # Suppress sleep delays in tests
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     call_count = 0
 
@@ -34,7 +34,7 @@ def test_get_retries_on_connect_error_then_succeeds(monkeypatch):
 def test_get_returns_none_after_exhausting_retries(monkeypatch):
     """_get returns None after 3 retries all fail with ConnectError."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     call_count = 0
 
@@ -55,7 +55,7 @@ def test_get_returns_none_after_exhausting_retries(monkeypatch):
 def test_get_retries_on_503(monkeypatch):
     """_get retries on HTTP 503 and succeeds on recovery."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     call_count = 0
 
@@ -78,7 +78,7 @@ def test_get_retries_on_503(monkeypatch):
 def test_post_retries_on_read_error_then_succeeds(monkeypatch):
     """_post retries on ReadError and returns result on recovery."""
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     call_count = 0
 
@@ -103,7 +103,7 @@ def test_get_warns_on_each_retry(monkeypatch, caplog):
     import logging
 
     monkeypatch.delenv("ATLAS_BEARER_TOKEN", raising=False)
-    monkeypatch.setattr("jarvis.subsystems.atlas.time.sleep", lambda _: None)
+    monkeypatch.setattr("jarvis.agents.atlas.agent.time.sleep", lambda _: None)
 
     def _always_fail(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")
@@ -111,7 +111,7 @@ def test_get_warns_on_each_retry(monkeypatch, caplog):
     with respx.mock(base_url="http://atlas-warn:8000", assert_all_called=False) as mock:
         mock.get("/portfolio").mock(side_effect=_always_fail)
         bridge = AtlasBridge(base_url="http://atlas-warn:8000")
-        with caplog.at_level(logging.WARNING, logger="jarvis.subsystems.atlas"):
+        with caplog.at_level(logging.WARNING, logger="jarvis.agents.atlas.agent"):
             bridge._get("/portfolio")
 
     # 3 retries = 3 warnings (+ 1 final exhausted warning)

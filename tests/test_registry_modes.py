@@ -11,8 +11,8 @@ import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis.subsystems.registry import AgentDescriptor, build_default_registry
-from jarvis.web.api import make_app
+from jarvis.agents.registry import AgentDescriptor, build_default_registry
+from jarvis.apps.api.app import make_app
 
 # ---------------------------------------------------------------------------
 # test_tempo_mode_live_when_env_set
@@ -94,7 +94,7 @@ def test_forge_mode_live_when_claude_present(monkeypatch, tmp_path):
 
     monkeypatch.setattr(shutil, "which", lambda _: "/usr/bin/claude")
     # Point repo_root at tmp_path so WorktreeRunner doesn't touch the real repo
-    import jarvis.subsystems.forge_runner as fr
+    import jarvis.agents.forge.runner as fr
 
     monkeypatch.setattr(fr, "_DEFAULT_TIMEOUT", 1)
     # Patch WorktreeRunner.__init__ to avoid real filesystem side effects

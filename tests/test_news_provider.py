@@ -1,4 +1,4 @@
-"""Tests for jarvis.subsystems.news_provider."""
+"""Tests for jarvis.agents.lens.news_provider."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from jarvis.subsystems.news_provider import (
+from jarvis.agents.lens.news_provider import (
     NewsItem,
     dedup_items,
     parse_feed,
@@ -118,7 +118,7 @@ def test_dedup_keeps_distinct_stories():
 @pytest.mark.asyncio
 async def test_fetch_world_brief_async_uses_window(monkeypatch):
     """Items older than window_hours are filtered out."""
-    from jarvis.subsystems import news_provider as np
+    from jarvis.agents.lens import news_provider as np
 
     fresh = _item("Fresh story", offset_min=10)
     stale = NewsItem(

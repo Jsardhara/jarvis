@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from jarvis.classify import TierClassification, classify_tier
+from jarvis.core.classify import TierClassification, classify_tier
 
 
 # Tier 1: safety/risk

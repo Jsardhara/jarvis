@@ -5,7 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from jarvis.memory import (
+from jarvis.state.memory import (
     append_daily,
     append_longterm,
     read_daily,

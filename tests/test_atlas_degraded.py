@@ -10,7 +10,7 @@ import time
 import httpx
 import respx
 
-from jarvis.subsystems.atlas import AtlasBridge, AtlasOrchestrator
+from jarvis.agents.atlas.agent import AtlasBridge, AtlasOrchestrator
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, UTC
 
-from jarvis.daemon.atlas_decision import (
+from jarvis.apps.sentinel.atlas_decision import (
     AtlasSnapshot,
     Policy,
     decide,

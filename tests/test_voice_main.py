@@ -1,4 +1,4 @@
-"""Smoke test for ``python -m jarvis.voice``.
+"""Smoke test for ``python -m jarvis.apps.voice``.
 
 End-to-end mocks: wake fires once, STT returns a canned utterance,
 orchestrator stub echoes, TTS captures bytes. Asserts the full pipeline
@@ -41,8 +41,8 @@ class _CapturingTTS:
 @pytest.mark.asyncio
 async def test_one_cycle_full_pipeline(monkeypatch):
     """One cycle: wake → collect → STT → handle → summary → TTS → play."""
-    from jarvis.voice import __main__ as voice_main
-    from jarvis.voice import audio_io
+    from jarvis.apps.voice import __main__ as voice_main
+    from jarvis.apps.voice import audio_io
 
     # Stub mic_chunks to yield finite frames so collect_until_silence terminates.
     def _mic():
@@ -97,7 +97,7 @@ async def test_one_cycle_full_pipeline(monkeypatch):
 @pytest.mark.asyncio
 async def test_one_cycle_skips_when_no_wake(monkeypatch):
     """When wake.listen() returns False, the cycle is a no-op."""
-    from jarvis.voice import __main__ as voice_main
+    from jarvis.apps.voice import __main__ as voice_main
 
     monkeypatch.setattr(voice_main, "mic_chunks", lambda: iter(()))
 
@@ -117,7 +117,7 @@ async def test_one_cycle_skips_when_no_wake(monkeypatch):
 @pytest.mark.asyncio
 async def test_one_cycle_skips_empty_transcription(monkeypatch):
     """Empty STT result must not invoke the orchestrator."""
-    from jarvis.voice import __main__ as voice_main
+    from jarvis.apps.voice import __main__ as voice_main
 
     def _mic():
         for _ in range(5):
@@ -144,7 +144,7 @@ async def test_one_cycle_skips_empty_transcription(monkeypatch):
 
 def test_build_tts_falls_back_to_edge_when_elevenlabs_missing_creds(monkeypatch):
     """ElevenLabs requested but no creds → fall back to edge-tts cleanly."""
-    from jarvis.voice import __main__ as voice_main
+    from jarvis.apps.voice import __main__ as voice_main
 
     class _Settings:
         voice_engine_tts = "elevenlabs"
@@ -174,7 +174,7 @@ def test_build_tts_falls_back_to_edge_when_elevenlabs_missing_creds(monkeypatch)
 
 
 def test_build_stt_falls_back_to_mock_when_deepgram_key_missing():
-    from jarvis.voice import __main__ as voice_main
+    from jarvis.apps.voice import __main__ as voice_main
 
     class _Settings:
         voice_engine_stt = "deepgram"

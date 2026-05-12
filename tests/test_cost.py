@@ -1,4 +1,4 @@
-"""Tests for jarvis.cost — log_cost + daily_rollup."""
+"""Tests for jarvis.llm.cost — log_cost + daily_rollup."""
 from __future__ import annotations
 
 import json
@@ -19,9 +19,9 @@ def _fake_settings(tmp_path: Path) -> Settings:
 def test_log_cost_appends_entry(tmp_path: Path, monkeypatch) -> None:
     """log_cost writes one JSON line to state/cost_log.jsonl."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import log_cost
+    from jarvis.llm.cost import log_cost
 
     log_cost("tempo", "claude-sonnet-4-6", in_tokens=1000, out_tokens=500)
 
@@ -41,9 +41,9 @@ def test_log_cost_appends_entry(tmp_path: Path, monkeypatch) -> None:
 def test_log_cost_appends_multiple(tmp_path: Path, monkeypatch) -> None:
     """Successive calls append lines, not overwrite."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import log_cost
+    from jarvis.llm.cost import log_cost
 
     log_cost("tempo", "claude-sonnet-4-6", 100, 50)
     log_cost("atlas", "claude-opus-4-7", 200, 100)
@@ -58,9 +58,9 @@ def test_log_cost_appends_multiple(tmp_path: Path, monkeypatch) -> None:
 def test_log_cost_sonnet_rate(tmp_path: Path, monkeypatch) -> None:
     """Sonnet cost: $3/Mtok in, $15/Mtok out."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import log_cost
+    from jarvis.llm.cost import log_cost
 
     # 1M in + 1M out at $3/$15 = $18
     log_cost("tempo", "claude-sonnet-4-6", in_tokens=1_000_000, out_tokens=1_000_000)
@@ -73,9 +73,9 @@ def test_log_cost_sonnet_rate(tmp_path: Path, monkeypatch) -> None:
 def test_log_cost_opus_rate(tmp_path: Path, monkeypatch) -> None:
     """Opus cost: $15/Mtok in, $75/Mtok out."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import log_cost
+    from jarvis.llm.cost import log_cost
 
     # 1M in + 1M out at $15/$75 = $90
     log_cost("atlas", "claude-opus-4-7", in_tokens=1_000_000, out_tokens=1_000_000)
@@ -88,9 +88,9 @@ def test_log_cost_opus_rate(tmp_path: Path, monkeypatch) -> None:
 def test_log_cost_haiku_rate(tmp_path: Path, monkeypatch) -> None:
     """Haiku cost: $1/Mtok in, $5/Mtok out."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import log_cost
+    from jarvis.llm.cost import log_cost
 
     # 1M in + 1M out at $1/$5 = $6
     log_cost("sentinel", "claude-haiku-4-5", in_tokens=1_000_000, out_tokens=1_000_000)
@@ -103,9 +103,9 @@ def test_log_cost_haiku_rate(tmp_path: Path, monkeypatch) -> None:
 def test_daily_rollup_empty(tmp_path: Path, monkeypatch) -> None:
     """daily_rollup returns zeroed dict when no entries exist."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import daily_rollup
+    from jarvis.llm.cost import daily_rollup
 
     result = daily_rollup(date(2026, 4, 28))
     assert result["date"] == "2026-04-28"
@@ -118,9 +118,9 @@ def test_daily_rollup_empty(tmp_path: Path, monkeypatch) -> None:
 def test_daily_rollup_sums_by_agent_and_model(tmp_path: Path, monkeypatch) -> None:
     """daily_rollup aggregates costs correctly."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import daily_rollup
+    from jarvis.llm.cost import daily_rollup
 
     today = date(2026, 4, 28)
     ts_today = datetime(2026, 4, 28, 10, 0, 0, tzinfo=UTC).isoformat()
@@ -128,7 +128,7 @@ def test_daily_rollup_sums_by_agent_and_model(tmp_path: Path, monkeypatch) -> No
 
     # Two today, one yesterday
     log_path = tmp_path / "cost_log.jsonl"
-    from jarvis.cost import MODEL_RATES
+    from jarvis.llm.cost import MODEL_RATES
     sonnet_in, sonnet_out = MODEL_RATES.get("claude-sonnet-4-6", (3.0, 15.0))
     opus_in, opus_out = MODEL_RATES.get("claude-opus-4-7", (15.0, 75.0))
 
@@ -167,9 +167,9 @@ def test_daily_rollup_sums_by_agent_and_model(tmp_path: Path, monkeypatch) -> No
 def test_daily_rollup_defaults_to_today(tmp_path: Path, monkeypatch) -> None:
     """daily_rollup(None) uses today's date."""
     fake = _fake_settings(tmp_path)
-    monkeypatch.setattr("jarvis.cost.get_settings", lambda: fake)
+    monkeypatch.setattr("jarvis.llm.cost.get_settings", lambda: fake)
 
-    from jarvis.cost import daily_rollup
+    from jarvis.llm.cost import daily_rollup
 
     result = daily_rollup()
     today_str = date.today().isoformat()

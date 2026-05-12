@@ -16,11 +16,11 @@ import pytest
 def study_svc(tmp_path):
     """Return a StudyService backed by a temp SQLite DB."""
     os.environ["JARVIS_STATE_DIR"] = str(tmp_path)
-    from jarvis.subsystems.study_db import _reset_engine, init_db
+    from jarvis.agents.scholar.db import _reset_engine, init_db
 
     _reset_engine()
     init_db()
-    from jarvis.subsystems.scholar_study import StudyService
+    from jarvis.agents.scholar.study import StudyService
 
     yield StudyService()
     # cleanup
@@ -93,7 +93,7 @@ def test_get_summary_calls_claude_and_caches(study_svc):
         )
     ]
 
-    with patch("jarvis.subsystems.scholar_study._call_claude_summary") as mock_call:
+    with patch("jarvis.agents.scholar.study._call_claude_summary") as mock_call:
         mock_call.return_value = {
             "tldr": "Vectors matter.",
             "key_concepts": ["vector space"],
@@ -118,7 +118,7 @@ def test_get_summary_missing_doc_raises(study_svc):
 def test_generate_flashcards(study_svc):
     doc = study_svc.upload_document("cards.txt", b"Matrices encode linear maps.")
 
-    with patch("jarvis.subsystems.scholar_study._call_claude_flashcards") as mock_call:
+    with patch("jarvis.agents.scholar.study._call_claude_flashcards") as mock_call:
         mock_call.return_value = [
             {"front": "What is a matrix?", "back": "A rectangular array.", "source_page": 1, "tags": ["linear-algebra"]},
             {"front": "What is a vector?", "back": "An element of a vector space.", "source_page": None, "tags": []},
@@ -141,7 +141,7 @@ def test_generate_flashcards_missing_doc_raises(study_svc):
 
 
 def _make_card(study_svc, doc_id: str) -> dict:
-    with patch("jarvis.subsystems.scholar_study._call_claude_flashcards") as mock_call:
+    with patch("jarvis.agents.scholar.study._call_claude_flashcards") as mock_call:
         mock_call.return_value = [
             {"front": "Q", "back": "A", "source_page": None, "tags": []}
         ]
@@ -200,7 +200,7 @@ def test_rate_card_invalid_rating_raises(study_svc):
 
 def test_due_cards_returns_new_cards(study_svc):
     doc = study_svc.upload_document("due.txt", b"Due cards test content.")
-    with patch("jarvis.subsystems.scholar_study._call_claude_flashcards") as mock_call:
+    with patch("jarvis.agents.scholar.study._call_claude_flashcards") as mock_call:
         mock_call.return_value = [
             {"front": "Due Q", "back": "Due A", "source_page": None, "tags": []}
         ]
@@ -212,7 +212,7 @@ def test_due_cards_returns_new_cards(study_svc):
 
 def test_due_cards_empty_after_good_rating(study_svc):
     doc = study_svc.upload_document("due2.txt", b"Due after rating test.")
-    with patch("jarvis.subsystems.scholar_study._call_claude_flashcards") as mock_call:
+    with patch("jarvis.agents.scholar.study._call_claude_flashcards") as mock_call:
         mock_call.return_value = [
             {"front": "Q2", "back": "A2", "source_page": None, "tags": []}
         ]
@@ -229,14 +229,14 @@ def test_due_cards_empty_after_good_rating(study_svc):
 fastapi_mod = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
 
-from jarvis.web.api import make_app  # noqa: E402
+from jarvis.apps.api.app import make_app  # noqa: E402
 
 
 @pytest.fixture()
 def client(tmp_path):
     os.environ["JARVIS_STATE_DIR"] = str(tmp_path)
     os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-placeholder")
-    from jarvis.subsystems.study_db import _reset_engine
+    from jarvis.agents.scholar.db import _reset_engine
 
     _reset_engine()
     app = make_app()
@@ -289,7 +289,7 @@ def test_api_rate_card(client):
     )
     doc_id = resp.json()["data"]["id"]
 
-    with patch("jarvis.subsystems.scholar_study._call_claude_flashcards") as mock_call:
+    with patch("jarvis.agents.scholar.study._call_claude_flashcards") as mock_call:
         mock_call.return_value = [
             {"front": "Rate Q", "back": "Rate A", "source_page": None, "tags": []}
         ]
