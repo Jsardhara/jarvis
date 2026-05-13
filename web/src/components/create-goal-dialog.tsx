@@ -11,6 +11,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { goalCreateSchema } from "@/lib/validations";
+import { showError } from "@/lib/toast";
 import {
   Select,
   SelectContent,
@@ -45,13 +47,24 @@ export function CreateGoalDialog({ open, onOpenChange, projects, goals, onSubmit
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim()) return;
-    onSubmit({
+    const candidate = {
       title: title.trim(),
       type,
       timeframe,
       projectId,
       parentGoalId: type === "medium-term" ? parentGoalId : null,
+    };
+    const parsed = goalCreateSchema.safeParse(candidate);
+    if (!parsed.success) {
+      showError(parsed.error.issues[0]?.message ?? "Invalid objective");
+      return;
+    }
+    onSubmit({
+      title: parsed.data.title,
+      type: parsed.data.type,
+      timeframe: parsed.data.timeframe,
+      projectId: parsed.data.projectId,
+      parentGoalId: parsed.data.parentGoalId,
     });
     setTitle("");
     setType("long-term");

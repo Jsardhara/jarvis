@@ -22,7 +22,10 @@ agent artifacts for ``_spoken_text`` to humanize.
 from __future__ import annotations
 
 import logging
+import os
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 from . import conversation_memory
 from .cheap_patterns import (
@@ -37,6 +40,10 @@ from .voice_state import set_state as _set_voice_state
 
 logger = logging.getLogger(__name__)
 
+# Stable per-process session_id so turns from one voice run can be grouped
+# in the dashboard. Falls back to a fresh UUID per process start.
+_VOICE_SESSION_ID = os.environ.get("JARVIS_VOICE_SESSION_ID") or uuid4().hex
+
 VOICE_SYSTEM_PROMPT = (
     PERSONA
     + "\n\nCONTEXT\n{context_block}\n\nRECENT EXCHANGES\n{memory_block}\n"
@@ -48,6 +55,35 @@ DEFAULT_MAX_TOKENS = 120
 
 # Module-level cache so "repeat" can replay the last reply.
 _LAST_REPLY: dict[str, str] = {"text": ""}
+
+
+def _persist_voice_turn(user_text: str, assistant_text: str, *, source: str) -> None:
+    """Append a voice turn to the unified ``chat_turns.jsonl`` store.
+
+    Called once per voice utterance regardless of tier (local / haiku /
+    sonnet / link). Tier 3 (agent-brain) writes its own unified record
+    through ``JarvisChat`` so we skip it here to avoid double-writing.
+    Best-effort: any failure is logged and swallowed — voice must never
+    crash on persistence.
+    """
+    if not user_text or not assistant_text:
+        return
+    try:
+        from jarvis.state.chat_turns import ChatTurnRecord, append_turn
+
+        rec = ChatTurnRecord(
+            user_id="default",
+            turn_id=uuid4().hex,
+            user_text=user_text,
+            assistant_text=assistant_text,
+            model=source,
+            ts=datetime.now(UTC).isoformat(),
+            session_id=_VOICE_SESSION_ID,
+            surface="voice",
+        )
+        append_turn(rec)
+    except Exception as exc:  # noqa: BLE001 — voice never crashes on persistence
+        logger.warning("[voice] chat_turns append failed: %s", exc)
 
 
 def _wrap(reply: str, *, source: str) -> dict[str, Any]:
@@ -70,8 +106,11 @@ def _local_response(text: str) -> dict[str, Any] | None:
     if local is None:
         return None
     if local == "__REPEAT_LAST__":
-        return _wrap(_LAST_REPLY["text"] or "Nothing to repeat.", source="local")
+        reply = _LAST_REPLY["text"] or "Nothing to repeat."
+        _persist_voice_turn(text, reply, source="local-repeat")
+        return _wrap(reply, source="local")
     _LAST_REPLY["text"] = local
+    _persist_voice_turn(text, local, source="local")
     return _wrap(local, source="local")
 
 
@@ -96,23 +135,28 @@ async def _ask_claude(text: str, model: str) -> dict[str, Any]:
     if reply:
         _LAST_REPLY["text"] = reply
         conversation_memory.remember(text, reply)
+        _persist_voice_turn(text, reply, source=model)
     return _wrap(reply, source=model)
 
 
 async def _orchestrator_fallback(text: str) -> dict[str, Any]:
     """Legacy orchestrator-only path. Used if the Agent SDK brain fails."""
     try:
-        from jarvis.core.orchestrator import Orchestrator  # type: ignore[import-not-found]
         from jarvis.agents.registry import build_default_registry  # type: ignore[import-not-found]
+        from jarvis.core.orchestrator import Orchestrator  # type: ignore[import-not-found]
 
         reg = build_default_registry()
         orch = Orchestrator(reg)
         result = await orch.dispatch(text)
         responses = result.get("responses", {})
+        spoken_for_persist = ""
         if responses:
             first = next(iter(responses.values()), {})
-            _LAST_REPLY["text"] = first.get("action") or _LAST_REPLY["text"]
+            spoken_for_persist = first.get("action") or ""
+            _LAST_REPLY["text"] = spoken_for_persist or _LAST_REPLY["text"]
         result.setdefault("source", "orchestrator")
+        if spoken_for_persist:
+            _persist_voice_turn(text, spoken_for_persist, source="orchestrator")
         return result
     except Exception as exc:  # noqa: BLE001
         logger.warning("[voice] orchestrator dispatch failed: %s", exc)
@@ -150,7 +194,13 @@ async def _full_dispatch(text: str) -> dict[str, Any]:
     """
     try:
         chat = _shared_jarvis_chat()
-        result = await chat.respond_single(text)
+        # surface="voice" + session_id flow into JarvisChat.stream and on to
+        # the unified chat_turns.jsonl writer so the dashboard sees this
+        # voice utterance. JarvisChat does the write itself — do NOT call
+        # _persist_voice_turn here (would double-write).
+        result = await chat.respond_single(
+            text, surface="voice", session_id=_VOICE_SESSION_ID
+        )
         responses = result.get("responses", {})
         block = responses.get("agent_brain") or responses.get("voice") or {}
         spoken = (block.get("result") or {}).get("text") or block.get("action")
@@ -181,6 +231,7 @@ async def _link_response(text: str) -> dict[str, Any]:
     if summary:
         _LAST_REPLY["text"] = summary
         conversation_memory.remember(text, summary)
+        _persist_voice_turn(text, summary, source="link_handler")
     return _wrap(summary or "Nothing useful.", source="link_handler")
 
 

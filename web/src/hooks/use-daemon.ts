@@ -80,7 +80,7 @@ interface DaemonData {
   refetch: () => Promise<void>;
 }
 
-const POLL_INTERVAL = 5000; // 5 seconds
+const POLL_INTERVAL = 15000; // 15 seconds
 
 export function useDaemon(): DaemonData {
   const [status, setStatus] = useState<DaemonStatus>({
@@ -120,7 +120,7 @@ export function useDaemon(): DaemonData {
     }
   }, []);
 
-  // Poll every 5 seconds
+  // Poll every 15 seconds
   useEffect(() => {
     refetch();
     const interval = setInterval(refetch, POLL_INTERVAL);

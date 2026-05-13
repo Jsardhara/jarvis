@@ -18,14 +18,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from jarvis.config import get_settings
-from jarvis.contract import InboxEvent, SentinelHealthEvent
-from jarvis.state.memory import append_daily, remember_session
-from jarvis.state import append_inbox, append_sentinel_health, read_agent_log, read_inbox
 from jarvis.agents.atlas.agent import AtlasOrchestrator, AtlasUnavailableError
 from jarvis.agents.lens.agent import Lens
 from jarvis.agents.scholar.agent import Scholar
 from jarvis.agents.tempo.agent import TIER_ACTION, Tempo
+from jarvis.config import get_settings
+from jarvis.contract import InboxEvent, SentinelHealthEvent
+from jarvis.state import append_inbox, append_sentinel_health, read_agent_log, read_inbox
+from jarvis.state.memory import append_daily, remember_session
+
 from .atlas_decision import AtlasSnapshot, DecisionAction, Policy, decide
 from .notifier import Notifier
 
@@ -166,7 +167,9 @@ def atlas_tick(
     statuses = [_execute_atlas_action(atlas, notifier, a) for a in actions]
 
     severity = "info"
-    if any(a.severity == "alert" for a in actions):
+    if any(a.severity == "crit" for a in actions):
+        severity = "crit"
+    elif any(a.severity == "alert" for a in actions):
         severity = "alert"
     elif any(a.severity == "warn" for a in actions):
         severity = "warn"
@@ -442,7 +445,7 @@ def daily_forge_tick(reg: dict[str, Any], notifier: Notifier) -> dict[str, Any]:
         if pick_resp.action != "picked":
             err = pick_resp.result.get("error", "pick failed")
             append_inbox(InboxEvent(
-                agent="forge", severity="alert", summary=f"daily forge pick failed: {err}",
+                agent="forge", severity="crit", summary=f"daily forge pick failed: {err}",
                 ref=rec_base,
             ))
             notifier.push("Daily Forge failed", err[:200], priority=1)
@@ -487,7 +490,7 @@ def daily_forge_tick(reg: dict[str, Any], notifier: Notifier) -> dict[str, Any]:
             err = run.get("error") or "scaffold failed"
             summary = f"daily forge failed: {err}"
             append_inbox(InboxEvent(
-                agent="forge", severity="alert", summary=summary, ref=full_rec
+                agent="forge", severity="crit", summary=summary, ref=full_rec
             ))
             notifier.push("Daily Forge failed", err[:200], priority=1)
         return {"status": run.get("status"), "rec": full_rec}
@@ -496,7 +499,7 @@ def daily_forge_tick(reg: dict[str, Any], notifier: Notifier) -> dict[str, Any]:
         log.exception("daily_forge_tick crashed")
         err = f"{type(exc).__name__}: {exc}"
         append_inbox(InboxEvent(
-            agent="forge", severity="alert",
+            agent="forge", severity="crit",
             summary=f"daily forge crashed: {err}", ref=rec_base,
         ))
         notifier.push("Daily Forge crashed", err[:200], priority=1)

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { readFileSync, writeFileSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from "fs";
 import { spawn } from "child_process";
 import path from "path";
 
 export const dynamic = "force-dynamic";
+
+const MAX_INBOX_LINES = 500;
 
 const DATA_DIR = path.resolve(process.cwd(), "data");
 
@@ -250,13 +252,42 @@ function spawnMissionTasks(
 /**
  * Post a mission report to inbox during reconciliation.
  */
+interface InboxMessage {
+  id: string;
+  from: string;
+  to: string;
+  type: string;
+  taskId: string | null;
+  subject: string;
+  body: string;
+  status: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+/**
+ * Parse an inbox.jsonl file line-by-line, tolerating malformed lines.
+ * Limits the returned array to the most recent `limit` entries.
+ */
+function readInboxJsonl(filePath: string, limit: number): InboxMessage[] {
+  if (!existsSync(filePath)) return [];
+  const raw = readFileSync(filePath, "utf-8");
+  const lines = raw.split("\n").filter((l) => l.trim().length > 0);
+  const recent = lines.slice(-limit);
+  const out: InboxMessage[] = [];
+  for (const line of recent) {
+    try {
+      out.push(JSON.parse(line) as InboxMessage);
+    } catch {
+      // Skip malformed line
+    }
+  }
+  return out;
+}
+
 function postMissionInboxReport(mission: MissionEntry): void {
   try {
-    const inboxPath = path.join(DATA_DIR, "inbox.json");
-    const inboxRaw = existsSync(inboxPath)
-      ? readFileSync(inboxPath, "utf-8")
-      : '{"messages":[]}';
-    const inboxData = JSON.parse(inboxRaw) as { messages: Array<Record<string, unknown>> };
+    const inboxPath = path.join(DATA_DIR, "inbox.jsonl");
 
     const isComplete = mission.status === "completed";
     const remaining = mission.totalTasks - mission.completedTasks - mission.failedTasks;
@@ -294,7 +325,7 @@ function postMissionInboxReport(mission: MissionEntry): void {
       lines.push("\nPlease check the Status Board for any remaining tasks. Some may need your input on the Decisions page.");
     }
 
-    inboxData.messages.push({
+    const newMessage: InboxMessage = {
       id: `msg_${Date.now()}`,
       from: "system",
       to: "me",
@@ -305,13 +336,19 @@ function postMissionInboxReport(mission: MissionEntry): void {
       status: "unread",
       createdAt: new Date().toISOString(),
       readAt: null,
-    });
+    };
 
-    writeFileSync(inboxPath, JSON.stringify(inboxData, null, 2), "utf-8");
+    // Append one JSON line — JSONL append-only format.
+    appendFileSync(inboxPath, JSON.stringify(newMessage) + "\n", "utf-8");
   } catch {
     // Best-effort — don't fail the API call
   }
 }
+
+// Touch the helper so it isn't flagged unused; consumers can call it
+// directly in this module if/when a JSONL-backed GET handler is added.
+void readInboxJsonl;
+void MAX_INBOX_LINES;
 
 // ─── GET: Return missions data (with reconciliation) ─────────────────────────
 

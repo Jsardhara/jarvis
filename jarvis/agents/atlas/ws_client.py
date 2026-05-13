@@ -45,6 +45,23 @@ _BACKOFF_BASE = 1.0
 _BACKOFF_MAX = 30.0
 
 
+class AtlasWebsocketUnavailableError(RuntimeError):
+    """Raised when the ``websockets`` runtime dependency is not installed.
+
+    Callers (apps/sentinel, apps/api) should catch this at start time and
+    render a "live Atlas events offline" banner instead of silently giving
+    up. Without the package there is no way to consume Atlas events; falling
+    back to polling is the caller's choice.
+
+    TODO: ``jarvis/apps/api/app.py:1541`` currently awaits ``start_ws()``
+    without a try/except, so once this exception is raised on a host
+    without ``websockets`` the FastAPI startup hook will crash. That caller
+    is out of this fix's scope; needs a sibling fix that catches
+    ``AtlasWebsocketUnavailableError``, sets a degraded-flag in app state, and
+    emits a banner event on the bus.
+    """
+
+
 def _atlas_ws_url() -> str:
     base = os.environ.get("JARVIS_ATLAS_API", "http://localhost:8000")
     ws_base = base.replace("http://", "ws://").replace("https://", "wss://")
@@ -93,7 +110,12 @@ class AtlasWsClient:
         Safe to call when a loop is running. If no loop is running (sync
         context), defers until the first event-loop tick that receives
         a running loop.
+
+        Raises:
+            AtlasWebsocketUnavailableError: if the ``websockets`` package is not
+                importable. Callers should catch this and surface a banner.
         """
+        self._require_websockets()
         try:
             loop = asyncio.get_running_loop()
             self._task = loop.create_task(self._run_loop(), name="atlas-ws-client")
@@ -103,10 +125,27 @@ class AtlasWsClient:
             log.debug("AtlasWsClient.start() called outside running loop; deferred")
 
     async def start_ws(self) -> None:
-        """Async entry point — schedules background task from async context."""
+        """Async entry point — schedules background task from async context.
+
+        Raises:
+            AtlasWebsocketUnavailableError: see :meth:`start`.
+        """
+        self._require_websockets()
         if self._task is None or self._task.done():
             self._stopped = False
             self._task = asyncio.create_task(self._run_loop(), name="atlas-ws-client")
+
+    @staticmethod
+    def _require_websockets() -> None:
+        try:
+            import websockets  # noqa: F401  — probe import only
+        except ImportError as exc:
+            log.warning(
+                "AtlasWsClient: websockets package not installed; live Atlas event stream unavailable"
+            )
+            raise AtlasWebsocketUnavailableError(
+                "websockets package not installed — `pip install websockets` to enable Atlas live events"
+            ) from exc
 
     async def stop(self) -> None:
         """Signal the loop to stop and await task completion."""
@@ -135,13 +174,14 @@ class AtlasWsClient:
                 backoff = min(backoff * 2, _BACKOFF_MAX)
 
     async def _connect_and_consume(self) -> None:
-        """Open the WebSocket, consume messages until disconnect."""
-        try:
-            import websockets  # type: ignore[import]
-        except ImportError:
-            log.warning("websockets package not installed; AtlasWsClient inactive")
-            self._stopped = True
-            return
+        """Open the WebSocket, consume messages until disconnect.
+
+        Assumes ``websockets`` is importable — :meth:`start` / :meth:`start_ws`
+        guard that precondition via :meth:`_require_websockets`. If the task
+        is somehow scheduled without that guard, the ImportError will surface
+        through ``_run_loop``'s warning-and-reconnect path.
+        """
+        import websockets  # type: ignore[import]
 
         log.info("AtlasWsClient connecting to %s", self._ws_url)
         async with websockets.connect(self._ws_url) as ws:

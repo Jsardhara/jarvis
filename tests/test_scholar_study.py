@@ -186,6 +186,18 @@ def test_rate_card_hard_decreases_ease(study_svc):
     card = _make_card(study_svc, doc["id"])
     updated = study_svc.rate_card(card["id"], 1)  # Hard
     assert updated["ease_factor"] == pytest.approx(2.35)
+    # Canonical SM-2: Hard does NOT advance repetitions.
+    assert updated["repetitions"] == 0
+
+
+def test_rate_card_good_keeps_ease(study_svc):
+    """SM-2: Good explicitly leaves ease_factor unchanged."""
+    doc = study_svc.upload_document("sm2g.txt", b"Good keeps ease.")
+    card = _make_card(study_svc, doc["id"])
+    starting_ease = card["ease_factor"]
+    updated = study_svc.rate_card(card["id"], 2)  # Good
+    assert updated["ease_factor"] == pytest.approx(starting_ease)
+    assert updated["repetitions"] == 1
 
 
 def test_rate_card_invalid_rating_raises(study_svc):

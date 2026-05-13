@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const FAST_POLL_INTERVAL = 5_000; // 5 seconds when tasks are running
+const FAST_POLL_INTERVAL = 15_000; // 15 seconds when tasks are running
 
 /**
  * Polls task data more frequently while any tasks are actively running.

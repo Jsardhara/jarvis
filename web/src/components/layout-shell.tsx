@@ -120,7 +120,14 @@ export function LayoutShell({ children }: LayoutShellProps) {
 
       {/* Overlays — rendered outside the grid so they sit above everything */}
       <a href="#main-content" className="skip-to-content">Skip to content</a>
-      <KeyboardShortcuts />
+      <KeyboardShortcuts
+        onCreateTask={() => {
+          // Dispatch a window event the CommandBar / forms can listen for.
+          // Also navigate to status-board where the new-task form lives.
+          window.dispatchEvent(new CustomEvent("jarvis:new-task"));
+          router.push("/status-board?new=task");
+        }}
+      />
       <OnboardingDialog />
       <SearchDialog />
       <CommandBar

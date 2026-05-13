@@ -71,7 +71,7 @@ export function AtlasDegradedBanner() {
             borderRadius: "2px",
           }}
         >
-          C:\Users\jyot2\atlas\
+          {process.env.NEXT_PUBLIC_ATLAS_PATH ?? "the atlas project"}
         </code>
       </span>
     </div>

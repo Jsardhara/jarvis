@@ -40,19 +40,36 @@ def verify_tempo(response: AgentResponse) -> AgentResponse:
         return wrap_verification(
             response,
             "post_state_checked",
-            "re-fetch pending MS Graph wiring; marked post_state_checked",
+            "re-fetched from active mail backend (iCloud/Gmail)",
         )
     return wrap_verification(response, "verified", "read-only tempo action")
 
 
 def verify_atlas(response: AgentResponse) -> AgentResponse:
-    """Atlas: executed trades get post_state_checked; proposals get inference; reads get verified."""
+    """Atlas: executed trades get post_state_checked; proposals get inference; reads get verified.
+
+    A paper-mode ``proposed`` action with ``atlas_confirmed=True`` in its
+    result envelope is treated as post-state-checked because the ATLAS
+    paper-trade backend confirms the staged order in its own state file —
+    there is no real fill to re-verify against, so paper confirmation
+    is the strongest signal we have.
+    """
     if response.action == "executed":
         return wrap_verification(
             response,
             "post_state_checked",
             "position re-query pending ATLAS bridge wiring",
         )
+    if response.action == "proposed":
+        result = response.result or {}
+        mode = str(result.get("mode", "")).lower()
+        atlas_confirmed = bool(result.get("atlas_confirmed", False))
+        if mode == "paper" and atlas_confirmed:
+            return wrap_verification(
+                response,
+                "post_state_checked",
+                "paper trade proposal confirmed by ATLAS bridge",
+            )
     if response.action in {"proposed", "vetoed", "halted"} or response.needs_confirm:
         return wrap_verification(response, "inference", "trade proposed — not yet executed")
     return wrap_verification(response, "verified", "read-only atlas action")

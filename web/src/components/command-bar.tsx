@@ -66,22 +66,24 @@ export function CommandBar({ onCapture, sidebarOpen, onToggleSidebar, isMobile =
     const trimmed = value.trim();
     if (!trimmed) return;
 
-    // Intercept slash commands
+    // Slash commands route through the same dispatch path as natural-language
+    // input — the orchestrator (jarvis/core/router.py) sees the slash-prefixed
+    // text and classifies/routes accordingly. We still flash a notification
+    // when the prefix matches a known skill so the user sees the action was
+    // recognised, but the dispatch is NOT swallowed any more.
     if (trimmed.startsWith("/")) {
       const matchedSkill = SKILLS.find(
         (s) => s.command === trimmed || trimmed.startsWith(s.command + " ")
       );
       if (matchedSkill) {
         setSlashNotification(matchedSkill.command);
-        setValue("");
-        setShowSuggestions(false);
         setTimeout(() => setSlashNotification(null), 5000);
-        return;
       }
     }
 
     onCapture(trimmed);
     setValue("");
+    setShowSuggestions(false);
   }, [value, onCapture]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

@@ -136,9 +136,19 @@ def _apply_sm2(
     repetitions: int,
     rating: int,
 ) -> tuple[float, int, int]:
-    """Return (new_ease_factor, new_interval, new_repetitions).
+    """Return ``(new_ease_factor, new_interval, new_repetitions)``.
 
     Rating scale: 0=Again, 1=Hard, 2=Good, 3=Easy.
+
+    Per canonical SM-2:
+
+    * Again resets the schedule (interval=1, repetitions=0).
+    * Hard nudges ease down and stretches interval modestly, but does **not**
+      advance the repetition counter — the card hasn't been "remembered".
+    * Good leaves ease unchanged and advances repetitions.
+    * Easy bumps ease up and advances repetitions.
+
+    The function is pure / deterministic, so unit tests pin all branches.
     """
     if rating == _RATING_AGAIN:
         return ease_factor, 1, 0
@@ -146,9 +156,10 @@ def _apply_sm2(
     if rating == _RATING_HARD:
         new_ease = max(1.3, ease_factor - 0.15)
         new_interval = max(1, round(interval * 1.2))
-        return new_ease, new_interval, repetitions + 1
+        # Canonical SM-2: Hard does not advance the repetition counter.
+        return new_ease, new_interval, repetitions
 
-    # Good (2) or Easy (3)
+    # Good (2) or Easy (3) — repetition successful, schedule advances.
     if repetitions == 0:
         new_interval = 1
     elif repetitions == 1:
@@ -156,7 +167,12 @@ def _apply_sm2(
     else:
         new_interval = round(interval * ease_factor)
 
-    new_ease = ease_factor + 0.15 if rating == _RATING_EASY else ease_factor
+    if rating == _RATING_EASY:
+        new_ease = ease_factor + 0.15
+    else:
+        # Good: ease unchanged. Explicit no-op makes the behaviour discoverable
+        # and matches the canonical formula's `+ 0` term.
+        new_ease = ease_factor
 
     return new_ease, new_interval, repetitions + 1
 

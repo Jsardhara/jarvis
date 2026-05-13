@@ -17,6 +17,7 @@ from jarvis.contract import (
     SentinelHealthEvent,
     Task,
 )
+from jarvis.state.rotate import rotate_if_large
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +114,7 @@ def update_task(task_id: str, **fields) -> Task | None:
 def append_inbox(event: InboxEvent) -> None:
     p = _inbox_path()
     p.parent.mkdir(parents=True, exist_ok=True)
+    rotate_if_large(p)
     with p.open("a", encoding="utf-8") as f:
         f.write(event.model_dump_json() + "\n")
     for fn in list(_inbox_listeners):
@@ -216,6 +218,7 @@ def append_sentinel_health(event: SentinelHealthEvent) -> None:
     """Write a heartbeat tick to sentinel_health.jsonl — NOT inbox.jsonl."""
     p = _sentinel_health_path()
     p.parent.mkdir(parents=True, exist_ok=True)
+    rotate_if_large(p)
     with p.open("a", encoding="utf-8") as f:
         f.write(event.model_dump_json() + "\n")
 

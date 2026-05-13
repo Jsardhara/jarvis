@@ -18,8 +18,9 @@ from typing import Any
 
 from jarvis.config import get_settings
 from jarvis.contract import AgentResponse, Task
-from jarvis.state.memory import load_preferences
 from jarvis.state import add_task, load_tasks, update_task
+from jarvis.state.memory import load_preferences
+
 from ..providers import OutlookProvider
 
 log = logging.getLogger(__name__)
@@ -132,10 +133,13 @@ def _classify_batch_with_llm(
 ) -> list[dict[str, Any]]:
     """Call Claude to classify a batch of mail items.
 
+    Routed through :func:`jarvis.llm.queue.submit` so every Jarvis LLM call
+    funnels into the global rate-limit-aware FIFO (Pro/Max shares one bucket).
+
     Returns a list of {id, bucket, reason}. Falls back to BUCKET_INFO on
     any parse failure so one bad item never breaks the whole batch.
     """
-    from jarvis.llm.client import query_claude_sync
+    from jarvis.llm.queue import submit
 
     user_payload = json.dumps(
         [
@@ -148,7 +152,7 @@ def _classify_batch_with_llm(
             for m in items
         ]
     )
-    raw = query_claude_sync(_SMART_TRIAGE_SYSTEM, user_payload)
+    raw = submit(_SMART_TRIAGE_SYSTEM, user_payload)
     try:
         results = json.loads(raw)
         if not isinstance(results, list):
@@ -405,13 +409,21 @@ class Tempo:
         )
 
     def send_mail(self, to: str, subject: str, body: str) -> AgentResponse:
-        sent = self.outlook.send(to, subject, body)
+        """Stage an outbound message; orchestrator gates the actual send.
+
+        Per the Jarvis confirmation matrix, every send_mail call must be
+        operator-confirmed. We surface the proposed message back to the
+        orchestrator with ``needs_confirm=True`` and do not touch the
+        provider here; the gated re-invocation performs the real send.
+        """
         return AgentResponse(
             agent="tempo",
             intent="send_mail",
-            action="sent",
-            result={"sent": sent},
-            confidence=1.0,
+            action="proposed",
+            result={"to": to, "subject": subject, "body": body},
+            follow_ups=["confirm to send"],
+            needs_confirm=True,
+            confidence=0.9,
         )
 
     # ---------- Calendar ----------

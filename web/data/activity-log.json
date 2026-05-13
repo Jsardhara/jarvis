@@ -764,6 +764,96 @@
       "summary": "tempo.summarised",
       "details": "",
       "timestamp": "2026-05-07T13:09:51.455732+00:00"
+    },
+    {
+      "id": "e4727da3b9b9a2eb",
+      "type": "task_failed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.search (2 ms)",
+      "details": "unknown action 'search' for agent 'lens'",
+      "timestamp": "2026-05-08T10:49:12.155595+00:00"
+    },
+    {
+      "id": "c4eafabe92608f96",
+      "type": "task_completed",
+      "actor": "forge",
+      "taskId": null,
+      "summary": "forge.listed (4 ms)",
+      "details": "",
+      "timestamp": "2026-05-08T10:49:13.392811+00:00"
+    },
+    {
+      "id": "46b2564b471c010f",
+      "type": "task_failed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.search",
+      "details": "unknown action 'search' for agent 'lens'",
+      "timestamp": "2026-05-08T10:49:48.103325+00:00"
+    },
+    {
+      "id": "c6ac1c73cdcc3336",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.scanned (2150 ms)",
+      "details": "",
+      "timestamp": "2026-05-08T10:49:50.935585+00:00"
+    },
+    {
+      "id": "fe829e0826f55a42",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.scanned (1283 ms)",
+      "details": "",
+      "timestamp": "2026-05-08T10:52:32.449820+00:00"
+    },
+    {
+      "id": "b6415b6d5a22dc67",
+      "type": "task_completed",
+      "actor": "forge",
+      "taskId": null,
+      "summary": "forge.listed",
+      "details": "",
+      "timestamp": "2026-05-08T10:52:33.108490+00:00"
+    },
+    {
+      "id": "dc631b6bd8d3da53",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.scanned (856 ms)",
+      "details": "",
+      "timestamp": "2026-05-08T10:53:50.312650+00:00"
+    },
+    {
+      "id": "420255a348dd7ccd",
+      "type": "task_completed",
+      "actor": "forge",
+      "taskId": null,
+      "summary": "forge.listed",
+      "details": "",
+      "timestamp": "2026-05-08T10:53:50.545346+00:00"
+    },
+    {
+      "id": "9228b0bd2375485e",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched (1236 ms)",
+      "details": "",
+      "timestamp": "2026-05-08T14:29:03.938272+00:00"
+    },
+    {
+      "id": "230e19e218bcf876",
+      "type": "task_completed",
+      "actor": "lens",
+      "taskId": null,
+      "summary": "lens.searched (668 ms)",
+      "details": "",
+      "timestamp": "2026-05-08T14:30:37.000964+00:00"
     }
   ]
 }

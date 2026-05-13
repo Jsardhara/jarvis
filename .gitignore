@@ -2,6 +2,11 @@
 # Anchor `state/` to the repo root so it ignores ./state/ (runtime data) but
 # does NOT match jarvis/state/ (the persistence-layer Python package).
 /state/
+# Dashboard runtime data — contains operator PII (inbox messages, decisions,
+# brain-dump entries). Must NOT be committed. The `web/data/` directory itself
+# is preserved via web/data/.gitkeep so first-boot writes succeed.
+/web/data/
+!/web/data/.gitkeep
 .env
 .env.local
 *.secret

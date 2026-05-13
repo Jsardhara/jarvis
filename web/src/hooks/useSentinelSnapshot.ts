@@ -29,7 +29,7 @@ export interface SentinelSnapshot {
   events: SentinelInboxEvent[];
 }
 
-const POLL_MS = 5000;
+const POLL_MS = 15000;
 
 const EMPTY: SentinelSnapshot = {
   last_heartbeat: null,

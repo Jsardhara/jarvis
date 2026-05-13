@@ -181,6 +181,7 @@ def fire_exam_scheduled(
 
     try:
         from jarvis.state import append_inbox
+
         from .supervisor import supervise_call
 
         supervise_call(
@@ -426,11 +427,12 @@ def _push_for_event(
     """Map InboxEvent severity → push priority and call notifier.
 
     Priority mapping:
-      crit → 2 (high — bypass quiet hours)
-      warn → 1 (normal)
-      info → no push (skip)
+      crit  → 2 (high — bypass quiet hours; dead-letters, guardian violations)
+      alert → 2 (high — bypass quiet hours; drawdowns, daily-forge failures)
+      warn  → 1 (normal)
+      info  → no push (skip)
     """
-    if event.severity == "crit":
+    if event.severity in ("crit", "alert"):
         priority = 2
     elif event.severity == "warn":
         priority = 1

@@ -69,7 +69,7 @@ export function RightSidebar() {
       }
     };
     void tick();
-    const id = setInterval(tick, 8000);
+    const id = setInterval(tick, 15000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -84,7 +84,7 @@ export function RightSidebar() {
       {/* Pending confirmations */}
       <section className="hud-panel hud-corners flex flex-col gap-1.5 px-3 py-2.5">
         <header className="hud-label flex items-center justify-between">
-          <span>// CONFIRM</span>
+          <span>{"// CONFIRM"}</span>
           <span
             className="font-mono text-[9px]"
             style={{
@@ -121,7 +121,7 @@ export function RightSidebar() {
 
       {/* Active tasks */}
       <section className="hud-panel hud-corners flex min-h-0 flex-1 flex-col gap-1.5 px-3 py-2.5">
-        <header className="hud-label">// TASKS</header>
+        <header className="hud-label">{"// TASKS"}</header>
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
           {tasks.length === 0 && (
             <div className="font-mono text-[10px] text-[var(--ops-fg-faint)]">

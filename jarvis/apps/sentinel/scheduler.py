@@ -15,16 +15,19 @@ import logging
 import os
 import signal
 import sys
+import time
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 
-from jarvis.agents.atlas.agent import AtlasBridge, AtlasOrchestrator
+from jarvis.agents.atlas.agent import AtlasOrchestrator, AtlasUnavailableError
 from jarvis.agents.lens.agent import Lens
-from jarvis.agents.providers import MockOutlook, MockSearch
-from jarvis.agents.registry import build_default_registry
+from jarvis.agents.registry import AgentDescriptor, build_default_registry
 from jarvis.agents.scholar.agent import Scholar
 from jarvis.agents.tempo.agent import Tempo
+from jarvis.contract import InboxEvent
 from jarvis.core.triggers import scan_periodic
+from jarvis.state import append_inbox
+
 from .mission_control_bridge import sync_tick as mission_control_sync_tick
 from .notifier import default_notifier
 from .routines import (
@@ -43,13 +46,52 @@ from .voice_context_tick import voice_context_tick
 log = logging.getLogger("sentinel")
 
 
-def _build_subsystems():
-    """Mocks until creds wired. Real stack composes via TempoStack (Gmail+iCloud+Drexel)."""
-    tempo = Tempo(MockOutlook())
-    atlas = AtlasOrchestrator(bridge=AtlasBridge(), allow_mock=True)
-    lens = Lens(MockSearch())
-    scholar = Scholar()
+def _build_subsystems(
+    reg: dict[str, AgentDescriptor] | None = None,
+) -> tuple[Tempo, AtlasOrchestrator, Lens, Scholar]:
+    """Return live registry-backed agents.
+
+    Sentinel ticks must hit the same agent instances the API serves so a
+    degraded-mode read here matches what the dashboard reports. Previously
+    this returned bare mocks, which made the daemon report a parallel
+    fictitious world.
+
+    If Atlas is unavailable the descriptor still wraps an ``AtlasOrchestrator``
+    in auto-mock mode — the per-tick handlers below catch
+    ``AtlasUnavailableError`` and emit a degraded-mode inbox event instead
+    of crashing the scheduler thread.
+    """
+    registry = reg or build_default_registry()
+    tempo = registry["tempo"].instance
+    atlas = registry["atlas"].instance
+    lens = registry["lens"].instance
+    scholar = registry["scholar"].instance
     return tempo, atlas, lens, scholar
+
+
+def _safe_tick(
+    fn,  # type: ignore[no-untyped-def]
+    label: str,
+    *args,  # type: ignore[no-untyped-def]
+    **kwargs,  # type: ignore[no-untyped-def]
+):
+    """Wrap a tick callable; swallow ``AtlasUnavailableError`` as a degraded event."""
+    try:
+        return fn(*args, **kwargs)
+    except AtlasUnavailableError as exc:
+        log.warning("%s: atlas unavailable — degraded inbox event (%s)", label, exc)
+        append_inbox(
+            InboxEvent(
+                agent="atlas",
+                severity="warn",
+                summary=f"{label}: atlas unavailable — running degraded",
+                ref={"error_class": type(exc).__name__, "error": str(exc)},
+            )
+        )
+        return {"degraded": True, "error": str(exc)}
+    except Exception:
+        log.warning("%s: tick failed", label, exc_info=True)
+        return {"degraded": True, "error": "tick_failed"}
 
 
 def _triggers_tick(reg: dict, notifier=None) -> None:
@@ -100,19 +142,58 @@ def atlas_health_tick(atlas_api_url: str) -> dict:
     return {"healthy": is_healthy, "transitioned": transitioned}
 
 
+# mission_control_sync_tick is scheduled every 30s but the upstream call is
+# expensive; throttle to one successful sync per ``_MC_SYNC_MIN_INTERVAL_SEC``.
+_MC_SYNC_MIN_INTERVAL_SEC = 60.0
+_mc_sync_last_ts: float = 0.0
+
+
+def _mc_sync_throttled() -> dict:
+    """Run mission_control_sync_tick at most once per 60s window."""
+    global _mc_sync_last_ts
+    now = time.monotonic()
+    if now - _mc_sync_last_ts < _MC_SYNC_MIN_INTERVAL_SEC:
+        return {"skipped": True, "reason": "cooldown"}
+    try:
+        result = mission_control_sync_tick()
+        _mc_sync_last_ts = now
+        return result if isinstance(result, dict) else {"ok": True}
+    except Exception:
+        log.warning("mc_sync_tick failed", exc_info=True)
+        return {"skipped": True, "reason": "error"}
+
+
 def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingScheduler:
-    tempo, atlas, lens, scholar = _build_subsystems()
+    reg = build_default_registry()
+    tempo, atlas, lens, scholar = _build_subsystems(reg)
     notifier = default_notifier()
     watchlist = [t.strip() for t in os.environ.get("JARVIS_WATCHLIST", "BTC,ETH").split(",") if t.strip()]
-    reg = build_default_registry()
 
     sched = scheduler or BlockingScheduler(timezone="UTC")
 
-    sched.add_job(email_tick, "interval", minutes=15, args=[tempo, notifier], id="email")
-    sched.add_job(calendar_tick, "interval", hours=1, args=[tempo, notifier], id="calendar")
-    sched.add_job(atlas_tick, "interval", minutes=5, args=[atlas, notifier], id="atlas")
-    sched.add_job(news_tick, "interval", minutes=30, args=[lens, watchlist, notifier], id="news")
-    sched.add_job(scholar_tick, "interval", hours=2, args=[scholar, notifier], id="scholar")
+    # Each tick is wrapped via _safe_tick so an offline Atlas (or any
+    # transient subsystem error) emits a degraded inbox event instead of
+    # crashing the APScheduler worker.
+    sched.add_job(
+        lambda: _safe_tick(email_tick, "email_tick", tempo, notifier),
+        "interval", minutes=15, id="email",
+    )
+    sched.add_job(
+        lambda: _safe_tick(calendar_tick, "calendar_tick", tempo, notifier),
+        "interval", hours=1, id="calendar",
+    )
+    sched.add_job(
+        lambda: _safe_tick(atlas_tick, "atlas_tick", atlas, notifier),
+        "interval", minutes=5, id="atlas",
+    )
+    sched.add_job(
+        lambda: _safe_tick(news_tick, "news_tick", lens, watchlist, notifier),
+        "interval", minutes=30, id="news",
+    )
+    sched.add_job(
+        lambda: _safe_tick(scholar_tick, "scholar_tick", scholar, notifier),
+        "interval", hours=2, id="scholar",
+    )
     sched.add_job(morning_digest, "cron", hour=8, minute=0,
                   args=[reg, notifier], id="morning")
     sched.add_job(morning_digest, "cron", hour=18, minute=0,
@@ -120,7 +201,7 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(atlas_daily_rollup, "cron", hour=22, minute=0,
                   args=[atlas, notifier], id="atlas_rollup")
     sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
-    sched.add_job(mission_control_sync_tick, "interval", seconds=30, id="mc_sync")
+    sched.add_job(_mc_sync_throttled, "interval", seconds=30, id="mc_sync")
     sched.add_job(_triggers_tick, "interval", minutes=30, args=[reg, notifier], id="triggers")
 
     # Wire fire_for_event as an in-process inbox listener so events written from
@@ -184,3 +265,4 @@ def main() -> int:  # pragma: no cover
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+# end of scheduler.py

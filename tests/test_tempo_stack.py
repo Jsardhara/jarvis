@@ -85,18 +85,44 @@ def test_stack_proxies_mail_methods():
     assert ("send", "a@b.com", "S", "B") in mail.calls
 
 
-def test_build_default_raises_when_apple_missing(monkeypatch):
+def test_build_default_succeeds_with_only_gmail(monkeypatch):
+    """build_default_tempo_stack is partial-stack tolerant — Gmail alone is enough."""
     monkeypatch.delenv("APPLE_ID", raising=False)
     monkeypatch.delenv("APPLE_APP_PASSWORD", raising=False)
-    with pytest.raises(RuntimeError):
-        build_default_tempo_stack()
+    monkeypatch.setenv("GMAIL_ADDRESS", "x@gmail.com")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "pw")
+    stack = build_default_tempo_stack()
+    assert "GMAIL" in stack.mail.labels
 
 
-def test_build_default_raises_when_gmail_missing(monkeypatch):
+def test_build_default_succeeds_with_only_apple(monkeypatch):
+    """Apple alone yields a calendar-only stack — mail attribute is absent.
+
+    iCloud serves as the calendar backend in this design (see stack.py
+    docstring: 'iCloud calendar only (mail will raise on use)'). Mail
+    operations on the resulting stack will raise at call time, not at
+    construction.
+    """
     monkeypatch.setenv("APPLE_ID", "x@icloud.com")
     monkeypatch.setenv("APPLE_APP_PASSWORD", "pw")
     monkeypatch.delenv("GMAIL_ADDRESS", raising=False)
     monkeypatch.delenv("GMAIL_APP_PASSWORD", raising=False)
+    monkeypatch.delenv("DREXEL_ADDRESS", raising=False)
+    monkeypatch.delenv("DREXEL_CLIENT_ID", raising=False)
+    stack = build_default_tempo_stack()
+    # Calendar is wired; mail is absent (None) because no mail backend env vars were set.
+    assert stack.calendar is not None
+    assert stack.mail is None
+
+
+def test_build_default_raises_when_no_providers(monkeypatch):
+    """With zero providers configured, the partial-stack builder still raises."""
+    for var in (
+        "APPLE_ID", "APPLE_APP_PASSWORD",
+        "GMAIL_ADDRESS", "GMAIL_APP_PASSWORD",
+        "DREXEL_ADDRESS", "DREXEL_CLIENT_ID",
+    ):
+        monkeypatch.delenv(var, raising=False)
     with pytest.raises(RuntimeError):
         build_default_tempo_stack()
 

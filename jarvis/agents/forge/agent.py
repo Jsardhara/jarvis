@@ -236,7 +236,7 @@ class Forge:
 
     def pick_project(self, brief: list[dict] | None = None) -> AgentResponse:
         """Daily Forge: pick one news story and design a buildable MVP spec."""
-        from . import forge_daily
+        from . import daily as forge_daily
 
         try:
             spec = forge_daily.pick_project(brief or [])
@@ -258,7 +258,7 @@ class Forge:
 
     def scaffold_daily(self, spec: dict) -> AgentResponse:
         """Daily Forge: build the picked MVP and push to the mono-repo."""
-        from . import forge_daily
+        from . import daily as forge_daily
 
         try:
             project_spec = forge_daily.ProjectSpec(

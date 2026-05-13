@@ -117,7 +117,7 @@ Atlas (the agent) is a thin HTTP client over the ATLAS project (`C:\Users\jyot2\
 
 ## Testing
 
-TDD enforced. `pytest --cov=jarvis --cov-fail-under=80` before commit. Currently 78 tests, 81% coverage.
+TDD enforced. `pytest --cov=jarvis --cov-fail-under=80` before commit. Coverage gate in CI (`.github/workflows/ci.yml`) is `--cov-fail-under=70`; raise back to 80 when stable. Current test suite: ~88 test files across `tests/`.
 
 ## Dev-side agents (parallel work on Jarvis itself)
 
@@ -127,7 +127,8 @@ TDD enforced. `pytest --cov=jarvis --cov-fail-under=80` before commit. Currently
 - `jarvis-frontend-dev` — Next.js dashboard
 - `jarvis-test-runner` — pytest + coverage + fix failures
 - `jarvis-dashboard-designer` — UI/UX redesign
-- `jarvis-outlook-integrator` — MS Graph wiring
+
+(The deprecated `jarvis-outlook-integrator` slot was removed — the Outlook/MS-Graph backend was retired in favour of the multi-mail iCloud + Gmail stack in `jarvis/agents/tempo/stack.py`.)
 
 ## Don't
 

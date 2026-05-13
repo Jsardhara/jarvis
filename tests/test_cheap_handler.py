@@ -101,7 +101,9 @@ async def test_dispatch_keyword_routes_to_jarvis_chat(monkeypatch):
     captured_text: list[str] = []
 
     class _FakeChat:
-        async def respond_single(self, text: str) -> dict:
+        async def respond_single(self, text: str, **_kwargs: object) -> dict:
+            # **_kwargs absorbs surface= / session_id= now threaded through
+            # the unified chat-brain plumbing (see jarvis/agent.py:582).
             captured_text.append(text)
             return {
                 "responses": {

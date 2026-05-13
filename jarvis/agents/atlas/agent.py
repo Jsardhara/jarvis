@@ -707,8 +707,12 @@ class AtlasOrchestrator:
         # Bridge returned a non-envelope dict (legacy shape) — treat as success
         # only when it carries a recognisable trade id.
         if not isinstance(raw, dict) or not (raw.get("id") or raw.get("txid")):
+            # Render dict vs list distinctly — list(dict) iterates keys, which
+            # hides the actual values; surface values for dicts so the failure
+            # message is debuggable.
+            shape = list(raw.values()) if isinstance(raw, dict) else raw
             raise AtlasUnavailableError(
-                f"trader_execute paper auto returned unexpected shape: {list(raw)}"
+                f"trader_execute paper auto returned unexpected shape: {shape}"
             )
         return AgentResponse(
             agent="atlas.trader",

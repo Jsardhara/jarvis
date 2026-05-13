@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 class TempoStack:
     """Composes calendar/tasks + mail behind the OutlookProvider Protocol."""
 
-    calendar: Any  # ICloudProvider-shaped (7 methods)
+    calendar: Any  # ICloudProvider-shaped (7 methods); may be None in mail-only mode
     mail: Any      # MultiMailProvider-shaped (4 methods)
 
     # ---------- mail (delegates to MultiMailProvider) ----------
@@ -85,27 +85,57 @@ class TempoStack:
 
 
 def build_default_tempo_stack() -> TempoStack:
-    """Construct from env vars. Raises if required vars missing.
+    """Construct a TempoStack from env vars, in **partial-stack mode**.
 
-    Required:
-        APPLE_ID, APPLE_APP_PASSWORD
-        GMAIL_ADDRESS, GMAIL_APP_PASSWORD
+    The registry decides Tempo is "live" whenever *either* APPLE_ID or
+    GMAIL_ADDRESS is set, so this builder must mirror that contract:
+    include whichever backends are actually configured and only raise
+    when zero providers are reachable. The resulting stack may have:
 
-    Optional (Drexel — adds school mail if all present):
-        DREXEL_ADDRESS, DREXEL_CLIENT_ID
+      * iCloud calendar + Gmail mail (full stack)
+      * iCloud calendar only (mail will raise on use)
+      * Gmail mail only (calendar will raise on use)
+      * +Drexel mail if DREXEL_ADDRESS and DREXEL_CLIENT_ID are set
+
+    The Tempo agent and orchestrator are expected to catch provider-level
+    failures from the unconfigured side; downgrading to a fully-mock stack
+    happens upstream in ``registry._build_outlook``.
+
+    Raises:
+        RuntimeError: if no Apple AND no Gmail credentials are present
+            (in that case the registry should select MockOutlook instead
+            of calling this function).
     """
     from jarvis.agents.tempo.providers.gmail_imap import GmailConfig, GmailIMAPProvider
     from jarvis.agents.tempo.providers.icloud import ICloudConfig, ICloudProvider
     from jarvis.agents.tempo.providers.multi_mail import MultiMailProvider
 
-    apple_id = _required("APPLE_ID")
-    apple_pw = _required("APPLE_APP_PASSWORD")
-    apple_url = os.getenv("APPLE_CALDAV_URL", "https://caldav.icloud.com")
-    icloud = ICloudProvider(ICloudConfig(apple_id=apple_id, app_password=apple_pw, caldav_url=apple_url))
+    icloud: Any | None = None
+    apple_id = os.getenv("APPLE_ID")
+    apple_pw = os.getenv("APPLE_APP_PASSWORD")
+    if apple_id and apple_pw:
+        apple_url = os.getenv("APPLE_CALDAV_URL", "https://caldav.icloud.com")
+        icloud = ICloudProvider(
+            ICloudConfig(apple_id=apple_id, app_password=apple_pw, caldav_url=apple_url)
+        )
+    elif apple_id or apple_pw:
+        logger.warning(
+            "TempoStack: partial Apple creds (APPLE_ID=%s, APPLE_APP_PASSWORD=%s) — skipping iCloud",
+            bool(apple_id),
+            bool(apple_pw),
+        )
 
-    gmail_addr = _required("GMAIL_ADDRESS")
-    gmail_pw = _required("GMAIL_APP_PASSWORD")
-    gmail = GmailIMAPProvider(GmailConfig(address=gmail_addr, app_password=gmail_pw))
+    gmail: Any | None = None
+    gmail_addr = os.getenv("GMAIL_ADDRESS")
+    gmail_pw = os.getenv("GMAIL_APP_PASSWORD")
+    if gmail_addr and gmail_pw:
+        gmail = GmailIMAPProvider(GmailConfig(address=gmail_addr, app_password=gmail_pw))
+    elif gmail_addr or gmail_pw:
+        logger.warning(
+            "TempoStack: partial Gmail creds (GMAIL_ADDRESS=%s, GMAIL_APP_PASSWORD=%s) — skipping Gmail",
+            bool(gmail_addr),
+            bool(gmail_pw),
+        )
 
     drexel: Any | None = None
     drexel_addr = os.getenv("DREXEL_ADDRESS")
@@ -124,11 +154,31 @@ def build_default_tempo_stack() -> TempoStack:
             )
         )
 
-    multi = MultiMailProvider.from_backends(gmail=gmail, drexel=drexel, default="GMAIL")
+    if icloud is None and gmail is None and drexel is None:
+        raise RuntimeError(
+            "TempoStack: no provider env vars set "
+            "(need APPLE_ID/APPLE_APP_PASSWORD or GMAIL_ADDRESS/GMAIL_APP_PASSWORD)"
+        )
+
+    # Only construct a MultiMailProvider when there's at least one mail backend
+    # to route to. iCloud is calendar-only in this design — Apple-only setups
+    # ship with `mail=None`, deferring the "no mail configured" failure to the
+    # first mail method call rather than failing fast at construction time.
+    multi: MultiMailProvider | None
+    if gmail is not None or drexel is not None:
+        default_label = "GMAIL" if gmail is not None else "DREXEL"
+        multi = MultiMailProvider.from_backends(
+            gmail=gmail, drexel=drexel, default=default_label
+        )
+    else:
+        multi = None
+
+    # Calendar may be None in mail-only mode; calendar methods will raise on use.
     return TempoStack(calendar=icloud, mail=multi)
 
 
 def _required(key: str) -> str:
+    """Legacy helper retained for downstream callers; new code uses os.getenv."""
     val = os.getenv(key)
     if not val:
         raise RuntimeError(f"TempoStack: required env var {key} not set")

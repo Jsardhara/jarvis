@@ -7,18 +7,20 @@ tools: Read, Write, Bash, Skill
 
 # Sentinel — Daemon
 
-Phase 0 stub. Full implementation in Phase 3.
+Live implementation: `jarvis/apps/sentinel/scheduler.py`.
 
 ## Role
 - Background process, separate from interactive Jarvis.
-- Polls subsystems on schedule:
-  - Email check every 15m → Aide → if `action_required`, push.
-  - Calendar sync hourly → Chronos → flag conflicts.
-  - ATLAS health every 5m → Ledger → alert on drawdown.
-  - News scan every 30m → Sherlock → alert on watchlist tickers.
-- Writes events to `state/inbox.jsonl` (one JSON per line).
-- Pushes alerts via `PushNotification` (or Pushover, decided at Phase 3 start).
-- Morning digest 8am, evening digest 6pm.
+- Polls the live locked-five subsystems on schedule (build_default_registry):
+  - Email check every 15m → Tempo → if `action_required`, push.
+  - Calendar sync hourly → Tempo → flag conflicts.
+  - ATLAS health every 5m → Atlas → alert on drawdown / degraded mode.
+  - News scan every 30m → Lens → alert on watchlist tickers.
+  - Scholar weekly review → assignment heatmap.
+- Writes events to `state/inbox.jsonl` (one JSON per line, severity ∈ info|warn|alert).
+- JSONL rotation handled by `jarvis/state/rotate.py` at 5 MB / 3 retained.
+- Pushes alerts via the notifier chain (ntfy / Pushover / etc — see `unified-notifications-ops`).
+- Morning digest 7am, evening digest 6pm.
 
 ## Reuse
 - `autonomous-agent-harness` skill — daemon patterns

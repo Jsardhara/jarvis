@@ -8,6 +8,8 @@ Rules (derived from CLAUDE.md confirmation table):
 from __future__ import annotations
 
 # Actions that mutate external state and always need confirmation regardless of tier.
+# Confirmation matrix (CLAUDE.md): send_mail, calendar mutations, code merge/push,
+# Atlas strategy triggers, sentinel control, agent pause, mass delete.
 _ALWAYS_CONFIRM_ACTIONS: frozenset[str] = frozenset({
     "send_mail",
     "trader_execute",
@@ -16,6 +18,10 @@ _ALWAYS_CONFIRM_ACTIONS: frozenset[str] = frozenset({
     "push",
     "commit",
     "cancel",
+    "stop_sentinel",
+    "restart_sentinel",
+    "pause_agent",
+    "mass_delete",
 })
 
 # External-effect actions that trigger confirmation at tier 2 but not at tier 3-5.

@@ -58,7 +58,12 @@
       "Bash(powershell -Command \"Get-Process 'Docker Desktop' -ErrorAction SilentlyContinue | Select-Object Name,Id\")",
       "Bash(powershell -Command \"Start-Process 'C:\\\\Program Files\\\\Docker\\\\Docker\\\\Docker Desktop.exe'\")",
       "Bash(grep -vE \"AtlasWsClient disconnected|^$\")",
-      "Bash(powershell -Command ' *)"
+      "Bash(powershell -Command ' *)",
+      "Bash(rmdir jarvis/web/data)",
+      "Bash(rmdir jarvis/web)",
+      "Bash(rm jarvis/web/data/*.json)",
+      "Bash(rmdir jarvis/web/data jarvis/web)",
+      "Bash(cmd.exe *)"
     ]
   }
 }

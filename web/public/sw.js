@@ -1,9 +1,9 @@
 /* Jarvis service worker — cache-first for static, network-first for /api. */
-const VERSION = "v7";
+const VERSION = "v8";
 const STATIC_CACHE = `jarvis-static-${VERSION}`;
 const RUNTIME_CACHE = `jarvis-runtime-${VERSION}`;
 
-const PRECACHE = ["/", "/manifest.webmanifest", "/icon-192.svg", "/icon-512.svg"];
+const PRECACHE = ["/manifest.webmanifest", "/icon-192.svg", "/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

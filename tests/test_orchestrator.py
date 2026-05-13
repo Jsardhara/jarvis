@@ -9,8 +9,12 @@ from jarvis.state import add_task, append_inbox
 
 
 def _stub_handler(name: str):
-    async def _h(req: str) -> AgentResponse:
-        return AgentResponse(agent=name, intent="stub", action="done", result={"echo": req})
+    async def _h(req: str | dict) -> AgentResponse:
+        # Orchestrator now passes an action envelope `{action, text}` when the
+        # classifier produced a non-default action; fall back to req-as-string
+        # for the legacy plain-text path.
+        text = req["text"] if isinstance(req, dict) else req
+        return AgentResponse(agent=name, intent="stub", action="done", result={"echo": text})
     return _h
 
 

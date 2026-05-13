@@ -51,7 +51,7 @@ export function LeftSidebar() {
       }
     };
     void tick();
-    const id = setInterval(tick, 8000);
+    const id = setInterval(tick, 15000);
     return () => {
       cancelled = true;
       clearInterval(id);
@@ -65,7 +65,7 @@ export function LeftSidebar() {
     >
       {/* Portfolio panel */}
       <section className="hud-panel hud-corners flex flex-col gap-1.5 px-3 py-2.5">
-        <header className="hud-label">// PORTFOLIO</header>
+        <header className="hud-label">{"// PORTFOLIO"}</header>
         {positions.length === 0 && (
           <div className="font-mono text-[10px] text-[var(--ops-fg-faint)]">
             no positions
@@ -105,7 +105,7 @@ export function LeftSidebar() {
 
       {/* News panel */}
       <section className="hud-panel hud-corners flex min-h-0 flex-1 flex-col gap-1.5 px-3 py-2.5">
-        <header className="hud-label">// LATEST</header>
+        <header className="hud-label">{"// LATEST"}</header>
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto">
           {news.length === 0 && (
             <div className="font-mono text-[10px] text-[var(--ops-fg-faint)]">

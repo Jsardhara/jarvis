@@ -79,7 +79,7 @@ export function CommandPanel() {
     >
       {/* Header */}
       <header className="flex items-center justify-between border-b border-[var(--ops-line-faint)] pb-2">
-        <span className="hud-label">// BOT {streaming ? "STREAMING" : "STANDBY"}</span>
+        <span className="hud-label">{"// BOT "}{streaming ? "STREAMING" : "STANDBY"}</span>
         <span
           className="font-mono text-[9px] tracking-wider"
           style={{ color: streaming ? "var(--ops-warn)" : "var(--ops-fg-faint)" }}

@@ -31,6 +31,19 @@ const CONTROL_LINKS: NavEntry[] = [
 const COMMS_LINKS: NavEntry[] = [
   { href: "/inbox",     label: "Inbox",     glyph: "□", badgeKey: "unreadInbox" },
   { href: "/decisions", label: "Decisions", glyph: "?", badgeKey: "pendingDecisions" },
+  { href: "/brain-dump", label: "Brain Dump", glyph: "✎" },
+];
+
+// Workspace / operator-facing pages that were previously orphaned (no nav).
+// Surfaced here so they're reachable; the canonical chat surface lives in
+// CommandPanel within the HUD on "/", not in a dedicated route.
+const WORKSPACE_LINKS: NavEntry[] = [
+  { href: "/priority-matrix", label: "Priority Matrix", glyph: "▥" },
+  { href: "/activity",        label: "Activity",        glyph: "≡" },
+  { href: "/sentinel",        label: "Sentinel",        glyph: "◐" },
+  { href: "/cost",            label: "Cost",            glyph: "$" },
+  { href: "/checkpoints",     label: "Checkpoints",     glyph: "▷" },
+  { href: "/preferences",     label: "Preferences",     glyph: "⚙" },
 ];
 
 // Atlas sub-agent nav entries with their accent CSS var
@@ -333,6 +346,20 @@ export function AppSidebar({
             glyph={entry.glyph}
             active={isActive(pathname, entry.href)}
             badge={entry.badgeKey ? badges[entry.badgeKey] : undefined}
+            onClick={onClose}
+          />
+        ))}
+      </NavSection>
+
+      {/* WORKSPACE — operator-facing surfaces, previously orphaned */}
+      <NavSection label="WORKSPACE">
+        {WORKSPACE_LINKS.map((entry) => (
+          <NavItem
+            key={entry.href}
+            href={entry.href}
+            label={entry.label}
+            glyph={entry.glyph}
+            active={isActive(pathname, entry.href)}
             onClick={onClose}
           />
         ))}

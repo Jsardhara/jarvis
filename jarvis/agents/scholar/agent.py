@@ -16,6 +16,7 @@ import base64
 import json
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -40,13 +41,16 @@ _SOLVE_SYSTEM = (
 
 
 def _query_claude(system: str, user: str) -> str:
-    """One-shot Claude query — delegates to the shared llm.query_claude_sync helper.
+    """One-shot Claude query — routed through the global LLM submit queue.
 
-    Preserved for back-compat: all scholar code calls this function directly.
+    All Jarvis LLM calls funnel through :func:`jarvis.llm.queue.submit` so the
+    shared Pro/Max rate-limit bucket gets serialised retries instead of
+    parallel saturation. Preserved as a function for back-compat: all scholar
+    code calls this directly.
     """
-    from jarvis.llm.client import query_claude_sync
+    from jarvis.llm.queue import submit
 
-    return query_claude_sync(system, user, model=_MODEL)
+    return submit(system, user, model=_MODEL)
 
 
 def _problems_path() -> Path:
@@ -579,12 +583,24 @@ class Scholar:
 
         # R1 — fire on-exam-scheduled callback so a tempo task auto-blocks the
         # slot on the calendar. Failure of the callback never blocks exam
-        # creation: the session is already persisted to disk.
+        # creation: the session is already persisted to disk. The callback
+        # runs in a daemon thread so the (potentially slow) downstream tempo
+        # write never blocks the response loop.
         if self._on_exam_scheduled is not None:
-            try:
-                self._on_exam_scheduled(session)
-            except Exception as exc:  # noqa: BLE001 — never fail the exam_session call
-                log.warning("on_exam_scheduled callback failed: %s", exc)
+            callback = self._on_exam_scheduled
+
+            def _fire_callback(snapshot: dict[str, Any]) -> None:
+                try:
+                    callback(snapshot)
+                except Exception as exc:  # noqa: BLE001 — never fail the exam_session call
+                    log.warning("on_exam_scheduled callback failed: %s", exc)
+
+            threading.Thread(
+                target=_fire_callback,
+                args=(session,),
+                daemon=True,
+                name="scholar.on_exam_scheduled",
+            ).start()
 
         return AgentResponse(
             agent="scholar",
@@ -686,8 +702,9 @@ class Scholar:
 
         from jarvis.contract import InboxEvent
         from jarvis.state import append_inbox
-        from .study import _extract_text
+
         from .db import StudyFlashcard, _now, get_session
+        from .study import _extract_text
 
         content = base64.b64decode(content_b64)
         text, _pages = _extract_text(filename, content)
@@ -794,7 +811,7 @@ class Scholar:
                         agent="scholar",
                         severity="info",
                         summary=f"Upcoming: {label} on {date_iso}",
-                        payload={"course": course_name, "date_iso": date_iso, "label": label},
+                        ref={"course": course_name, "date_iso": date_iso, "label": label},
                     )
                 )
             except Exception as exc:

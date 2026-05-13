@@ -40,6 +40,33 @@ export interface TempoTask {
 
 const POLL_MS = 30_000;
 
+// Shared 30s tick so the three useTempo* hooks share one interval rather
+// than each starting their own. Listeners are invoked in registration order.
+const tempoTickListeners = new Set<() => void>();
+let tempoTickInterval: ReturnType<typeof setInterval> | null = null;
+
+function subscribeTempoTick(listener: () => void): () => void {
+  tempoTickListeners.add(listener);
+  if (tempoTickInterval === null && typeof window !== "undefined") {
+    tempoTickInterval = setInterval(() => {
+      for (const l of tempoTickListeners) {
+        try {
+          l();
+        } catch {
+          /* swallow — individual hook handles its own errors */
+        }
+      }
+    }, POLL_MS);
+  }
+  return () => {
+    tempoTickListeners.delete(listener);
+    if (tempoTickListeners.size === 0 && tempoTickInterval !== null) {
+      clearInterval(tempoTickInterval);
+      tempoTickInterval = null;
+    }
+  };
+}
+
 async function dispatch<T = unknown>(action: string, args: Record<string, unknown> = {}): Promise<T> {
   const res = await apiFetch("/api/agents/tempo/dispatch", {
     method: "POST",
@@ -70,8 +97,9 @@ export function useTempoToday(): { events: TempoEvent[]; loading: boolean; error
 
   useEffect(() => {
     void refresh();
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
+    return subscribeTempoTick(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   return { events, loading, error, refresh };
@@ -129,8 +157,9 @@ export function useTempoTriage(): {
 
   useEffect(() => {
     void refresh();
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
+    return subscribeTempoTick(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   return { data, loading, error, refresh: runFreshTriage };
@@ -162,8 +191,9 @@ export function useTempoTasks(): {
 
   useEffect(() => {
     void refresh();
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
+    return subscribeTempoTick(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   const add = useCallback(

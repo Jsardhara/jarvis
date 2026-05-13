@@ -10,11 +10,9 @@ These tests pin the contract that:
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from jarvis.agents.scholar.agent import Scholar
 from jarvis.contract import AgentResponse

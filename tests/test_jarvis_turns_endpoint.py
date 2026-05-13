@@ -27,7 +27,9 @@ def isolated_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _make_client(stream_events: list[TraceEvent]) -> TestClient:
-    async def _fake_stream(message: str):
+    async def _fake_stream(message: str, **_kwargs: object):
+        # **_kwargs absorbs surface= / session_id= passed by the chat HTTP
+        # handler now that the unified chat brain tags every turn.
         for ev in stream_events:
             yield ev
 

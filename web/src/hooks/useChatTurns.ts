@@ -61,6 +61,15 @@ async function loadHistory(limit: number): Promise<ChatTurn[]> {
   }
 }
 
+interface ServerTurnPushPayload {
+  turn?: {
+    turn_id?: string;
+    user_text?: string;
+    assistant_text?: string;
+    ts?: string;
+  };
+}
+
 export function useChatTurns(historyLimit = 30): ChatTurnsHook {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -73,6 +82,53 @@ export function useChatTurns(historyLimit = 30): ChatTurnsHook {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /**
+   * Subscribe to /api/jarvis/turns/stream so voice-originated turns
+   * (or turns written from another tab) merge in without polling.
+   * Falls back silently when EventSource is unavailable. The mount +
+   * after-send poll in ``reload`` stays as a defensive fallback.
+   */
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof EventSource === "undefined") {
+      return;
+    }
+    let cancelled = false;
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource("/api/jarvis/turns/stream");
+    } catch {
+      return;
+    }
+    es.onmessage = (event: MessageEvent<string>) => {
+      if (cancelled) return;
+      try {
+        const json = JSON.parse(event.data) as ServerTurnPushPayload;
+        const pushed = json.turn;
+        if (!pushed || !pushed.turn_id) return;
+        setTurns((prev) => {
+          if (prev.some((t) => t.turn_id === pushed.turn_id)) return prev;
+          const next: ChatTurn = {
+            turn_id: pushed.turn_id ?? `push-${Date.now()}`,
+            user_text: pushed.user_text ?? "",
+            assistant_text: pushed.assistant_text ?? "",
+            ts: pushed.ts,
+            live: false,
+          };
+          return [...prev, next];
+        });
+      } catch {
+        // ignore unparseable frames
+      }
+    };
+    es.onerror = () => {
+      // Browser auto-reconnects; nothing to do.
+    };
+    return () => {
+      cancelled = true;
+      es?.close();
+    };
+  }, []);
 
   const send = useCallback(
     async (text: string) => {

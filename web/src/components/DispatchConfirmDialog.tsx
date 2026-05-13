@@ -20,9 +20,13 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { showError } from "@/lib/toast";
+import { apiFetch } from "@/lib/api-client";
 
-const JARVIS_API =
-  process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765";
+// Confirmation approve/reject calls now go through the Next.js proxy
+// (`/api/confirmations/[id]/[decision]/route.ts`) so the same auth-token /
+// MC_API_TOKEN policy enforced by `web/src/middleware.ts` applies. The
+// previous direct `${JARVIS_API}:8765` bypass left the FastAPI port wide
+// open if exposed on a LAN.
 
 export interface DispatchConfirmDialogProps {
   open: boolean;
@@ -48,8 +52,8 @@ export function DispatchConfirmDialog({
   async function handleApprove() {
     setInflight("approve");
     try {
-      const res = await fetch(
-        `${JARVIS_API}/api/confirmations/${confirmationId}/approve`,
+      const res = await apiFetch(
+        `/api/confirmations/${confirmationId}/approve`,
         { method: "POST" }
       );
       if (!res.ok) {
@@ -69,8 +73,8 @@ export function DispatchConfirmDialog({
   async function handleReject() {
     setInflight("reject");
     try {
-      const res = await fetch(
-        `${JARVIS_API}/api/confirmations/${confirmationId}/reject`,
+      const res = await apiFetch(
+        `/api/confirmations/${confirmationId}/reject`,
         { method: "POST" }
       );
       if (!res.ok) {

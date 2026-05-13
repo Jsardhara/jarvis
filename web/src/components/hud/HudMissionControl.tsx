@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useMissionBus } from "@/hooks/useMissionBus";
-import { useVoiceState } from "@/hooks/useVoiceState";
 import { apiFetch } from "@/lib/api-client";
 import { AgentCardRow, type AgentCard } from "./AgentCardRow";
 import { CentralOrb } from "./CentralOrb";
@@ -51,7 +50,6 @@ interface AgentApi {
  */
 export function HudMissionControl() {
   const bus = useMissionBus();
-  const voice = useVoiceState();
   const [agentRows, setAgentRows] = useState<AgentCard[]>([]);
   const [activeAgent, setActiveAgent] = useState<string | undefined>(undefined);
 
@@ -110,7 +108,7 @@ export function HudMissionControl() {
   }, [bus.events]);
 
   // Map voice state → orb intensity
-  const mode = voice.state?.mode;
+  const mode = bus.voice?.mode;
   const orbState: "idle" | "listening" | "speaking" | "thinking" =
     mode === "tts"     ? "speaking"
     : mode === "stt"   ? "listening"

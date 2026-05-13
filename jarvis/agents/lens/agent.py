@@ -7,12 +7,21 @@ daemon news_tick uses lens.quick_search per ticker.
 from __future__ import annotations
 
 from jarvis.contract import AgentResponse
-from ..providers import SearchProvider
+
+from ..providers import MockSearch, SearchProvider
 
 
 class Lens:
     def __init__(self, search: SearchProvider):
         self.search_provider = search
+
+    def _degraded(self) -> bool:
+        """True when the configured search provider is the mock fallback.
+
+        Dashboard renders this as a banner so the operator knows results are
+        fixture data rather than live web search.
+        """
+        return isinstance(self.search_provider, MockSearch)
 
     def quick_search(self, query: str, num_results: int = 5) -> AgentResponse:
         results = self.search_provider.search(query, num_results=num_results)
@@ -26,6 +35,7 @@ class Lens:
                 "results": results,
                 "markdown": markdown,
                 "count": len(results),
+                "degraded": self._degraded(),
             },
             confidence=0.9,
         )
@@ -43,6 +53,7 @@ class Lens:
                 "sources": [{"url": r["url"], "title": r["title"]} for r in top],
                 "markdown": markdown,
                 "depth": depth,
+                "degraded": self._degraded(),
             },
             confidence=0.85,
         )
@@ -56,14 +67,20 @@ class Lens:
             agent="lens",
             intent="monitor",
             action="scanned",
-            result={"watchlist": watchlist, "hits": hits, "count": sum(len(v) for v in hits.values())},
+            result={
+                "watchlist": watchlist,
+                "hits": hits,
+                "count": sum(len(v) for v in hits.values()),
+                "degraded": self._degraded(),
+            },
             confidence=0.85,
         )
 
     def world_brief(self, window_hours: int = 18) -> AgentResponse:
-        """Unbiased world-news brief from Reuters/AP/BBC wire feeds.
+        """Unbiased world-news brief from BBC, NPR, AlJazeera, and Google News.
 
         Returns the last *window_hours* of dedup'd stories sorted newest-first.
+        Source list mirrors :data:`jarvis.agents.lens.news_provider.FEEDS`.
         Used by the daily autonomous Forge routine.
         """
         from datetime import UTC, datetime
@@ -82,6 +99,7 @@ class Lens:
                 "window_hours": window_hours,
                 "fetched_at": datetime.now(UTC).isoformat(),
                 "sources": [src for src, _ in news_provider.FEEDS],
+                "degraded": self._degraded(),
             },
             confidence=0.9,
         )

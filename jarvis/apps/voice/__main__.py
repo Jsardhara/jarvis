@@ -30,6 +30,7 @@ import sys
 from typing import Any
 
 from jarvis.config import get_settings
+
 from .audio_io import collect_until_silence, mic_chunks, play_audio
 from .loop import _spoken_text
 from .stt import DeepgramSTT, MockSTT, STTProvider, WhisperSTT

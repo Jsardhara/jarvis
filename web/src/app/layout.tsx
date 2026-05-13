@@ -53,7 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       suppressHydrationWarning
-      className={`dark ${jetbrainsMono.variable} ${rajdhani.variable} ${orbitron.variable}`}
+      className={`${jetbrainsMono.variable} ${rajdhani.variable} ${orbitron.variable}`}
     >
       <body className="antialiased">
         <ThemeProvider>

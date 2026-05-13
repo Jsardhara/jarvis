@@ -102,6 +102,21 @@ class WorktreeRunner:
     # Public API
     # ------------------------------------------------------------------
 
+    def run(self, agent_name: str, prompt: str) -> str:
+        """Adapter for the staged ``Forge`` pipeline.
+
+        The staged pipeline issues per-stage calls of the form
+        ``runner.run(agent_name, prompt)`` and only consumes a string artifact
+        of stage output, not a full :class:`ForgeRun` record. We delegate to
+        :meth:`execute` (repo=cwd, task=prompt) and return its
+        ``diff_summary`` so the live runner is drop-in compatible with
+        :class:`MockRunner`. ``agent_name`` is currently unused at the live
+        layer; stages already encode the role in the prompt.
+        """
+        del agent_name  # reserved for future per-stage tool selection
+        forge_run = self.execute(repo=str(self._repo_root), task=prompt)
+        return forge_run.diff_summary or ""
+
     def execute(
         self,
         repo: str,

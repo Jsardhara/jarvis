@@ -7,7 +7,7 @@ property the audit said was missing pre-fix.
 """
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import httpx
 import pytest

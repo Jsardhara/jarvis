@@ -18,7 +18,7 @@ const shortcuts = [
   { key: "G K", label: "Go to Status Board" },
   { key: "G O", label: "Go to Objectives" },
   { key: "G B", label: "Go to Brain Dump" },
-  { key: "G P", label: "Go to Missions" },
+  { key: "G P", label: "Go to Projects" },
   { key: "G I", label: "Go to Inbox" },
   { key: "G D", label: "Go to Decisions" },
   { key: "G C", label: "Go to Crew" },

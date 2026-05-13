@@ -6,6 +6,7 @@ import { Tag } from "./Tag";
 import { Dot } from "./Dot";
 import { useSidebar } from "@/hooks/use-sidebar";
 import { useDailyCost } from "@/hooks/useDailyCost";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /**
  * Topbar — 44px header bar occupying grid-area "topbar".
@@ -90,6 +91,7 @@ export function Topbar() {
           <b style={{ color: "var(--ops-amber)" }}>{costDisplay}</b>
         </span>
         <Clock />
+        <ThemeToggle />
       </div>
     </header>
   );

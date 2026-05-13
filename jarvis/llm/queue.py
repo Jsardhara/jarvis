@@ -1,5 +1,12 @@
 """Pro/Max-routed Claude queue.
 
+Known bypass sites (call query_claude_sync directly, skipping this queue):
+    * jarvis/agents/scholar/agent.py:42 — direct call for fast study tasks
+    * jarvis/agents/tempo/agent.py:131 — direct call (being fixed by parallel agent)
+
+Every other subsystem must route through :func:`submit` / :func:`submit_multimodal`
+so the shared 5h Pro/Max rate-limit bucket stays under one global lock.
+
 Single global FIFO funnel for every LLM call in Jarvis. All subsystems use
 ``query_claude_sync`` from ``jarvis.llm.client``, which authenticates through the
 local ``claude-agent-sdk`` (Pro/Max session token) — no Anthropic API key.

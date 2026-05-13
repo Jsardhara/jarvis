@@ -4,6 +4,8 @@ import type { Task, AgentRole, InboxMessage, ActivityEvent } from "@/lib/types";
 import { taskCreateSchema, taskUpdateSchema, validateBody, DEFAULT_LIMIT } from "@/lib/validations";
 import { generateId } from "@/lib/utils";
 
+export const dynamic = "force-dynamic";
+
 // ─── Side-effect helpers (now atomic via mutate*) ───────────────────────────
 
 async function addInboxMessage(msg: Omit<InboxMessage, "id" | "createdAt" | "readAt" | "status">) {

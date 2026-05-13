@@ -35,17 +35,13 @@ try:
 except ImportError:  # pragma: no cover
     HAS_FASTAPI = False
 
-from jarvis import config  # noqa: F401  side-effect: load_dotenv() so APPLE_ID/GMAIL_* reach subsystems
-from jarvis.state.chat_turns import (
-    ChatTurnRecord,
-    append_turn,
-    read_recent,
-    user_id_from_token,
+from jarvis import (
+    config,  # noqa: F401  side-effect: load_dotenv() so APPLE_ID/GMAIL_* reach subsystems
 )
+from jarvis.agents.registry import AgentDescriptor, build_default_registry
 from jarvis.contract import AgentLogEntry, Confirmation, InboxEvent, Task, TraceEvent
-from jarvis.llm.cost import daily_rollup
-from jarvis.state.memory import OperatorPreferences, load_preferences, save_preferences
 from jarvis.core.orchestrator import Orchestrator
+from jarvis.llm.cost import daily_rollup
 from jarvis.state import (
     add_confirmation,
     add_task,
@@ -62,7 +58,13 @@ from jarvis.state import (
     update_confirmation,
     update_task,
 )
-from jarvis.agents.registry import AgentDescriptor, build_default_registry
+from jarvis.state.chat_turns import (
+    ChatTurnRecord,
+    append_turn,
+    read_recent,
+    user_id_from_token,
+)
+from jarvis.state.memory import OperatorPreferences, load_preferences, save_preferences
 
 log = logging.getLogger(__name__)
 
@@ -103,8 +105,30 @@ def _build_orchestrator(registry: dict[str, AgentDescriptor]) -> Orchestrator:
     o = Orchestrator()
     for name, desc in registry.items():
 
-        async def _handler(req: str, _desc: AgentDescriptor = desc) -> Any:
-            return _desc.call_text(req)
+        async def _handler(req: str, _desc: AgentDescriptor = desc, _name: str = name) -> Any:
+            # Prefer a classifier-selected action when the orchestrator has
+            # threaded one onto the dispatch envelope; otherwise fall back to
+            # the descriptor's free-text default (current behaviour).
+            action: str | None = None
+            args: dict[str, Any] = {}
+            if isinstance(req, dict):
+                action = req.get("action")
+                args = dict(req.get("args") or {})
+                text = str(req.get("text", ""))
+            else:
+                text = str(req)
+
+            if action and action in _desc.actions:
+                return _desc.call(action, args)
+
+            if action:
+                log.debug(
+                    "orchestrator: action %r unknown for agent %r; "
+                    "falling back to call_text",
+                    action,
+                    _name,
+                )
+            return _desc.call_text(text)
 
         o.register(name, _handler)
     return o
@@ -719,7 +743,10 @@ def make_app(
         if conf is None:
             raise HTTPException(status_code=404, detail="confirmation not found")
 
-        # Replay the original request with confirmed=True
+        # Replay the original request with confirmed=True. The orchestrator
+        # re-classifies via the action-aware router, so send_mail / schedule
+        # / cancel / trader_execute reach the real descriptor action; the
+        # ``confirmed=True`` flag lets ``check_authority`` skip the gate.
         dispatch_result = await o.dispatch(conf.request, confirmed=True)
 
         # Persist the replay result back onto the confirmation record
@@ -991,8 +1018,8 @@ def make_app(
     # ─── Scholar Study Companion ─────────────────────────────────────────────
 
     def _get_study_service():  # type: ignore[return]
-        from jarvis.agents.scholar.study import StudyService
         from jarvis.agents.scholar.db import init_db
+        from jarvis.agents.scholar.study import StudyService
 
         init_db()
         return StudyService()
@@ -1287,7 +1314,9 @@ def make_app(
             cost_usd = 0.0
             duration_ms = 0
             try:
-                async for ev in chat.stream(message):
+                async for ev in chat.stream(
+                    message, surface="chat", session_id=user_id
+                ):
                     if ev.type == "text":
                         assistant_buf.append(str(ev.payload.get("delta", "")))
                     elif ev.type == "model":
@@ -1339,6 +1368,8 @@ def make_app(
                         cost_usd=cost_usd,
                         duration_ms=duration_ms,
                         ts=datetime.now(UTC).isoformat(),
+                        session_id=user_id,
+                        surface="chat",
                     )
                 )
             except Exception:
@@ -1361,6 +1392,44 @@ def make_app(
         user_id = _bearer_user_id(request)
         records = read_recent(user_id, limit=limit)
         return {"data": [asdict(r) for r in records], "error": None}
+
+    @app.get("/api/jarvis/turns/stream")
+    async def jarvis_turns_stream(request: Request) -> StreamingResponse:
+        """SSE push of every new chat turn as it lands in chat_turns.jsonl.
+
+        Lets the dashboard see voice-originated turns the instant the
+        voice daemon writes them, without polling. The bearer token
+        scopes which turns the subscriber receives (matches user_id);
+        voice turns persisted under user_id="default" are also passed
+        through so a logged-out dashboard still receives them.
+        """
+        from jarvis.state.chat_turns import subscribe as _subscribe
+
+        user_id = _bearer_user_id(request)
+
+        async def gen():
+            # Comment line keeps the SSE connection alive through proxies.
+            yield ": connected\n\n"
+            try:
+                async for payload in _subscribe():
+                    record_user = payload.get("user_id", "")
+                    if record_user and record_user != user_id and record_user != "default":
+                        continue
+                    line = json.dumps({"turn": payload}, default=str)
+                    yield f"data: {line}\n\n"
+                    if await request.is_disconnected():
+                        return
+            except asyncio.CancelledError:
+                return
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/api/jarvis/terminal")
     async def jarvis_terminal_chat(payload: dict[str, Any]) -> dict[str, Any]:
@@ -1432,7 +1501,7 @@ def make_app(
         return {"data": [asdict(h) for h in hits], "error": None}
 
     # Wire inbox listener so every append_inbox call fans out to trigger rules.
-    # The notifier is injected so atlas/forge crit events surface as pushes
+    # The notifier is injected so atlas/forge alert events surface as pushes
     # (priority=2) from this process too — guardian violations triggered by
     # /api/dispatch or /api/jarvis/chat are visible immediately on phone/desktop
     # without waiting for the dashboard to refresh.
@@ -1474,12 +1543,12 @@ def make_app(
             },
             {
                 "name": "forge_run_failed",
-                "description": "Forge dead-letter record → crit InboxEvent on /inbox",
+                "description": "Forge dead-letter record → alert InboxEvent on /inbox",
                 "trigger": "periodic (every 30 min via sentinel)",
             },
             {
                 "name": "atlas_guardian_violation",
-                "description": "Atlas guardian_check violation → crit InboxEvent (caller-driven)",
+                "description": "Atlas guardian_check violation → alert InboxEvent (caller-driven)",
                 "trigger": "event-driven (atlas pipeline)",
             },
         ]
@@ -1533,3 +1602,5 @@ def make_app(
 app = None
 if HAS_FASTAPI:  # pragma: no cover
     app = make_app()
+# end of app.py
+

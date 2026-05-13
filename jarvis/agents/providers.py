@@ -7,9 +7,29 @@ stack runs end-to-end.
 """
 from __future__ import annotations
 
+import logging
+import os
 from datetime import UTC, datetime
 from typing import Protocol
 from uuid import uuid4
+
+log = logging.getLogger(__name__)
+
+
+# Module-import diagnostic: warn loud and once when no live web-search key is set
+# so the dashboard / operator know Lens is in fallback mode rather than silently
+# serving fixture data. Cleared once the key appears (the registry recomputes on
+# each ``build_default_registry`` call, this is a one-shot import-time signal).
+if not (
+    os.environ.get("BRAVE_SEARCH_API_KEY")
+    or os.environ.get("PERPLEXITY_API_KEY")
+    or os.environ.get("EXA_API_KEY")
+):
+    log.warning(
+        "lens: no web-search API key set (BRAVE_SEARCH_API_KEY / "
+        "PERPLEXITY_API_KEY / EXA_API_KEY) — falling back to MockSearch. "
+        "Responses will be marked degraded=True."
+    )
 
 
 class OutlookProvider(Protocol):

@@ -5,7 +5,7 @@ import type { ActiveRun, DecisionItem, MissionRun } from "@/lib/types";
 import { showSuccess, showError } from "@/lib/toast";
 import { apiFetch } from "@/lib/api-client";
 
-const POLL_INTERVAL = 3000; // 3 seconds
+const POLL_INTERVAL = 15000; // 15 seconds
 
 export function useActiveRuns() {
   const [runs, setRuns] = useState<ActiveRun[]>([]);

@@ -1,11 +1,13 @@
-"""Unbiased world-news provider — wire-service RSS aggregation.
+"""Unbiased world-news provider — mainstream RSS aggregation.
 
-Pulls Reuters, AP, BBC RSS feeds in parallel, dedups by title similarity,
-returns last-N-hours sorted by recency. Used by ``lens.world_brief``.
+Pulls BBC, NPR, AlJazeera, and Google News RSS feeds in parallel, dedups
+by title similarity, returns last-N-hours sorted by recency. Used by
+``lens.world_brief``.
 
-Reasoning: wire services have lowest editorial bias and report what is
-actually happening rather than partisan framing. No Exa or LLM call here —
-that layer is optional in lens.py.
+Reasoning: a mix of UK, US, Middle-East, and global-aggregator sources
+broadens the editorial frame relative to any single outlet. No Exa or LLM
+call here — that layer is optional in lens.py. See :data:`FEEDS` for the
+authoritative source list.
 """
 
 from __future__ import annotations

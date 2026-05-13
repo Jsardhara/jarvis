@@ -170,39 +170,8 @@ export default function InboxPage() {
   interface RespondingInfo { runId: string; agent: string; since: number; sessionIndex: number }
   const [respondingThreads, setRespondingThreads] = useState<Map<string, RespondingInfo>>(new Map());
 
-  // Poll /api/inbox/respond/status every 3 seconds to track active runs
-  useEffect(() => {
-    if (respondingThreads.size === 0) return;
-
-    const poll = async () => {
-      try {
-        const res = await fetch("/api/inbox/respond/status");
-        if (!res.ok) return;
-        const data = await res.json() as { runs: Array<{ id: string; messageId: string; agentId: string; continuationIndex: number; status: string }> };
-
-        setRespondingThreads((prev) => {
-          const next = new Map(prev);
-          // Check each tracked thread against server state
-          for (const [threadKey, info] of prev) {
-            const serverRun = data.runs.find((r) => r.id === info.runId);
-            if (!serverRun) {
-              // Run no longer active — clear it
-              next.delete(threadKey);
-            } else {
-              // Update session index
-              if (serverRun.continuationIndex !== info.sessionIndex) {
-                next.set(threadKey, { ...info, sessionIndex: serverRun.continuationIndex });
-              }
-            }
-          }
-          return next;
-        });
-      } catch { /* ignore poll errors */ }
-    };
-
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
-  }, [respondingThreads.size]); // Only depend on size to avoid excessive re-renders
+  // Active-run state is delivered via the inbox WS stream (useInboxStream).
+  // No polling needed — the WS pushes updates as runs progress.
 
   // Filter messages first, then group into threads
   const threads = useMemo(() => {

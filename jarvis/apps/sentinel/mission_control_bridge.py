@@ -325,6 +325,10 @@ def _stable_id(*parts: str) -> str:
 
 
 def _default_web_data() -> Path:
-    """Project-relative default: <repo>/web/data/."""
+    """Project-relative default: <repo>/web/data/.
+
+    Post-reorg layout: this file lives at <repo>/jarvis/apps/sentinel/, so the
+    repo root is parents[3] (sentinel → apps → jarvis → repo).
+    """
     here = Path(__file__).resolve()
-    return here.parents[2] / "web" / "data"
+    return here.parents[3] / "web" / "data"

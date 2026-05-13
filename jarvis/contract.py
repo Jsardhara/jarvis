@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def _now_iso() -> str:
@@ -14,6 +14,10 @@ def _now_iso() -> str:
 
 class AgentResponse(BaseModel):
     """Standard envelope for all subsystem agent responses."""
+
+    # extra="forbid" so typo'd kwargs (e.g. ``payload=`` vs ``ref=`` on
+    # InboxEvent) raise at construction instead of being silently dropped.
+    model_config = ConfigDict(extra="forbid")
 
     intent: str = Field(description="What the request was understood as")
     action: str = Field(description="What was done, or 'proposed' if awaiting confirm")
@@ -36,7 +40,7 @@ class InboxEvent(BaseModel):
 
     ts: str = Field(default_factory=_now_iso)
     agent: str
-    severity: str = Field(description="info | warn | alert")
+    severity: str = Field(description="info | warn | alert | crit")
     summary: str
     ref: dict[str, Any] = Field(default_factory=dict)
 
@@ -61,6 +65,11 @@ class IntentClassification(BaseModel):
     rationale: str
     parallel: list[str] = Field(default_factory=list, description="Other agents to run in parallel")
     raw_request: str
+    action: str = Field(
+        default="dispatch",
+        description="Best-guess action name on the primary agent; "
+        "falls back to 'dispatch' when no specific action matched.",
+    )
 
 
 # --- Mission control: trace events, agent log entries, confirmations ---

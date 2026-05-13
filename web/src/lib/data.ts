@@ -1,4 +1,4 @@
-import { readFile, writeFile, readdir, unlink, mkdir } from "fs/promises";
+import { readFile, writeFile, readdir, unlink, mkdir, stat } from "fs/promises";
 import path from "path";
 import { Mutex } from "async-mutex";
 import type {
@@ -151,6 +151,10 @@ export async function deleteCheckpoint(id: string): Promise<void> {
 
 async function _writeJson(name: string, data: unknown): Promise<void> {
   await writeFile(filePath(name), JSON.stringify(data, null, 2), "utf-8");
+  // Cache is keyed by mtimeMs so the next read picks up the new file
+  // naturally; clear here to avoid serving briefly-stale data on the
+  // same-tick read that follows a write.
+  invalidateCache(name);
 }
 
 // ─── Per-file mutexes for concurrent write safety ─────────────────────────────
@@ -170,56 +174,118 @@ const fileMutexes = {
   daemonConfig: new Mutex(),
 };
 
-// ─── Read functions (no locking needed — reads are safe) ──────────────────────
+// ─── Read functions (mtime-cached — reads are safe and share results) ────────
+
+interface CacheEntry {
+  mtimeMs: number;
+  data: unknown;
+}
+
+const readCache = new Map<string, CacheEntry>();
+
+/**
+ * Read+parse a JSON file with an mtime-keyed in-memory cache.
+ * If the file's mtime is unchanged since the last read, the cached value
+ * is returned. Otherwise the file is re-read, re-parsed, and cached.
+ *
+ * Callers pass a `validate` function to assert the parsed shape at runtime —
+ * the cache stores `unknown` so this is the only place the cast lives.
+ */
+async function readJsonCached<T>(
+  name: string,
+  validate: (value: unknown) => T,
+): Promise<T> {
+  const fp = filePath(name);
+  const st = await stat(fp);
+  const cached = readCache.get(name);
+  if (cached && cached.mtimeMs === st.mtimeMs) {
+    return validate(cached.data);
+  }
+  const raw = await readFile(fp, "utf-8");
+  const parsed: unknown = JSON.parse(raw);
+  readCache.set(name, { mtimeMs: st.mtimeMs, data: parsed });
+  return validate(parsed);
+}
+
+function invalidateCache(name: string): void {
+  readCache.delete(name);
+}
+
+// Validators — minimal shape checks. They cast through `unknown` so we
+// never use `any`. Callers expect the shape to match what they wrote.
+function asTasks(v: unknown): TasksFile {
+  return v as TasksFile;
+}
+function asGoals(v: unknown): GoalsFile {
+  return v as GoalsFile;
+}
+function asProjects(v: unknown): ProjectsFile {
+  return v as ProjectsFile;
+}
+function asBrainDump(v: unknown): BrainDumpFile {
+  return v as BrainDumpFile;
+}
+function asActivityLog(v: unknown): ActivityLogFile {
+  return v as ActivityLogFile;
+}
+function asInbox(v: unknown): InboxFile {
+  return v as InboxFile;
+}
+function asDecisions(v: unknown): DecisionsFile {
+  return v as DecisionsFile;
+}
+function asAgents(v: unknown): AgentsFile {
+  return v as AgentsFile;
+}
+function asSkillsLibrary(v: unknown): SkillsLibraryFile {
+  return v as SkillsLibraryFile;
+}
+function asActiveRuns(v: unknown): ActiveRunsFile {
+  return v as ActiveRunsFile;
+}
+function asDaemonConfig(v: unknown): Record<string, unknown> {
+  return v as Record<string, unknown>;
+}
 
 export async function getTasks(): Promise<TasksFile> {
-  const raw = await readFile(filePath("tasks.json"), "utf-8");
-  return JSON.parse(raw) as TasksFile;
+  return readJsonCached("tasks.json", asTasks);
 }
 
 export async function getTasksArchive(): Promise<TasksFile> {
   try {
-    const raw = await readFile(filePath("tasks-archive.json"), "utf-8");
-    return JSON.parse(raw) as TasksFile;
+    return await readJsonCached("tasks-archive.json", asTasks);
   } catch {
     return { tasks: [] };
   }
 }
 
 export async function getGoals(): Promise<GoalsFile> {
-  const raw = await readFile(filePath("goals.json"), "utf-8");
-  return JSON.parse(raw) as GoalsFile;
+  return readJsonCached("goals.json", asGoals);
 }
 
 export async function getProjects(): Promise<ProjectsFile> {
-  const raw = await readFile(filePath("projects.json"), "utf-8");
-  return JSON.parse(raw) as ProjectsFile;
+  return readJsonCached("projects.json", asProjects);
 }
 
 export async function getBrainDump(): Promise<BrainDumpFile> {
-  const raw = await readFile(filePath("brain-dump.json"), "utf-8");
-  return JSON.parse(raw) as BrainDumpFile;
+  return readJsonCached("brain-dump.json", asBrainDump);
 }
 
 export async function getActivityLog(): Promise<ActivityLogFile> {
-  const raw = await readFile(filePath("activity-log.json"), "utf-8");
-  return JSON.parse(raw) as ActivityLogFile;
+  return readJsonCached("activity-log.json", asActivityLog);
 }
 
 export async function getInbox(): Promise<InboxFile> {
-  const raw = await readFile(filePath("inbox.json"), "utf-8");
-  return JSON.parse(raw) as InboxFile;
+  return readJsonCached("inbox.json", asInbox);
 }
 
 export async function getDecisions(): Promise<DecisionsFile> {
-  const raw = await readFile(filePath("decisions.json"), "utf-8");
-  return JSON.parse(raw) as DecisionsFile;
+  return readJsonCached("decisions.json", asDecisions);
 }
 
 export async function getAgents(): Promise<AgentsFile> {
   try {
-    const raw = await readFile(filePath("agents.json"), "utf-8");
-    return JSON.parse(raw) as AgentsFile;
+    return await readJsonCached("agents.json", asAgents);
   } catch {
     return { agents: [] };
   }
@@ -227,8 +293,7 @@ export async function getAgents(): Promise<AgentsFile> {
 
 export async function getSkillsLibrary(): Promise<SkillsLibraryFile> {
   try {
-    const raw = await readFile(filePath("skills-library.json"), "utf-8");
-    return JSON.parse(raw) as SkillsLibraryFile;
+    return await readJsonCached("skills-library.json", asSkillsLibrary);
   } catch {
     return { skills: [] };
   }
@@ -236,8 +301,7 @@ export async function getSkillsLibrary(): Promise<SkillsLibraryFile> {
 
 export async function getActiveRuns(): Promise<ActiveRunsFile> {
   try {
-    const raw = await readFile(filePath("active-runs.json"), "utf-8");
-    return JSON.parse(raw) as ActiveRunsFile;
+    return await readJsonCached("active-runs.json", asActiveRuns);
   } catch {
     return { runs: [] };
   }
@@ -245,8 +309,7 @@ export async function getActiveRuns(): Promise<ActiveRunsFile> {
 
 export async function getDaemonConfig(): Promise<Record<string, unknown>> {
   try {
-    const raw = await readFile(filePath("daemon-config.json"), "utf-8");
-    return JSON.parse(raw) as Record<string, unknown>;
+    return await readJsonCached("daemon-config.json", asDaemonConfig);
   } catch {
     return {};
   }

@@ -29,11 +29,12 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -50,13 +51,13 @@ from claude_agent_sdk import (
     tool,
 )
 
+from jarvis.agents.registry import AgentDescriptor, build_default_registry
 from jarvis.llm.model_router import (
     DEFAULT_OPUS_ID,
     DEFAULT_SONNET_ID,
     RouteDecision,
     decide_model,
 )
-from jarvis.agents.registry import AgentDescriptor, build_default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,11 @@ SOUL_LITE = "jarvis_soul_lite.md"
 _RECAP_TURN_PAIRS = 3
 _RECAP_MAX_CHARS = 800
 _TURN_LOG_MAX = 12  # 6 user + 6 assistant
-_TURN_LOG_PATH = Path("state/jarvis_turn_log.json")
+# Anchor at the project root so the file resolves the same whether the
+# importer is uvicorn (started from the repo root), the voice daemon
+# (started from any cwd), or a test runner from `tests/`.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_TURN_LOG_PATH = _PROJECT_ROOT / "state" / "jarvis_turn_log.json"
 _SEMANTIC_RECAP_TOP_K = 3
 _SEMANTIC_MIN_SCORE = 0.4
 _SEMANTIC_MAX_CHARS = 120  # per hit in recap
@@ -95,14 +100,23 @@ def _load_turn_log() -> list[dict[str, str]]:
 
 
 def _save_turn_log(turns: list[dict[str, str]]) -> None:
-    """Persist the rolling turn log to disk (atomic write)."""
-    try:
-        _TURN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = _TURN_LOG_PATH.with_suffix(".tmp")
-        tmp.write_text(json.dumps(turns, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(_TURN_LOG_PATH)
-    except OSError as exc:
-        logger.warning("turn-log write failed: %s", exc)
+    """Persist the rolling turn log to disk (atomic write).
+
+    Runs the disk write on a background thread so the chat hot path
+    doesn't block on fsync.
+    """
+    snapshot = list(turns)
+
+    def _write() -> None:
+        try:
+            _TURN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            tmp = _TURN_LOG_PATH.with_suffix(".tmp")
+            tmp.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(_TURN_LOG_PATH)
+        except OSError as exc:
+            logger.warning("turn-log write failed: %s", exc)
+
+    threading.Thread(target=_write, daemon=True).start()
 
 
 # ---------- Soul loader ----------
@@ -446,28 +460,81 @@ class JarvisChat:
         _save_turn_log(self._turn_log)
         self._index_turn(role=role, text=text, lane=lane)
 
-    def _index_turn(self, role: str, text: str, lane: str | None) -> None:
-        """Persist turn to semantic index. Never raises — failures are warnings."""
+    @staticmethod
+    def _record_unified_turn(
+        *,
+        user_text: str,
+        assistant_text: str,
+        lane: str | None,
+        surface: Literal["voice", "chat", "api"],
+        session_id: str = "default",
+        user_id: str = "default",
+        turn_id: str | None = None,
+        cost_usd: float = 0.0,
+    ) -> None:
+        """Append a turn pair to the unified ``chat_turns.jsonl`` store.
+
+        Called from voice paths (cheap_handler) AND from JarvisChat itself
+        when invoked outside the HTTP layer, so the dashboard sees every
+        turn regardless of surface. Best-effort: failures are warnings.
+        """
+        if not user_text and not assistant_text:
+            return
         try:
             from datetime import UTC, datetime
+            from uuid import uuid4
 
-            from jarvis.state.memory_index import IndexedTurn, append_turn, embed, turn_id_from_dict
+            from jarvis.state.chat_turns import ChatTurnRecord, append_turn
 
-            ts = datetime.now(UTC).isoformat()
-            raw = {"role": role, "text": text, "ts": ts}
-            tid = turn_id_from_dict(raw)
-            vec = embed(text)
-            turn = IndexedTurn(
-                turn_id=tid,
-                ts=ts,
-                role=role,
-                text=text,
-                lane=lane,
-                embedding=vec,
+            rec = ChatTurnRecord(
+                user_id=user_id,
+                turn_id=turn_id or uuid4().hex,
+                user_text=user_text,
+                assistant_text=assistant_text,
+                model=lane or "",
+                cost_usd=cost_usd,
+                ts=datetime.now(UTC).isoformat(),
+                session_id=session_id,
+                surface=surface,
             )
-            append_turn(turn)
-        except Exception as exc:
-            logger.warning("memory index write failed: %s", exc)
+            append_turn(rec)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("unified turn write failed: %s", exc)
+
+    def _index_turn(self, role: str, text: str, lane: str | None) -> None:
+        """Persist turn to semantic index. Never raises — failures are warnings.
+
+        Embedding is dispatched to a background thread so the chat hot path
+        is never blocked on the model call or disk write.
+        """
+        def _run() -> None:
+            try:
+                from datetime import UTC, datetime
+
+                from jarvis.state.memory_index import (
+                    IndexedTurn,
+                    append_turn,
+                    embed,
+                    turn_id_from_dict,
+                )
+
+                ts = datetime.now(UTC).isoformat()
+                raw = {"role": role, "text": text, "ts": ts}
+                tid = turn_id_from_dict(raw)
+                vec = embed(text)
+                turn = IndexedTurn(
+                    turn_id=tid,
+                    ts=ts,
+                    role=role,
+                    text=text,
+                    lane=lane,
+                    embedding=vec,
+                )
+                append_turn(turn)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("memory index write failed: %s", exc)
+
+        threading.Thread(target=_run, daemon=True).start()
 
     # ----- public API -----
 
@@ -508,15 +575,28 @@ class JarvisChat:
             for score, turn in hits
         ]
 
-    async def stream(self, message: str) -> AsyncIterator[StreamEvent]:
-        """Send one user turn, yield events as Claude responds."""
+    async def stream(
+        self,
+        message: str,
+        *,
+        surface: Literal["voice", "chat", "api"] = "api",
+        session_id: str = "default",
+    ) -> AsyncIterator[StreamEvent]:
+        """Send one user turn, yield events as Claude responds.
+
+        ``surface`` and ``session_id`` are stamped on the unified
+        ``chat_turns.jsonl`` record written when the turn completes, so the
+        dashboard can attribute turns to voice vs. chat vs. terminal.
+        """
         # Short-circuit: message contains a URL → run multimodal link_handler
         # and synthesize stream events from its summary. Skips the normal
         # routing + Claude SDK call entirely.
         from jarvis.agents.lens import link_handler
 
         if link_handler.extract_urls(message or ""):
-            async for ev in self._stream_via_link_handler(message or ""):
+            async for ev in self._stream_via_link_handler(
+                message or "", surface=surface, session_id=session_id
+            ):
                 yield ev
             return
 
@@ -593,9 +673,29 @@ class JarvisChat:
         # Update lane + log AFTER the response completes successfully.
         self._last_lane = decision.model
         self._record_turn("user", cleaned, lane=decision.model)
-        self._record_turn("assistant", "".join(assistant_text_buf), lane=decision.model)
+        assistant_text = "".join(assistant_text_buf)
+        self._record_turn("assistant", assistant_text, lane=decision.model)
 
-    async def _stream_via_link_handler(self, message: str) -> AsyncIterator[StreamEvent]:
+        # Unified chat_turns.jsonl write — skip when surface=="chat" because
+        # the HTTP endpoint already persists with full tool-call metadata.
+        # Voice/terminal paths land here and need the durable record so the
+        # dashboard sees their turns.
+        if surface != "chat":
+            self._record_unified_turn(
+                user_text=cleaned,
+                assistant_text=assistant_text,
+                lane=decision.model,
+                surface=surface,
+                session_id=session_id,
+            )
+
+    async def _stream_via_link_handler(
+        self,
+        message: str,
+        *,
+        surface: Literal["voice", "chat", "api"] = "api",
+        session_id: str = "default",
+    ) -> AsyncIterator[StreamEvent]:
         """Run link_handler in a thread, synthesize stream events from result."""
         import asyncio
 
@@ -650,8 +750,22 @@ class JarvisChat:
         self._last_lane = decision_model
         self._record_turn("user", cleaned, lane=decision_model)
         self._record_turn("assistant", summary, lane=decision_model)
+        if surface != "chat":
+            self._record_unified_turn(
+                user_text=cleaned,
+                assistant_text=summary,
+                lane=decision_model,
+                surface=surface,
+                session_id=session_id,
+            )
 
-    async def respond_single(self, message: str) -> dict[str, Any]:
+    async def respond_single(
+        self,
+        message: str,
+        *,
+        surface: Literal["voice", "chat", "api"] = "voice",
+        session_id: str = "default",
+    ) -> dict[str, Any]:
         """Single-shot reply for non-streaming surfaces (voice channel).
 
         Drives :meth:`stream` end-to-end, accumulates the assistant text +
@@ -665,7 +779,9 @@ class JarvisChat:
         tool_calls: list[dict[str, Any]] = []
         cost_usd = 0.0
         try:
-            async for ev in self.stream(message):
+            async for ev in self.stream(
+                message, surface=surface, session_id=session_id
+            ):
                 if ev.type == "text":
                     text_buf.append(str(ev.payload.get("delta", "")))
                 elif ev.type == "tool_use":
@@ -776,4 +892,3 @@ async def _convert_message(msg: Any) -> AsyncIterator[StreamEvent]:
                 "total_cost_usd": msg.total_cost_usd,
             },
         )
- 
