@@ -51,6 +51,32 @@ def email_tick(tempo: Tempo, notifier: Notifier) -> dict[str, Any]:
     return {"action_count": action_count, "severity": severity}
 
 
+def draft_replies_tick(tempo: Tempo, notifier: Notifier) -> dict[str, Any]:
+    """Nightly: draft replies for action-required mail (J9).
+
+    Calls ``tempo.draft_replies(limit=5)``, which scans recent unread mail,
+    classifies via ``classify_message``, and persists candidate drafts to
+    ``state/drafted_replies.jsonl`` with status="drafted". The operator
+    reviews/approves in the morning; sending still requires confirmation
+    via ``tempo.send_mail`` per the Jarvis authority matrix.
+    """
+    resp = tempo.draft_replies(limit=5)
+    count = int(resp.result.get("count", 0))
+    draft_ids = list(resp.result.get("draft_ids", []))
+    if count > 0:
+        summary = f"Drafted {count} reply candidates overnight"
+        append_inbox(
+            InboxEvent(
+                agent="tempo",
+                severity="info",
+                summary=summary,
+                ref={"draft_ids": draft_ids},
+            )
+        )
+        notifier.push("Tempo - drafts ready", summary, priority=0)
+    return {"count": count, "draft_ids": draft_ids}
+
+
 def calendar_tick(tempo: Tempo, notifier: Notifier) -> dict[str, Any]:
     resp = tempo.today()
     count = resp.result["count"]
@@ -330,6 +356,18 @@ def scholar_tick(scholar: Scholar, notifier: Notifier) -> dict[str, Any]:
     if count >= 5:
         notifier.push("Scholar — workload high", summary, priority=0)
     return {"count": count, "severity": severity}
+
+
+def proactive_intelligence_tick(notifier: Notifier) -> dict[str, Any]:
+    """Daily: LLM scans recent activity, emits non-obvious observations."""
+    from .proactive_intelligence import run_proactive_pass
+
+    events = run_proactive_pass()
+    summaries: list[str] = []
+    for event in events:
+        summaries.append(event.summary)
+        notifier.push("Jarvis — observed", event.summary, priority=0)
+    return {"observation_count": len(events), "summaries": summaries}
 
 
 def morning_digest(reg: dict[str, Any], notifier: Notifier) -> dict[str, Any]:

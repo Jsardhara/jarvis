@@ -1,17 +1,4 @@
-"""Voice state singleton + WS broadcast helpers.
-
-The voice loop emits two channels of state for the Mission Control UI:
-
-* ``voice.state`` — coarse mode/tier transitions (idle, wake, stt, routing,
-  tts). Persisted to ``state/voice_state.json`` so the dashboard can read
-  the last-known state on cold start.
-* ``voice.level`` — high-frequency RMS envelope for the bottom-strip
-  waveform, broadcast only (no file write).
-
-Broadcast is performed via a callback registered by ``jarvis.apps.api.app`` at
-startup. When no broadcaster is registered (tests, headless runs), state
-mutations still write to disk; level pushes are no-ops.
-"""
+"""Voice state singleton + WS broadcast helpers."""
 from __future__ import annotations
 
 import json
@@ -38,8 +25,23 @@ _DEFAULT_STATE: dict[str, Any] = {
     "last_reply_source": None,
     "latency_ms": 0,
     "cost_usd": 0.0,
+    "hot_mic_enabled": False,
     "updated_at": None,
 }
+
+
+def set_hot_mic_enabled(enabled: bool) -> dict[str, Any]:
+    """Toggle the persisted ``hot_mic_enabled`` flag (J10)."""
+    state = read_state()
+    state["hot_mic_enabled"] = bool(enabled)
+    state["updated_at"] = _now_iso()
+    write_state(state)
+    if _broadcaster is not None:
+        try:
+            _broadcaster({"type": "voice.state", "state": state})
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("voice.state broadcast failed: %s", exc)
+    return state
 
 
 def register_broadcaster(fn: BroadcastFn) -> None:
@@ -59,11 +61,15 @@ def read_state() -> dict[str, Any]:
         write_state(_DEFAULT_STATE.copy())
         return _DEFAULT_STATE.copy()
     try:
-        return json.loads(_STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(_STATE_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("voice_state read failed (%s); resetting", exc)
         write_state(_DEFAULT_STATE.copy())
         return _DEFAULT_STATE.copy()
+    # Backfill any new fields onto state files written by older versions.
+    for key, default in _DEFAULT_STATE.items():
+        state.setdefault(key, default)
+    return state
 
 
 def write_state(state: dict[str, Any]) -> None:
@@ -83,11 +89,7 @@ def set_state(
     latency_ms: int | None = None,
     cost_usd: float | None = None,
 ) -> dict[str, Any]:
-    """Update + persist + broadcast the singleton.
-
-    Only fields passed explicitly mutate; others retain their previous value
-    so partial updates (e.g., just `mode="stt"`) don't clobber `last_text`.
-    """
+    """Update + persist + broadcast the singleton."""
     state = read_state()
     state["mode"] = mode
     if tier is not None:
@@ -105,7 +107,7 @@ def set_state(
     if _broadcaster is not None:
         try:
             _broadcaster({"type": "voice.state", "state": state})
-        except Exception as exc:  # noqa: BLE001 — broadcast must never raise
+        except Exception as exc:  # noqa: BLE001
             logger.warning("voice.state broadcast failed: %s", exc)
     return state
 
@@ -132,5 +134,6 @@ __all__ = [
     "read_state",
     "write_state",
     "set_state",
+    "set_hot_mic_enabled",
     "push_level",
 ]

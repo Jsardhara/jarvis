@@ -15,10 +15,16 @@ import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from jarvis.config import get_settings
 from jarvis.contract import AgentResponse, Task
 from jarvis.state import add_task, load_tasks, update_task
+from jarvis.state.drafted_replies import (
+    STATUS_DRAFTED,
+    DraftedReply,
+    append_draft,
+)
 from jarvis.state.memory import load_preferences
 
 from ..providers import OutlookProvider
@@ -161,6 +167,14 @@ def _classify_batch_with_llm(
     except (json.JSONDecodeError, ValueError) as exc:
         log.warning("tempo: LLM triage parse error (%s); defaulting all to info_only", exc)
         return [{"id": m["id"], "bucket": BUCKET_INFO, "reason": "parse_error"} for m in items]
+
+
+def _reply_subject(subject: str) -> str:
+    """Return ``subject`` with a single ``Re:`` prefix, idempotent."""
+    s = (subject or "").strip()
+    if s.lower().startswith("re:"):
+        return s
+    return f"Re: {s}" if s else "Re:"
 
 
 def _apply_important_sender_override(
@@ -406,6 +420,70 @@ class Tempo:
             follow_ups=["confirm to send"],
             needs_confirm=True,
             confidence=0.9,
+        )
+
+    def _draft_one(self, message: dict[str, Any]) -> str:
+        """Ask Claude for a polite, professional draft reply (4 sentences max)."""
+        from jarvis.llm.client import query_claude_sync
+
+        system = (
+            "You draft polite, professional email replies. Keep it to 4 "
+            "sentences max. No subject line, no signature placeholders, no "
+            "markdown - just the reply body."
+        )
+        sender = message.get("from", "") or ""
+        subject = message.get("subject", "") or ""
+        body_preview = (
+            message.get("body_preview")
+            or message.get("snippet")
+            or message.get("body", "")
+        )
+        user = (
+            f"From: {sender}\nSubject: {subject}\nBody:\n{body_preview}\n\n"
+            "Write a reply."
+        )
+        try:
+            return query_claude_sync(system, user, agent="tempo").strip()
+        except Exception:  # noqa: BLE001
+            log.warning("tempo: draft LLM call failed", exc_info=True)
+            return (
+                "Thanks for reaching out - I'll review and follow up shortly."
+            )
+
+    def draft_replies(self, limit: int = 5) -> AgentResponse:
+        """Scan recent action-required mail and draft reply candidates.
+
+        Non-destructive: persists drafts to ``state/drafted_replies.jsonl``
+        with status="drafted". The eventual send still flows through
+        ``send_mail`` so the authority gate fires (needs_confirm=True).
+        """
+        fetch_n = max(limit * 2, limit)
+        msgs = self.outlook.list_unread(max_results=fetch_n)
+        action_msgs = [m for m in msgs if classify_message(m) == TIER_ACTION]
+        action_msgs = action_msgs[:limit]
+
+        draft_ids: list[str] = []
+        for msg in action_msgs:
+            body = self._draft_one(msg)
+            draft = DraftedReply(
+                id=uuid4().hex[:12],
+                inbox_event_id=str(msg.get("id", "")),
+                to=str(msg.get("from", "")),
+                subject=_reply_subject(str(msg.get("subject", ""))),
+                body=body,
+                drafted_at=datetime.now(UTC).isoformat(),
+                status=STATUS_DRAFTED,
+            )
+            append_draft(draft)
+            draft_ids.append(draft.id)
+
+        return AgentResponse(
+            agent="tempo",
+            intent="draft_replies",
+            action="drafted",
+            result={"count": len(draft_ids), "draft_ids": draft_ids},
+            confidence=0.9,
+            needs_confirm=False,
         )
 
     def send_mail(self, to: str, subject: str, body: str) -> AgentResponse:

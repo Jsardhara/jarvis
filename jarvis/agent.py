@@ -254,6 +254,15 @@ def _build_live_state_block() -> str:
         logger.debug("facts block render skipped: %s", exc)
         facts_block = ""
 
+    projects_block = ""
+    try:
+        from jarvis.state.projects import render_active_projects_for_prompt
+
+        projects_block = render_active_projects_for_prompt(limit=5)
+    except Exception as exc:  # noqa: BLE001 — projects must never break chat
+        logger.debug("projects block render skipped: %s", exc)
+        projects_block = ""
+
     parts: list[str] = []
     if body:
         parts.append(
@@ -262,6 +271,8 @@ def _build_live_state_block() -> str:
         )
     if facts_block:
         parts.append(facts_block)
+    if projects_block:
+        parts.append(projects_block)
     return "\n\n".join(parts)
 
 
@@ -736,6 +747,27 @@ class JarvisChat:
                 yield ev
             return
 
+        # Short-circuit: slash-skill dispatch. ``/code-review <text>`` looks
+        # up the named skill in ``jarvis.skills`` and runs it as a one-shot
+        # multimodal call with the skill's prompt as system and the
+        # operator's trailing text as content. Mirrors the link/screen paths.
+        from jarvis.skills import get_skill
+
+        stripped = (message or "").strip()
+        if stripped.startswith("/") and not stripped.lower().startswith("/screen"):
+            slash = stripped.split(maxsplit=1)
+            slug = slash[0][1:]  # strip leading "/"
+            skill = get_skill(slug)
+            if skill is not None:
+                async for ev in self._stream_via_skill(
+                    skill,
+                    slash[1] if len(slash) > 1 else "",
+                    surface=surface,
+                    session_id=session_id,
+                ):
+                    yield ev
+                return
+
         if self._forced_model is not None:
             decision = RouteDecision(
                 model=self._forced_model,
@@ -892,6 +924,78 @@ class JarvisChat:
             self._record_unified_turn(
                 user_text=cleaned,
                 assistant_text=summary,
+                lane=decision_model,
+                surface=surface,
+                session_id=session_id,
+            )
+
+    async def _stream_via_skill(
+        self,
+        skill: "Any",
+        user_text: str,
+        *,
+        surface: Literal["voice", "chat", "api"] = "api",
+        session_id: str = "default",
+    ) -> AsyncIterator[StreamEvent]:
+        """Run a named skill — one-shot Claude call using skill.prompt as system.
+
+        Mirrors ``_stream_via_link_handler``: emits a model badge, runs the
+        skill via the global claude queue in a thread, then synthesizes
+        text + done events. Records the turn through the standard pathways
+        so it lands in turn-log + unified store like any other reply.
+        """
+        import asyncio
+
+        cleaned = (user_text or "").strip()
+        decision_model = skill.model or self._sonnet_model
+
+        yield StreamEvent(
+            "model",
+            {
+                "model": decision_model,
+                "reason": f"skill — {skill.slug}",
+                "tier": 2,
+                "manual": True,
+                "length_chars": len(cleaned),
+            },
+        )
+
+        def _run_skill() -> str:
+            from jarvis.llm.queue import submit
+
+            try:
+                return submit(
+                    system=skill.prompt,
+                    user=cleaned or f"(no input — run the {skill.slug} skill with whatever defaults make sense.)",
+                    model=decision_model,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[chat] skill %s failed: %s", skill.slug, exc)
+                return f"Sorry, the {skill.slug} skill hit an error."
+
+        try:
+            loop = asyncio.get_running_loop()
+            reply = await loop.run_in_executor(None, _run_skill)
+        except Exception as exc:  # pragma: no cover — inner already caught
+            yield StreamEvent("error", {"message": f"skill failed: {exc}"})
+            return
+
+        reply = (reply or "").strip() or "Nothing useful."
+        yield StreamEvent("text", {"delta": reply})
+        yield StreamEvent("done", {"total_cost_usd": 0.0})
+
+        self._last_lane = decision_model
+        # Log with the slash prefix so the turn-log reflects what the
+        # operator actually typed.
+        logged_user = f"/{skill.slug}"
+        if cleaned:
+            logged_user = f"{logged_user} {cleaned}"
+        self._record_turn("user", logged_user, lane=decision_model)
+        self._record_turn("assistant", reply, lane=decision_model)
+        if surface != "chat":
+            self._record_unified_turn(
+                user_text=logged_user,
+                assistant_text=reply,
                 lane=decision_model,
                 surface=surface,
                 session_id=session_id,
@@ -1105,7 +1209,7 @@ class JarvisChat:
                     raw_cost = ev.payload.get("total_cost_usd")
                     if isinstance(raw_cost, (int, float)):
                         cost_usd = float(raw_cost)
-        except Exception as exc:  # pragma: no cover — voice never crashes on chat fail
+        except Exception as exc:  # pragma: no cover - voice never crashes on chat fail
             logger.warning("respond_single failed: %s", exc)
             return {
                 "responses": {

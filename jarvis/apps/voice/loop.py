@@ -9,6 +9,10 @@ the agents did.
 - Tier 3 (orchestrator dispatch) returns raw work artifacts. Those go
   through ``_humanize_dispatch`` — a single Haiku call that turns the
   dispatch result into one conversational sentence.
+
+J10 — when ``settings.voice_hot_mic`` is set, :func:`run_hot_mic_loop`
+replaces the wake-word gate with a continuous-listening + barge-in
+loop. The wake-word path stays the default; hot-mic is additive.
 """
 from __future__ import annotations
 
@@ -17,9 +21,11 @@ import logging
 from collections.abc import Awaitable, Callable, Iterable
 
 from .persona import PERSONA, VOICE_WORD_CAP
+from .silence import BargeinDetector
 from .speech import clean_for_speech, rewrite_for_speech
 from .stt import STTProvider
 from .tts import TTSProvider
+from .voice_state import set_hot_mic_enabled as _set_hot_mic_enabled
 from .voice_state import set_state as _set_voice_state
 from .wake import WakeDetector
 
@@ -39,11 +45,7 @@ HUMANIZER_SYSTEM = (
 
 
 def _humanize_dispatch(response: dict) -> str:
-    """Turn raw orchestrator dispatch result into one spoken-ready sentence.
-
-    Synchronous — runs through claude_queue.submit which is sync. Wrapped in
-    try/except so voice never crashes on LLM errors.
-    """
+    """Turn raw orchestrator dispatch result into one spoken-ready sentence."""
     from jarvis.llm.queue import submit  # type: ignore[import-not-found]
 
     try:
@@ -58,24 +60,18 @@ def _humanize_dispatch(response: dict) -> str:
         if isinstance(reply, dict):
             reply = reply.get("text", "")
         reply = (reply or "").strip()
-    except Exception as exc:  # noqa: BLE001 — voice never crashes on LLM fail
+    except Exception as exc:  # noqa: BLE001
         logger.warning("[voice] humanizer failed: %s", exc)
         reply = ""
     return reply or "Handled. Anything else?"
 
 
-# Markers that indicate structural artifacts a clean pass alone can't fix.
 _STRUCTURAL_HINTS = ("{", "}", "[", "]", "  - ", "  * ")
 _MAX_SPOKEN_WORDS = 50
 
 
 def _talk_pass(text: str, *, source: str | None) -> str:
-    """Last-mile spoken pass.
-
-    Always clean. If cleaned text is short + structure-free, return as-is.
-    Otherwise rephrase through Haiku for natural cadence. Local-tier replies
-    (already short, hand-tuned) skip the rewrite.
-    """
+    """Last-mile spoken pass."""
     cleaned = clean_for_speech(text)
     if not cleaned:
         return ""
@@ -93,12 +89,7 @@ def _talk_pass(text: str, *, source: str | None) -> str:
 
 
 def _spoken_text(response: dict) -> str:
-    """Extract or synthesize the spoken-ready line for TTS.
-
-    - needs_confirm → confirmation prompt (skip talk-pass)
-    - voice tier reply (cheap_handler) → talk-pass cleaner
-    - orchestrator dispatch → humanize via Haiku, then talk-pass cleaner
-    """
+    """Extract or synthesize the spoken-ready line for TTS."""
     if response.get("needs_confirm"):
         return "Need your okay before I run that."
 
@@ -149,3 +140,84 @@ async def run_voice_loop(detector: WakeDetector, stt: STTProvider, tts: TTSProvi
     text = stt.transcribe(audio)
     response, spoken = await process_utterance(text, handle, tts)
     return {"text": text, "response": response, "audio_bytes": len(spoken)}
+
+
+def _safe_interrupt(tts: TTSProvider) -> bool:
+    """Call ``tts.interrupt()`` defensively (providers may lack it)."""
+    fn = getattr(tts, "interrupt", None)
+    if not callable(fn):
+        return False
+    try:
+        return bool(fn())
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[voice] tts.interrupt() failed: %s", exc)
+        return False
+
+
+async def run_hot_mic_loop(
+    stt: STTProvider,
+    tts: TTSProvider,
+    handle: HandleFn,
+    audio_source: Callable[[], Iterable[bytes]],
+    *,
+    detector: BargeinDetector | None = None,
+    silence_frames_to_end: int = 24,  # ~720 ms at 30 ms frames
+    max_frames: int = 500,            # safety cap (~15 s)
+    is_tts_playing: Callable[[], bool] | None = None,
+) -> dict | None:
+    """One hot-mic cycle: continuously listen, barge-in on speech, send to handle.
+
+    Mirrors :func:`run_voice_loop`'s output shape. Wraps in a ``while True``
+    upstream. Safe to call repeatedly - each invocation processes one
+    end-to-end utterance and returns.
+    """
+    det = detector or BargeinDetector()
+    _set_hot_mic_enabled(True)
+    _set_voice_state("wake")
+
+    frames: list[bytes] = []
+    voice_started = False
+    silence_count = 0
+    interrupted = False
+
+    for total, frame in enumerate(audio_source(), start=1):
+        if total > max_frames:
+            break
+        speech = det.feed(frame)
+
+        if speech and not interrupted and is_tts_playing and is_tts_playing():
+            if _safe_interrupt(tts):
+                interrupted = True
+                logger.info("[voice] hot-mic barge-in - interrupted TTS")
+
+        if speech:
+            frames.append(frame)
+            voice_started = True
+            silence_count = 0
+            continue
+
+        if voice_started:
+            frames.append(frame)
+            silence_count += 1
+            if silence_count >= silence_frames_to_end:
+                break
+
+    if not frames:
+        _set_voice_state("idle")
+        return None
+
+    pcm = b"".join(frames)
+    _set_voice_state("stt")
+    text = stt.transcribe(pcm) if hasattr(stt, "transcribe") else ""
+    text = (text or "").strip()
+    if not text:
+        _set_voice_state("idle")
+        return None
+
+    response, audio = await process_utterance(text, handle, tts)
+    return {
+        "text": text,
+        "response": response,
+        "audio_bytes": len(audio) if audio else 0,
+        "interrupted": interrupted,
+    }
