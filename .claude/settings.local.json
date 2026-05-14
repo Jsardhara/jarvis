@@ -63,7 +63,9 @@
       "Bash(rmdir jarvis/web)",
       "Bash(rm jarvis/web/data/*.json)",
       "Bash(rmdir jarvis/web/data jarvis/web)",
-      "Bash(cmd.exe *)"
+      "Bash(cmd.exe *)",
+      "Bash(findstr /B \"VOICE_ENABLED\" .env)",
+      "Bash(ls .env)"
     ]
   }
 }

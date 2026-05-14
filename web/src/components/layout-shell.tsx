@@ -16,6 +16,7 @@ import { showSuccess, showError } from "@/lib/toast";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActiveRunsProvider } from "@/providers/active-runs-provider";
 import { AtlasDegradedBanner } from "@/components/AtlasDegradedBanner";
+import { MockModeBanner } from "@/components/atlas/MockModeBanner";
 
 interface LayoutShellProps {
   children: React.ReactNode;
@@ -68,8 +69,11 @@ export function LayoutShell({ children }: LayoutShellProps) {
 
   return (
     <TooltipProvider delayDuration={300}>
-      {/* Atlas degraded banner sits above the grid as a 1-line strip */}
+      {/* Atlas status banners sit above the grid as 1-line strips.
+          Only one renders at a time — MockModeBanner suppresses itself when
+          AtlasDegradedBanner is visible to avoid stacked amber noise. */}
       <AtlasDegradedBanner />
+      <MockModeBanner />
 
       {/* Ops Black 4-area grid */}
       <div className="ops-app">

@@ -12,18 +12,18 @@ import { Keyboard } from "lucide-react";
 
 const shortcuts = [
   { key: "?", label: "Show keyboard shortcuts" },
-  { key: "N", label: "Create new task (opens Cmd+K)" },
-  { key: "G H", label: "Go to Dashboard" },
+  { key: "N", label: "Create new task" },
+  { key: "G H", label: "Go to Command Center" },
   { key: "G E", label: "Go to Priority Matrix" },
   { key: "G K", label: "Go to Status Board" },
-  { key: "G O", label: "Go to Objectives" },
   { key: "G B", label: "Go to Brain Dump" },
-  { key: "G P", label: "Go to Projects" },
   { key: "G I", label: "Go to Inbox" },
   { key: "G D", label: "Go to Decisions" },
-  { key: "G C", label: "Go to Crew" },
-  { key: "G S", label: "Go to Skills" },
-  { key: "G L", label: "Go to Launch" },
+  { key: "G A", label: "Go to Atlas" },
+  { key: "G T", label: "Go to Tempo" },
+  { key: "G S", label: "Go to Scholar" },
+  { key: "G F", label: "Go to Forge" },
+  { key: "G L", label: "Go to Lens" },
 ];
 
 interface KeyboardShortcutsProps {
@@ -48,21 +48,24 @@ export function KeyboardShortcuts({ onCreateTask }: KeyboardShortcutsProps) {
         return;
       }
 
-      // Handle "G" prefix for navigation
+      // Handle "G" prefix for navigation. Routes to deleted pages
+      // (objectives/projects/crew/skills/launch) were removed during the
+      // orphan-page cleanup; G-prefix routes now target only pages that
+      // exist in the sidebar.
       if (gPressed) {
         setGPressed(false);
         switch (e.key.toLowerCase()) {
           case "h": router.push("/"); return;
           case "e": router.push("/priority-matrix"); return;
           case "k": router.push("/status-board"); return;
-          case "o": router.push("/objectives"); return;
           case "b": router.push("/brain-dump"); return;
-          case "p": router.push("/projects"); return;
           case "i": router.push("/inbox"); return;
           case "d": router.push("/decisions"); return;
-          case "c": router.push("/crew"); return;
-          case "s": router.push("/skills"); return;
-          case "l": router.push("/launch"); return;
+          case "a": router.push("/atlas"); return;
+          case "t": router.push("/tempo"); return;
+          case "s": router.push("/scholar"); return;
+          case "f": router.push("/forge"); return;
+          case "l": router.push("/lens"); return;
         }
         return;
       }

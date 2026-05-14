@@ -23,6 +23,35 @@
       "dueDate": "2026-04-30T15:30:00",
       "createdAt": "2026-04-29T14:58:22.532284+00:00",
       "updatedAt": "2026-05-04T13:48:00.000000+00:00"
+    },
+    {
+      "id": "task_9WGBWz1ul6Q-",
+      "title": "Money Maker",
+      "description": "",
+      "importance": "not-important",
+      "urgency": "not-urgent",
+      "kanban": "not-started",
+      "projectId": null,
+      "milestoneId": null,
+      "assignedTo": null,
+      "collaborators": [
+        "lens",
+        "forge"
+      ],
+      "dailyActions": [],
+      "subtasks": [],
+      "blockedBy": [],
+      "estimatedMinutes": null,
+      "actualMinutes": null,
+      "acceptanceCriteria": [],
+      "comments": [],
+      "tags": [],
+      "notes": "",
+      "createdAt": "2026-05-13T18:46:30.543Z",
+      "updatedAt": "2026-05-13T18:46:30.543Z",
+      "dueDate": null,
+      "completedAt": null,
+      "deletedAt": null
     }
   ]
 }

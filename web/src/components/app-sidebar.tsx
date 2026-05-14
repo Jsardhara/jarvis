@@ -365,16 +365,17 @@ export function AppSidebar({
         ))}
       </NavSection>
 
-      {/* SUB-AGENTS */}
+      {/* SUB-AGENTS — atlas excluded; it has its own dedicated section below
+          with Overview/Pipeline/Network/Trades/Agents sub-pages. Listing it
+          here too would double-render the same destination. */}
       <NavSection label="SUB-AGENTS">
-        {SUBSYSTEM_AGENTS.map((id) => {
+        {SUBSYSTEM_AGENTS.filter((id) => id !== "atlas").map((id) => {
           const agentHref =
-            id === "atlas" ? "/atlas" :
             id === "scholar" ? "/scholar" :
             id === "lens" ? "/lens" :
             id === "tempo" ? "/tempo" :
             id === "forge" ? "/forge" :
-            `/team/${id}`;
+            `/${id}`;
           return (
             <AgentRow
               key={id}

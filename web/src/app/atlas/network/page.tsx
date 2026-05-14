@@ -14,7 +14,7 @@ import { useAtlasNetwork } from "@/hooks/useAtlasNetwork";
 import type { MessageKind, KindFilter } from "@/hooks/useAtlasNetwork";
 import { AgentNetworkGraph } from "@/components/atlas/network/AgentNetworkGraph";
 import { AgentInspectorDrawer } from "@/components/atlas/network/AgentInspectorDrawer";
-import { MockModeBanner } from "@/components/atlas/MockModeBanner";
+// MockModeBanner is mounted globally in LayoutShell — see web/src/components/layout-shell.tsx.
 import { Dot } from "@/components/ops/Dot";
 
 // ─── Kind filter chips ────────────────────────────────────────────────────────
@@ -177,8 +177,6 @@ export default function AtlasNetworkPage() {
         overflow: "hidden",
       } as CSSProperties}
     >
-      <MockModeBanner />
-
       {/* ── Toolbar ────────────────────────────────────────────────────── */}
       <NetworkToolbar
         paused={paused}

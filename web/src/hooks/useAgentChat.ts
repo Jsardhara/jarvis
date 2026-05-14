@@ -14,7 +14,7 @@
  * Returns { messages, send, isStreaming, error, clear }
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 const JARVIS_API =
   typeof process !== "undefined"
@@ -76,6 +76,18 @@ export function useAgentChat(agentId: string): UseAgentChatReturn {
 
   const esRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+
+  // Close any open EventSource when the component unmounts.
+  // Without this, navigating away from an agent page leaks the SSE
+  // connection — after ~6 leaks the browser hits its per-origin cap
+  // and stalls subsequent fetches (including Next.js route prefetches),
+  // which manifests as sidebar links becoming unresponsive.
+  useEffect(() => {
+    return () => {
+      esRef.current?.close();
+      esRef.current = null;
+    };
+  }, []);
 
   // Keep sessionIdRef in sync
   const updateSessionId = useCallback((id: string) => {

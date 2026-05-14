@@ -276,7 +276,7 @@ class TestDailyDigest:
         """Calling daily_digest() with no args uses today's UTC date."""
         from jarvis.state.exports import daily_digest
 
-        today = datetime.date.today()
+        today = datetime.datetime.now(datetime.UTC).date()
         result = daily_digest()
 
         assert today.isoformat() in result
@@ -333,7 +333,7 @@ class TestWeeklyDigest:
         """weekly_digest() with no args ends today."""
         from jarvis.state.exports import weekly_digest
 
-        today = datetime.date.today()
+        today = datetime.datetime.now(datetime.UTC).date()
         result = weekly_digest()
 
         assert today.isoformat() in result

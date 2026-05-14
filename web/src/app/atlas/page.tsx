@@ -19,7 +19,7 @@ import type { TradeStats } from "@/hooks/useTradeBlotter";
 import { Panel, Tag, KV, Hatch, AgentGlyph, getAgentIdentity } from "@/components/ops";
 import { AgentStatusRow } from "@/components/atlas/AgentStatusRow";
 import { AtlasEventTicker } from "@/components/atlas/AtlasEventTicker";
-import { MockModeBanner } from "@/components/atlas/MockModeBanner";
+// MockModeBanner is mounted globally in LayoutShell — see web/src/components/layout-shell.tsx.
 import { SentinelTimeline } from "@/components/atlas/SentinelTimeline";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -81,8 +81,6 @@ export default function AtlasPage() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 } as CSSProperties}>
-      <MockModeBanner />
-
       {/* KPI strip */}
       <KpiStrip snapshot={snapshot} stats={stats} />
 

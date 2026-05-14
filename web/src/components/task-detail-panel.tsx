@@ -27,7 +27,7 @@ import { getAgentIcon } from "@/lib/agent-icons";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Tip } from "@/components/ui/tip";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+import { showSuccess, showError } from "@/lib/toast";
 
 const quadrantLabels: Record<string, { label: string; color: string }> = {
   do: { label: "DO", color: "bg-quadrant-do/20 text-quadrant-do border-quadrant-do/30" },
@@ -114,7 +114,7 @@ export function TaskDetailPanel({ task, projects, goals, allTasks, onUpdate, onD
       };
       const agent = agents.find((a) => a.id === role);
       const agentLabel = agent?.name ?? role;
-      toast.success(`Deployed to ${agentLabel}`, { icon: "🚀" });
+      showSuccess(`Deployed to ${agentLabel}`);
       onUpdate(deployData);
       onClose();
     },
@@ -144,9 +144,9 @@ export function TaskDetailPanel({ task, projects, goals, allTasks, onUpdate, onD
       // Optimistically update the local task reference
       task.comments = [...existingComments, newComment];
       setCommentText("");
-      toast.success("Comment added");
+      showSuccess("Comment added");
     } catch {
-      toast.error("Failed to add comment");
+      showError("Failed to add comment");
     }
   }, [commentText, task]);
 

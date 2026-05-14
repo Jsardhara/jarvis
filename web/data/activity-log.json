@@ -854,6 +854,204 @@
       "summary": "lens.searched (668 ms)",
       "details": "",
       "timestamp": "2026-05-08T14:30:37.000964+00:00"
+    },
+    {
+      "id": "1c3b8c26d3621953",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:48:26.643640+00:00"
+    },
+    {
+      "id": "699950c9883ff019",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:48:26.648095+00:00"
+    },
+    {
+      "id": "e7bbf4541220cb14",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (2215 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:48:28.865643+00:00"
+    },
+    {
+      "id": "e8598b3ceb9b05e3",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-13T18:48:28.868169+00:00"
+    },
+    {
+      "id": "a68898f7ac79437d",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-13T18:48:28.870642+00:00"
+    },
+    {
+      "id": "812fb994a5a6d238",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (166 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:48:29.039767+00:00"
+    },
+    {
+      "id": "7ed83c7a9949bf2b",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.classified (52622 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:49:23.034961+00:00"
+    },
+    {
+      "id": "1d6e85e19059b82f",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:49:23.054327+00:00"
+    },
+    {
+      "id": "a22d016aaad60c7e",
+      "type": "task_failed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.today (30209 ms)",
+      "details": "HTTPSConnectionPool(host='caldav.icloud.com', port=443): Read timed out. (read timeout=30)",
+      "timestamp": "2026-05-13T18:49:53.268938+00:00"
+    },
+    {
+      "id": "9724a4e101692a54",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:49:53.275430+00:00"
+    },
+    {
+      "id": "d624360cf47afa33",
+      "type": "task_failed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.today (30018 ms)",
+      "details": "HTTPSConnectionPool(host='caldav.icloud.com', port=443): Read timed out. (read timeout=30)",
+      "timestamp": "2026-05-13T18:50:23.301083+00:00"
+    },
+    {
+      "id": "4f646892b91b22b9",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (2 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:50:23.309522+00:00"
+    },
+    {
+      "id": "0da4ab9e02b4920e",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-13T18:50:23.316755+00:00"
+    },
+    {
+      "id": "49290b58cdc65295",
+      "type": "task_failed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.today (30002 ms)",
+      "details": "HTTPSConnectionPool(host='caldav.icloud.com', port=443): Read timed out. (read timeout=30)",
+      "timestamp": "2026-05-13T18:50:53.321373+00:00"
+    },
+    {
+      "id": "25c0fe86d785465f",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:50:53.327916+00:00"
+    },
+    {
+      "id": "9872d671ce2ba313",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-13T18:50:53.334828+00:00"
+    },
+    {
+      "id": "d5f60d5696fb4847",
+      "type": "task_failed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.today (30014 ms)",
+      "details": "HTTPSConnectionPool(host='caldav.icloud.com', port=443): Read timed out. (read timeout=30)",
+      "timestamp": "2026-05-13T18:51:23.356750+00:00"
+    },
+    {
+      "id": "3fb3948fa3591ff9",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:51:23.372759+00:00"
+    },
+    {
+      "id": "880ed053b816bc5d",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised",
+      "details": "",
+      "timestamp": "2026-05-13T18:51:23.376734+00:00"
+    },
+    {
+      "id": "c79918909e6e9529",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.listed",
+      "details": "",
+      "timestamp": "2026-05-13T18:51:23.378882+00:00"
+    },
+    {
+      "id": "e019cf5b99c7f13a",
+      "type": "task_failed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.today (30010 ms)",
+      "details": "HTTPSConnectionPool(host='caldav.icloud.com', port=443): Read timed out. (read timeout=30)",
+      "timestamp": "2026-05-13T18:51:53.391049+00:00"
+    },
+    {
+      "id": "569c37d5c56a9de7",
+      "type": "task_completed",
+      "actor": "tempo",
+      "taskId": null,
+      "summary": "tempo.summarised (1 ms)",
+      "details": "",
+      "timestamp": "2026-05-13T18:51:53.397926+00:00"
     }
   ]
 }

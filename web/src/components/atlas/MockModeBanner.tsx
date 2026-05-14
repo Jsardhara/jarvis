@@ -12,11 +12,16 @@
 
 import { useEffect, useState } from "react";
 import { useAtlasMode } from "@/hooks/useAtlasMode";
+import { useAtlasSnapshot } from "@/hooks/useAtlasSnapshot";
 
 const SESSION_KEY = "atlas-mock-banner-dismissed";
 
 export function MockModeBanner() {
   const { mode, isLoading } = useAtlasMode();
+  // Suppress the mock-mode banner when AtlasDegradedBanner is already
+  // rendering. Two stacked amber strips look noisy and tell the operator
+  // the same thing (Atlas not live).
+  const { degraded } = useAtlasSnapshot();
   const [dismissed, setDismissed] = useState(false);
 
   // Read dismissal state from sessionStorage on mount
@@ -37,7 +42,7 @@ export function MockModeBanner() {
     }
   };
 
-  if (isLoading || mode !== "mock" || dismissed) return null;
+  if (isLoading || mode !== "mock" || dismissed || degraded) return null;
 
   return (
     <div

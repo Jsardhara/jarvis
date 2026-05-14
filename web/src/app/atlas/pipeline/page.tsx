@@ -14,7 +14,7 @@ import { useCallback } from "react";
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
 import { PipelineSwimlane } from "@/components/PipelineSwimlane";
 import { usePipelineStream } from "@/hooks/usePipelineStream";
-import { MockModeBanner } from "@/components/atlas/MockModeBanner";
+// MockModeBanner is mounted globally in LayoutShell — see web/src/components/layout-shell.tsx.
 import { AgentStatusRow } from "@/components/atlas/AgentStatusRow";
 import { apiFetch } from "@/lib/api-client";
 
@@ -43,8 +43,6 @@ export default function AtlasPipelinePage() {
 
   return (
     <div className="space-y-4">
-      <MockModeBanner />
-
       <BreadcrumbNav
         items={[
           { label: "Atlas", href: undefined },

@@ -8,7 +8,7 @@
  */
 
 import { CSSProperties, useState } from "react";
-import { MockModeBanner } from "@/components/atlas/MockModeBanner";
+// MockModeBanner is mounted globally in LayoutShell — see web/src/components/layout-shell.tsx.
 import { TradeKpiStrip } from "@/components/atlas/trades/TradeKpiStrip";
 import { TradeTable } from "@/components/atlas/trades/TradeTable";
 import { TradeDetailDrawer } from "@/components/atlas/trades/TradeDetailDrawer";
@@ -30,8 +30,6 @@ export default function TradesPage() {
         background: "var(--ops-bg-void)",
       } as CSSProperties}
     >
-      <MockModeBanner />
-
       {/* Page header */}
       <div
         style={{
