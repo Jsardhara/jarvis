@@ -27,10 +27,24 @@ export interface ChatTurn {
   live?: boolean;
 }
 
+/**
+ * Optional image attachment for a chat turn.
+ *
+ * ``b64`` is the base64-encoded image data (no ``data:`` prefix). ``mediaType``
+ * is the MIME type — usually ``image/png`` for clipboard captures, varies for
+ * drag-dropped files. Both are forwarded as ``image_b64`` / ``image_media_type``
+ * to the FastAPI ``/api/jarvis/chat`` endpoint which routes to the multimodal
+ * vision pipeline.
+ */
+export interface ChatImage {
+  b64: string;
+  mediaType: string;
+}
+
 interface ChatTurnsHook {
   turns: ChatTurn[];
   streaming: boolean;
-  send: (text: string) => Promise<void>;
+  send: (text: string, image?: ChatImage) => Promise<void>;
   /** Refresh from server. */
   reload: () => Promise<void>;
 }
@@ -131,15 +145,23 @@ export function useChatTurns(historyLimit = 30): ChatTurnsHook {
   }, []);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, image?: ChatImage) => {
       const message = text.trim();
-      if (!message || streaming) return;
+      // An image with no text is OK — the endpoint defaults to "What's in this image?"
+      if (!message && !image) return;
+      if (streaming) return;
       setStreaming(true);
 
       const liveTurnId = `live-${Date.now()}`;
+      const displayText = message || "(image)";
       setTurns((prev) => [
         ...prev,
-        { turn_id: liveTurnId, user_text: message, assistant_text: "", live: true },
+        {
+          turn_id: liveTurnId,
+          user_text: image ? `📎 ${displayText}` : displayText,
+          assistant_text: "",
+          live: true,
+        },
       ]);
 
       const headers: HeadersInit = { "content-type": "application/json" };
@@ -149,10 +171,15 @@ export function useChatTurns(historyLimit = 30): ChatTurnsHook {
       let assistant = "";
 
       try {
+        const body: Record<string, string> = { message: message || "What's in this image?" };
+        if (image) {
+          body.image_b64 = image.b64;
+          body.image_media_type = image.mediaType;
+        }
         const res = await fetch(`${JARVIS_API}/api/jarvis/chat`, {
           method: "POST",
           headers,
-          body: JSON.stringify({ message }),
+          body: JSON.stringify(body),
         });
         if (!res.ok || !res.body) {
           throw new Error(`HTTP ${res.status}`);

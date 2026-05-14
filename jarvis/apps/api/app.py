@@ -1300,8 +1300,20 @@ def make_app(
     @app.post("/api/jarvis/chat")
     async def jarvis_chat(payload: dict[str, Any], request: Request) -> StreamingResponse:
         message = str(payload.get("message", "")).strip()
+        # Optional image attachment: base64-encoded bytes + media type.
+        # When present, route through the multimodal vision path so Claude
+        # can see the screenshot/diagram/PDF page the operator dropped in.
+        image_b64 = payload.get("image_b64") or payload.get("image")
+        image_media_type = str(
+            payload.get("image_media_type")
+            or payload.get("media_type")
+            or "image/png"
+        )
+        if not message and not image_b64:
+            raise HTTPException(status_code=400, detail="message or image required")
+        # Image without prompt is OK — fall back to a default question.
         if not message:
-            raise HTTPException(status_code=400, detail="message required")
+            message = "What's in this image?"
         chat = _get_jarvis()
         user_id = _bearer_user_id(request)
         turn_id = uuid4().hex
@@ -1314,9 +1326,19 @@ def make_app(
             cost_usd = 0.0
             duration_ms = 0
             try:
-                async for ev in chat.stream(
-                    message, surface="chat", session_id=user_id
-                ):
+                if image_b64:
+                    stream_iter = chat.stream_with_image(
+                        message,
+                        str(image_b64),
+                        media_type=image_media_type,
+                        surface="chat",
+                        session_id=user_id,
+                    )
+                else:
+                    stream_iter = chat.stream(
+                        message, surface="chat", session_id=user_id
+                    )
+                async for ev in stream_iter:
                     if ev.type == "text":
                         assistant_buf.append(str(ev.payload.get("delta", "")))
                     elif ev.type == "model":

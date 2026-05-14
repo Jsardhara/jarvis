@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  Image as ImageIcon,
   Mic,
   Pause,
   Play,
@@ -8,11 +9,32 @@ import {
   SkipBack,
   SkipForward,
   Square,
+  X,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import type { ChatImage } from "@/hooks/useChatTurns";
 import { useChatTurns } from "@/hooks/useChatTurns";
 import { useBrowserSpeech } from "@/hooks/useBrowserSpeech";
+
+/** Read a File/Blob as base64 (without the ``data:...;base64,`` prefix). */
+async function readAsBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("FileReader returned non-string"));
+        return;
+      }
+      // Strip "data:image/png;base64," prefix to send raw b64 only.
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.readAsDataURL(blob);
+  });
+}
 
 /**
  * HUD command panel — sits below the central orb.
@@ -26,9 +48,12 @@ export function CommandPanel() {
   const { turns, streaming, send } = useChatTurns(20);
   const [input, setInput] = useState("");
   const [paused, setPaused] = useState(false);
+  const [attached, setAttached] = useState<ChatImage | null>(null);
+  const [dragOver, setDragOver] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
   const lastSpokenRef = useRef<string>("");
   const historicalIdsRef = useRef<Set<string> | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleFinal = useCallback(
     (text: string) => {
@@ -39,6 +64,37 @@ export function CommandPanel() {
   );
 
   const speech = useBrowserSpeech({ onFinal: handleFinal, voiceReply: !paused });
+
+  /** Convert a dropped/pasted image File into the ChatImage shape. */
+  const attachFromBlob = useCallback(async (blob: Blob): Promise<void> => {
+    try {
+      const b64 = await readAsBase64(blob);
+      setAttached({ b64, mediaType: blob.type || "image/png" });
+    } catch {
+      // FileReader failure — silently drop; user can retry.
+    }
+  }, []);
+
+  /** Clipboard paste: capture image entries (Cmd/Ctrl+V on a screenshot). */
+  useEffect(() => {
+    function onPaste(e: ClipboardEvent): void {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i += 1) {
+        const item = items[i];
+        if (item && item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            void attachFromBlob(file);
+            return;
+          }
+        }
+      }
+    }
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [attachFromBlob]);
 
   // Auto-scroll log
   useEffect(() => {
@@ -65,10 +121,42 @@ export function CommandPanel() {
 
   const submit = useCallback(() => {
     const t = input.trim();
-    if (!t || streaming) return;
+    // Allow image-only send (no text) when an attachment is present.
+    if ((!t && !attached) || streaming) return;
+    const imageToSend = attached;
     setInput("");
-    void send(t);
-  }, [input, streaming, send]);
+    setAttached(null);
+    void send(t, imageToSend ?? undefined);
+  }, [input, attached, streaming, send]);
+
+  /** Drag-and-drop: highlight on hover, capture image on drop. */
+  const onDragOver = useCallback((e: React.DragEvent): void => {
+    if (Array.from(e.dataTransfer.items).some((it) => it.type.startsWith("image/"))) {
+      e.preventDefault();
+      setDragOver(true);
+    }
+  }, []);
+  const onDragLeave = useCallback((): void => setDragOver(false), []);
+  const onDrop = useCallback(
+    (e: React.DragEvent): void => {
+      e.preventDefault();
+      setDragOver(false);
+      const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
+      if (file) void attachFromBlob(file);
+    },
+    [attachFromBlob],
+  );
+
+  /** Picker fallback for environments without drag or clipboard. */
+  const onPickFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
+      const file = e.target.files?.[0];
+      if (file) await attachFromBlob(file);
+      // Reset so picking the same file twice still fires onChange.
+      e.target.value = "";
+    },
+    [attachFromBlob],
+  );
 
   const recent = turns.slice(-3);
 
@@ -76,7 +164,24 @@ export function CommandPanel() {
     <section
       aria-label="Command channel"
       className="hud-panel hud-corners flex w-full max-w-[420px] flex-col gap-2 px-3 py-2.5"
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      style={{
+        outline: dragOver ? "2px dashed var(--hud-cyan)" : undefined,
+        outlineOffset: dragOver ? "-2px" : undefined,
+      }}
     >
+      {/* Hidden file picker — opened via the attach button */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={onPickFile}
+        style={{ display: "none" }}
+        aria-hidden
+      />
+
       {/* Header */}
       <header className="flex items-center justify-between border-b border-[var(--ops-line-faint)] pb-2">
         <span className="hud-label">{"// BOT "}{streaming ? "STREAMING" : "STANDBY"}</span>
@@ -157,6 +262,32 @@ export function CommandPanel() {
         )}
       </div>
 
+      {/* Attachment chip — visible when an image is staged for the next send. */}
+      {attached && (
+        <div
+          className="flex items-center justify-between font-mono text-[10px]"
+          style={{
+            background: "rgba(0, 229, 255, 0.06)",
+            border: "1px solid var(--hud-cyan)",
+            padding: "3px 6px",
+            color: "var(--hud-cyan)",
+          }}
+        >
+          <span className="flex items-center gap-1">
+            <ImageIcon className="h-3 w-3" />
+            <span>image attached ({attached.mediaType})</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setAttached(null)}
+            aria-label="Remove attached image"
+            className="opacity-70 hover:opacity-100"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
+
       {/* Composer */}
       <div className="flex items-center gap-2 border-t border-[var(--ops-line-faint)] pt-2">
         <input
@@ -168,7 +299,7 @@ export function CommandPanel() {
               submit();
             }
           }}
-          placeholder="Type command here..."
+          placeholder={attached ? "Optional question..." : "Type command here..."}
           disabled={streaming}
           aria-label="Command input"
           className="h-8 flex-1 border bg-[var(--ops-bg-input)] px-2 font-mono text-[11px] outline-none transition-colors placeholder:text-[var(--ops-fg-faint)] disabled:opacity-50"
@@ -184,9 +315,17 @@ export function CommandPanel() {
           }
         />
         <ComposerBtn
+          ariaLabel="Attach image"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={streaming}
+          label="IMG"
+        >
+          <ImageIcon className="h-3 w-3" />
+        </ComposerBtn>
+        <ComposerBtn
           ariaLabel="Send"
           onClick={submit}
-          disabled={!input.trim() || streaming}
+          disabled={(!input.trim() && !attached) || streaming}
           label="DONE"
         >
           <Send className="h-3 w-3" />

@@ -718,6 +718,24 @@ class JarvisChat:
                 yield ev
             return
 
+        # Short-circuit: explicit /screen slash OR a "look at my screen"-style
+        # phrase triggers a screen-capture multimodal Sonnet call. Same single
+        # source of truth for the phrase detector as the voice path so the
+        # operator's verbal cues route consistently across surfaces.
+        from jarvis.apps.voice.cheap_handler import wants_screen_vision
+
+        raw_message = message or ""
+        if raw_message.strip().lower().startswith("/screen") or wants_screen_vision(raw_message):
+            stripped = raw_message.strip()
+            # Strip the slash so the question forwarded to vision is clean.
+            if stripped.lower().startswith("/screen"):
+                stripped = stripped[len("/screen"):].strip() or "What's on my screen right now?"
+            async for ev in self._stream_via_screen_vision(
+                stripped, surface=surface, session_id=session_id
+            ):
+                yield ev
+            return
+
         if self._forced_model is not None:
             decision = RouteDecision(
                 model=self._forced_model,
@@ -874,6 +892,177 @@ class JarvisChat:
             self._record_unified_turn(
                 user_text=cleaned,
                 assistant_text=summary,
+                lane=decision_model,
+                surface=surface,
+                session_id=session_id,
+            )
+
+    async def stream_with_image(
+        self,
+        message: str,
+        image_b64: str,
+        media_type: str = "image/png",
+        *,
+        surface: Literal["voice", "chat", "api"] = "api",
+        session_id: str = "default",
+    ) -> AsyncIterator[StreamEvent]:
+        """Run a multimodal turn with an operator-supplied image.
+
+        Used by the dashboard image-upload path: the user drags or pastes
+        an image into the chat panel; the API endpoint receives base64 and
+        forwards here. Distinct from ``_stream_via_screen_vision`` which
+        captures the operator's own screen.
+        """
+        import asyncio
+
+        cleaned = (message or "").strip() or "What's in this image?"
+        decision_model = self._sonnet_model
+
+        yield StreamEvent(
+            "model",
+            {
+                "model": decision_model,
+                "reason": "image-attached — multimodal vision",
+                "tier": 2,
+                "manual": False,
+                "length_chars": len(cleaned),
+            },
+        )
+
+        def _do_vision() -> str:
+            from jarvis.llm.queue import submit_multimodal
+
+            block = {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": image_b64,
+                },
+            }
+            system = (
+                "You are Jarvis. Look at this image Jyot shared and answer "
+                "the question grounded in what's visible. Stay terse — "
+                "2-3 sentences. Markdown is fine for code or lists."
+            )
+            try:
+                return submit_multimodal(
+                    system=system,
+                    content=[
+                        block,
+                        {"type": "text", "text": cleaned},
+                    ],
+                    model=decision_model,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[chat] image-attached vision call failed: %s", exc)
+                return "Sorry, I had trouble reading that image."
+
+        try:
+            loop = asyncio.get_running_loop()
+            reply = await loop.run_in_executor(None, _do_vision)
+        except Exception as exc:  # pragma: no cover
+            yield StreamEvent("error", {"message": f"image vision failed: {exc}"})
+            return
+
+        reply = (reply or "").strip() or "Nothing useful."
+        yield StreamEvent("text", {"delta": reply})
+        yield StreamEvent("done", {"total_cost_usd": 0.0})
+
+        self._last_lane = decision_model
+        self._record_turn("user", cleaned, lane=decision_model)
+        self._record_turn("assistant", reply, lane=decision_model)
+        if surface != "chat":
+            self._record_unified_turn(
+                user_text=cleaned,
+                assistant_text=reply,
+                lane=decision_model,
+                surface=surface,
+                session_id=session_id,
+            )
+
+    async def _stream_via_screen_vision(
+        self,
+        message: str,
+        *,
+        surface: Literal["voice", "chat", "api"] = "api",
+        session_id: str = "default",
+    ) -> AsyncIterator[StreamEvent]:
+        """Capture the operator's screen and run a multimodal Sonnet call.
+
+        Synthesizes stream events from the single-shot multimodal reply so the
+        dashboard UI receives the same model→text→done sequence it expects
+        from a normal SDK turn. Mirrors ``_stream_via_link_handler``.
+        """
+        import asyncio
+
+        cleaned = (message or "").strip() or "What's on my screen right now?"
+        decision_model = self._sonnet_model
+
+        yield StreamEvent(
+            "model",
+            {
+                "model": decision_model,
+                "reason": "screen-vision — desktop capture + multimodal",
+                "tier": 2,
+                "manual": False,
+                "length_chars": len(cleaned),
+            },
+        )
+
+        # Run the blocking screenshot + LLM call in a thread so we don't
+        # stall the event loop. Both are inherently synchronous.
+        def _do_vision() -> str:
+            from jarvis.llm.queue import submit_multimodal
+            from jarvis.tools.screen import (
+                ScreenCaptureError,
+                capture_and_block,
+            )
+
+            try:
+                block = capture_and_block()
+            except ScreenCaptureError as exc:
+                logger.warning("[chat] screen capture failed: %s", exc)
+                return (
+                    "I can't see your screen right now — screen capture isn't available."
+                )
+
+            system = (
+                "You are Jarvis. Look at this screenshot of Jyot's screen and "
+                "answer the question grounded in what's actually visible. Stay "
+                "terse — 2-3 sentences. Markdown is fine for code or lists."
+            )
+            try:
+                return submit_multimodal(
+                    system=system,
+                    content=[
+                        block,
+                        {"type": "text", "text": cleaned},
+                    ],
+                    model=decision_model,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[chat] screen vision call failed: %s", exc)
+                return "Sorry, I had trouble reading your screen."
+
+        try:
+            loop = asyncio.get_running_loop()
+            reply = await loop.run_in_executor(None, _do_vision)
+        except Exception as exc:  # pragma: no cover — inner already caught
+            yield StreamEvent("error", {"message": f"screen vision failed: {exc}"})
+            return
+
+        reply = (reply or "").strip() or "Nothing useful."
+        yield StreamEvent("text", {"delta": reply})
+        yield StreamEvent("done", {"total_cost_usd": 0.0})
+
+        self._last_lane = decision_model
+        self._record_turn("user", cleaned, lane=decision_model)
+        self._record_turn("assistant", reply, lane=decision_model)
+        if surface != "chat":
+            self._record_unified_turn(
+                user_text=cleaned,
+                assistant_text=reply,
                 lane=decision_model,
                 surface=surface,
                 session_id=session_id,

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -37,6 +38,24 @@ from .cheap_patterns import (
 from .context_cache import load_voice_context, render_for_prompt
 from .persona import PERSONA
 from .voice_state import set_state as _set_voice_state
+
+# Screen-vision intent detector. Matches direct requests to look at the
+# operator's screen so Jarvis can capture + describe instead of guessing.
+_SCREEN_VISION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(?:look at|read|describe|check|see)\s+(?:this|my|the)\s+(?:screen|screenshot|window)\b", re.IGNORECASE),
+    re.compile(r"\bwhat(?:'s| is)\s+(?:on\s+)?(?:my|the|this)\s+screen\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+do\s+you\s+see\b", re.IGNORECASE),
+    re.compile(r"\b(?:take|grab|capture)\s+(?:a\s+)?screenshot\b", re.IGNORECASE),
+    re.compile(r"\bread\s+this\s+(?:for me|to me)?\b", re.IGNORECASE),
+    re.compile(r"\bsee\s+(?:this|my screen)\b", re.IGNORECASE),
+)
+
+
+def wants_screen_vision(text: str) -> bool:
+    """Return True when the operator's utterance asks Jarvis to look at the screen."""
+    if not text:
+        return False
+    return any(p.search(text) for p in _SCREEN_VISION_PATTERNS)
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +200,57 @@ def _load_cross_surface_records() -> list[Any]:
     except Exception as exc:  # noqa: BLE001
         logger.debug("[voice] chat_turns read skipped: %s", exc)
         return []
+
+
+_SCREEN_VISION_SYSTEM = (
+    PERSONA
+    + "\n\nYou are looking at a screenshot of Jyot's current screen. Answer "
+    "their question grounded in what's actually visible. If the screenshot "
+    "doesn't contain the answer, say so briefly. Stay terse — one or two "
+    "spoken sentences. No markdown."
+)
+
+
+async def _screen_vision_response(text: str) -> dict[str, Any]:
+    """Capture the operator's screen and answer based on what's visible.
+
+    Falls back to a clean text response when capture fails (pyautogui
+    missing, headless host, etc.) — never crashes the voice path.
+    """
+    from jarvis.llm.queue import submit_multimodal  # type: ignore[import-not-found]
+    from jarvis.tools.screen import (  # type: ignore[import-not-found]
+        ScreenCaptureError,
+        capture_and_block,
+    )
+
+    try:
+        block = capture_and_block()
+    except ScreenCaptureError as exc:
+        logger.warning("[voice] screen capture failed: %s", exc)
+        return _wrap(
+            "I can't see your screen right now — screen capture isn't available.",
+            source="screen-vision-error",
+        )
+
+    try:
+        reply = submit_multimodal(
+            system=_SCREEN_VISION_SYSTEM,
+            content=[
+                block,
+                {"type": "text", "text": text},
+            ],
+            model="claude-sonnet-4-6",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[voice] screen vision call failed: %s", exc)
+        return _wrap("Sorry, I had trouble reading your screen.", source="screen-vision-error")
+
+    reply = (reply or "").strip()
+    if reply:
+        _LAST_REPLY["text"] = reply
+        conversation_memory.remember(text, reply)
+        _persist_voice_turn(text, reply, source="screen-vision")
+    return _wrap(reply, source="screen-vision")
 
 
 async def _ask_claude(text: str, model: str) -> dict[str, Any]:
@@ -335,6 +405,14 @@ async def handle(text: str) -> dict[str, Any]:
         logger.info("[voice] tier=link_handler (URL detected)")
         _set_voice_state("routing", tier="link_handler", last_text=text)
         return await _link_response(text)
+
+    # Screen-vision intent → capture + multimodal Sonnet call. Sits between
+    # URL handling and Tier 0 because "look at my screen" is a strong
+    # directive that beats any local pattern match.
+    if wants_screen_vision(text):
+        logger.info("[voice] tier=screen-vision")
+        _set_voice_state("routing", tier="screen-vision", last_text=text)
+        return await _screen_vision_response(text)
 
     # Tier 0 — local pattern match, no LLM.
     local = _local_response(text)
