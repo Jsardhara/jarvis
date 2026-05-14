@@ -22,6 +22,15 @@ _ALWAYS_CONFIRM_ACTIONS: frozenset[str] = frozenset({
     "restart_sentinel",
     "pause_agent",
     "mass_delete",
+    # Response-side action verbs — agents emit these on completion. Including
+    # them here lets ``check_response_authority`` catch mutations that the
+    # pre-dispatch gate could not see (e.g. agent decided to merge even
+    # though the request text only said "ship it").
+    "paused",
+    "halted",
+    "merged",
+    "pushed",
+    "committed",
 })
 
 # External-effect actions that trigger confirmation at tier 2 but not at tier 3-5.
@@ -67,3 +76,24 @@ def check_authority(agent: str, action: str, tier: int, confirmed: bool = False)
             f"tier-2 external-effect action '{action}' requires confirmation",
         )
     raise AuthorityError(action, f"action '{action}' requires confirmation")
+
+
+def check_response_authority(
+    agent: str,  # noqa: ARG001
+    response_action: str,
+    confirmed: bool = False,
+) -> None:
+    """Post-dispatch authority gate.
+
+    The pre-dispatch ``check_authority`` runs against an action *inferred*
+    from request text. After a handler returns, the agent may have emitted
+    a response-side action (e.g. ``paused`` or ``merged``) that should also
+    have required confirmation but bypassed the up-front gate. Re-check
+    against ``_ALWAYS_CONFIRM_ACTIONS`` here so the orchestrator can
+    transform the response into a proposal instead of letting it land.
+    """
+    if response_action in _ALWAYS_CONFIRM_ACTIONS and not confirmed:
+        raise AuthorityError(
+            response_action,
+            f"response-side action '{response_action}' requires confirmation",
+        )

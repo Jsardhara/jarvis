@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from .persona import PERSONA
+from .persona import PERSONA, VOICE_WORD_CAP
 from .voice_state import read_state
 
 logger = logging.getLogger(__name__)
@@ -34,10 +34,10 @@ _OFFSET: int = 0  # byte offset into inbox.jsonl
 
 _ALERT_SYSTEM = (
     PERSONA
-    + "\n\nA background daemon just flagged something the operator should hear.\n"
-    "Speak one short sentence — what happened, plain words, no jargon.\n"
-    "End with a question if action is needed ('want me to pull it up?').\n"
-    "No markdown. No agent names. ~20 words max."
+    + f"\n\nA background daemon just flagged something the operator should hear.\n"
+    f"Speak one short sentence — what happened, plain words, no jargon.\n"
+    f"End with a question if action is needed ('want me to pull it up?').\n"
+    f"No markdown. No agent names. {VOICE_WORD_CAP} words max."
 )
 
 

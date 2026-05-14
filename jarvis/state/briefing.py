@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -418,3 +418,276 @@ def build_briefing(
             "duration_ms": duration_ms,
         },
     }
+
+
+# ── Evening digest ────────────────────────────────────────────────────────────
+
+
+def _closes_today(now: datetime) -> list[Any]:
+    """Tasks whose status==done AND updated >= start-of-today (UTC)."""
+    today_start_iso = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return [
+        t
+        for t in load_tasks()
+        if t.status == "done" and (t.updated or "") >= today_start_iso
+    ]
+
+
+def _open_loops_at_eod(now: datetime) -> list[Any]:
+    """Open tasks that are either high-priority or due tomorrow.
+
+    "High priority" is tag-based: any of {priority:high, p1, urgent}.
+    """
+    tomorrow_str = (now + timedelta(days=1)).date().isoformat()
+    high_tags = {"priority:high", "p1", "urgent"}
+    out: list[Any] = []
+    for t in load_tasks():
+        if t.status != "open":
+            continue
+        tags_lower = {str(tag).lower() for tag in (t.tags or [])}
+        is_high = bool(tags_lower & high_tags)
+        is_due_tomorrow = bool(t.due and t.due.startswith(tomorrow_str))
+        if is_high or is_due_tomorrow:
+            out.append(t)
+    return out
+
+
+def _today_cost_rollup() -> dict[str, float]:
+    """Today's cost-log spend grouped by agent (empty when cost_log missing)."""
+    rollup = daily_rollup()
+    by_agent = rollup.get("by_agent") or {}
+    if not isinstance(by_agent, dict):
+        return {}
+    return {str(k): float(v) for k, v in by_agent.items()}
+
+
+def _tomorrow_first_event(reg: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the next-day's first calendar event as a dict, or None.
+
+    Tries ``tempo.today_first_tomorrow()`` first (preferred); falls back to
+    filtering ``tempo.today()`` events for ones starting tomorrow.
+    """
+    tempo_desc = reg.get("tempo")
+    if tempo_desc is None:
+        return None
+    tempo_inst = getattr(tempo_desc, "instance", None)
+    if tempo_inst is not None:
+        fn = getattr(tempo_inst, "today_first_tomorrow", None)
+        if callable(fn):
+            try:
+                resp = fn()
+                first = resp.result if hasattr(resp, "result") else resp
+                if isinstance(first, dict) and first:
+                    return first
+            except Exception:
+                log.warning("evening_digest: today_first_tomorrow failed", exc_info=True)
+    # Fallback — best effort via today()
+    try:
+        resp = tempo_desc.call("today")
+        events = resp.result.get("events", []) if hasattr(resp, "result") else []
+    except Exception:
+        log.warning("evening_digest: tempo.today fallback failed", exc_info=True)
+        return None
+    tomorrow_str = (datetime.now(UTC) + timedelta(days=1)).date().isoformat()
+    for ev in events:
+        if not isinstance(ev, dict):
+            continue
+        start = str(ev.get("start") or ev.get("when") or "")
+        if start.startswith(tomorrow_str):
+            return ev
+    return None
+
+
+def _atlas_pnl_close(reg: dict[str, Any]) -> dict[str, Any] | None:
+    """Return today's realized P&L close for atlas, or None when unavailable."""
+    atlas_desc = reg.get("atlas")
+    if atlas_desc is None:
+        return None
+    try:
+        pnl_resp = atlas_desc.call("pnl")
+    except Exception:
+        log.warning("evening_digest: atlas.pnl failed", exc_info=True)
+        return None
+    pnl = pnl_resp.result.get("pnl", {}) if hasattr(pnl_resp, "result") else {}
+    if not pnl:
+        return None
+    pnl_usd_raw = pnl.get("pnl_usd")
+    pnl_pct_raw = pnl.get("pnl_pct")
+    if pnl_usd_raw is None and pnl_pct_raw is None:
+        return None
+    return {
+        "pnl_usd": float(pnl_usd_raw if pnl_usd_raw is not None else 0.0),
+        "pnl_pct": float(pnl_pct_raw if pnl_pct_raw is not None else 0.0),
+        "mock": bool(pnl_resp.result.get("mock", False)) if hasattr(pnl_resp, "result") else False,
+    }
+
+
+def _render_evening_markdown(
+    date_str: str,
+    closes: list[Any],
+    open_loops: list[Any],
+    cost_by_agent: dict[str, float],
+    tomorrow_first: dict[str, Any] | None,
+    atlas_close: dict[str, Any] | None,
+) -> str:
+    """Render evening digest markdown — each section conditional on content."""
+    lines: list[str] = [f"# Evening Recap · {date_str}", ""]
+
+    if closes:
+        lines.append("## Today's closes")
+        for t in closes:
+            lines.append(f"- {t.title}")
+        lines.append("")
+
+    if open_loops:
+        lines.append("## Open loops")
+        for t in open_loops:
+            tail = f" (due {t.due})" if t.due else ""
+            lines.append(f"- {t.title}{tail}")
+        lines.append("")
+
+    if cost_by_agent:
+        lines.append("## Cost rollup")
+        total = sum(cost_by_agent.values())
+        lines.append(f"- Total today: ${total:.4f}")
+        for agent, cost in sorted(cost_by_agent.items(), key=lambda kv: -kv[1]):
+            lines.append(f"- {agent}: ${cost:.4f}")
+        lines.append("")
+
+    if tomorrow_first:
+        title = (
+            tomorrow_first.get("subject")
+            or tomorrow_first.get("title")
+            or "Untitled"
+        )
+        start = tomorrow_first.get("start") or tomorrow_first.get("when") or ""
+        lines.append("## Tomorrow's first event")
+        lines.append(f"- {title} @ {start}".rstrip(" @"))
+        lines.append("")
+
+    if atlas_close:
+        sign = "+" if atlas_close["pnl_usd"] >= 0 else ""
+        mock_tag = " (mock)" if atlas_close.get("mock") else ""
+        lines.append("## Atlas close")
+        lines.append(
+            f"- P&L: {sign}${atlas_close['pnl_usd']:.2f} "
+            f"({atlas_close['pnl_pct']:+.2%}){mock_tag}"
+        )
+        lines.append("")
+
+    # If everything is empty, still emit a tombstone so the operator sees the cron ran.
+    if len(lines) == 2:
+        lines.append("_Nothing notable today._")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def evening_digest(reg: dict[str, Any], notifier: Any) -> dict[str, Any]:
+    """End-of-day recap — distinct from morning_digest.
+
+    Aggregates closed tasks, open loops, today's spend, tomorrow's first event,
+    and atlas P&L close. Pushes a priority-1 notification ("Evening recap") and
+    appends a single info-severity inbox event. Returns ``{"digest", "severity"}``.
+    """
+    from jarvis.contract import InboxEvent
+    from jarvis.state import append_inbox
+
+    now = datetime.now(UTC)
+    date_str = now.strftime("%Y-%m-%d")
+
+    closes = _closes_today(now)
+    open_loops = _open_loops_at_eod(now)
+    cost_by_agent = _today_cost_rollup()
+    tomorrow_first = _tomorrow_first_event(reg)
+    atlas_close = _atlas_pnl_close(reg)
+    memory_section = _build_memory_section(now.date())
+
+    digest_md = _render_evening_markdown(
+        date_str, closes, open_loops, cost_by_agent, tomorrow_first, atlas_close
+    )
+    if memory_section:
+        digest_md = f"{digest_md}\n\n{memory_section}"
+
+    try:
+        notifier.push("Evening recap", digest_md[:300] + "...", priority=1)
+    except Exception:
+        log.warning("evening_digest: notifier push failed", exc_info=True)
+
+    append_inbox(
+        InboxEvent(
+            agent="sentinel",
+            severity="info",
+            summary="Evening digest fired",
+            ref={
+                "closes": [t.title for t in closes],
+                "open_loops": [t.title for t in open_loops],
+                "cost_by_agent": cost_by_agent,
+                "tomorrow_first": tomorrow_first,
+                "atlas_close": atlas_close,
+            },
+        )
+    )
+
+    return {"digest": digest_md, "severity": "info"}
+
+
+# ── Memory section (J2) ───────────────────────────────────────────────────────
+
+
+_MEMORY_DAILY_CAP_CHARS = 200
+_MEMORY_RECENT_TURN_LIMIT = 10
+_MEMORY_TURN_TRUNC_CHARS = 160
+
+
+def _build_memory_section(today: date) -> str:
+    """Render a ``## Memory`` markdown section, or empty string if no content.
+
+    Pulls:
+      * Yesterday's daily file (``memory.read_daily``) — capped at 200 chars.
+      * Recent chat_turns — last 10 turns, oldest-first, each truncated.
+
+    Defensive against every read failure (filesystem, import) — a broken
+    memory store must never crash a briefing.
+    """
+    yesterday = today - timedelta(days=1)
+
+    daily_excerpt = ""
+    try:
+        from jarvis.state import memory as _memory
+
+        body = _memory.read_daily(yesterday.isoformat())
+        if body:
+            daily_excerpt = body.strip()[:_MEMORY_DAILY_CAP_CHARS]
+    except Exception:  # noqa: BLE001 — never crash on memory read
+        log.debug("memory section: read_daily failed", exc_info=True)
+
+    recent_lines: list[str] = []
+    try:
+        from jarvis.state.chat_turns import read_recent
+
+        records = read_recent(user_id="default", limit=_MEMORY_RECENT_TURN_LIMIT)
+        for rec in records:
+            user_text = (rec.user_text or "").strip()
+            asst_text = (rec.assistant_text or "").strip()
+            if user_text:
+                recent_lines.append(
+                    f"- user: {user_text[:_MEMORY_TURN_TRUNC_CHARS]}"
+                )
+            if asst_text:
+                recent_lines.append(
+                    f"- jarvis: {asst_text[:_MEMORY_TURN_TRUNC_CHARS]}"
+                )
+    except Exception:  # noqa: BLE001 — never crash on memory read
+        log.debug("memory section: chat_turns read failed", exc_info=True)
+
+    if not daily_excerpt and not recent_lines:
+        return ""
+
+    lines: list[str] = ["## Memory"]
+    if daily_excerpt:
+        lines.append(f"**Yesterday ({yesterday.isoformat()}):** {daily_excerpt}")
+    if recent_lines:
+        lines.append("")
+        lines.append("Recent context:")
+        lines.extend(recent_lines)
+    return "\n".join(lines)

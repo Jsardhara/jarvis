@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import re
 
-from .persona import PERSONA
+from .persona import PERSONA, VOICE_WORD_CAP
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +89,9 @@ def clean_for_speech(text: str | None) -> str:
 
 _REWRITE_SYSTEM = (
     PERSONA
-    + "\n\nThe operator just got a response. Rewrite it for spoken delivery.\n"
-    "One or two sentences max. ~25 words. Conversational. No markdown.\n"
-    "Numbers spoken as numbers. Keep the meaning, lose the structure."
+    + f"\n\nThe operator just got a response. Rewrite it for spoken delivery.\n"
+    f"One or two sentences max. {VOICE_WORD_CAP} words max. Conversational. No markdown.\n"
+    f"Numbers spoken as numbers. Keep the meaning, lose the structure."
 )
 
 

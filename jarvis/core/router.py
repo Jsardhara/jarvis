@@ -34,15 +34,19 @@ _RULES: list[tuple[re.Pattern, str]] = [
     # Code-work signals
     (
         re.compile(
-            r"\b(repo|pr|pull request|build|ship|bug|refactor|implement|deploy|commit|merge|\.py|\.ts|\.tsx|\.js)\b",
+            r"\b(repo|codebase|pr|pull request|build|ship|bug|refactor|implement|deploy|commit|merge|\.py|\.ts|\.tsx|\.js)\b",
             re.I,
         ),
         "forge",
     ),
-    # Trading / ATLAS
+    # Trading / ATLAS — includes watchlist surface so "add NVDA to watchlist"
+    # routes here instead of falling into lens's generic ``watch`` rule. The
+    # ``trader`` surface lets ``pause the trader`` route here so the action
+    # rule can flag it for confirmation.
     (
         re.compile(
-            r"\b(portfolio|positions?|p&?l|holdings|drawdown|atlas|paper trade|live trade|strateg(?:y|ies)|backtest)\b",
+            r"\b(portfolio|positions?|p&?l|holdings|drawdown|atlas|paper trade|live trade|"
+            r"strateg(?:y|ies)|backtest|watchlist|watch list|track ticker|add to watch|trader)\b",
             re.I,
         ),
         "atlas",
@@ -76,6 +80,15 @@ _RULES: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(code)\b", re.I), "forge"),
 ]
 
+# Negative-context guard: when the operator mentions code context
+# (``codebase``, ``repo``, ``\.py``, an inline ``code``/``comment`` reference),
+# tempo's todo/task match is a false positive — it's almost always a ``TODO``
+# marker in source. ``_TODO_ONLY_RE`` matches just the keywords whose tempo
+# match should be dropped under that code-context guard.
+_CODE_CONTEXT_RE = re.compile(r"\b(code|codebase|repo|\.py|\.ts|\.tsx|\.js|comment)\b", re.I)
+_TODO_ONLY_RE = re.compile(r"todos?|tasks?|reminds?|remind", re.I)
+
+
 # Multi-domain triggers
 _MULTI: list[tuple[re.Pattern, list[str]]] = [
     (
@@ -85,6 +98,12 @@ _MULTI: list[tuple[re.Pattern, list[str]]] = [
     (
         re.compile(r"\b(end of day|wrap up|evening summary)\b", re.I),
         ["tempo", "scholar", "atlas"],
+    ),
+    # Overdue items can be either todos (tempo) or assignments (scholar) — fan
+    # out and let each agent surface what it owns.
+    (
+        re.compile(r"\b(overdue|past due|late|missed)\b", re.I),
+        ["tempo", "scholar"],
     ),
 ]
 
@@ -104,6 +123,13 @@ _ACTION_RULES: dict[str, list[tuple[re.Pattern, str]]] = {
     ],
     "atlas": [
         (re.compile(r"\b(execute|place trade|fire trade|live trade|run trade)\b", re.I), "trader_execute"),
+        # Watchlist mutations route to a dedicated action so the agent layer
+        # can add/remove tickers without colliding with portfolio reads.
+        # ``add ... to ... watchlist`` or ``track ticker`` both match.
+        (re.compile(r"\b(?:add\b.*\bto\b.*\bwatchlist|track\s+ticker|add\s+to\s+watchlist)\b", re.I), "add_to_watchlist"),
+        # Pause / halt the live trader or any internal sub-agent. Authority
+        # gate flags this for confirmation.
+        (re.compile(r"\b(pause|halt|stop)\b.*\b(trader|agent|strategy|atlas)\b", re.I), "pause_agent"),
         (re.compile(r"\b(portfolio|holdings)\b", re.I), "portfolio"),
         (re.compile(r"\b(positions?)\b", re.I), "positions"),
         (re.compile(r"\b(p&?l|pnl)\b", re.I), "pnl"),
@@ -113,12 +139,20 @@ _ACTION_RULES: dict[str, list[tuple[re.Pattern, str]]] = {
         (re.compile(r"\b(pipeline|run pipeline)\b", re.I), "pipeline"),
     ],
     "forge": [
-        (re.compile(r"\b(execute|build|implement|deploy|run)\b", re.I), "execute"),
-        (re.compile(r"\b(push|merge|commit)\b", re.I), "execute"),
+        # Split git-mutation actions from generic build/execute so the
+        # authority gate can distinguish merge/push/commit (each in
+        # _ALWAYS_CONFIRM_ACTIONS) from non-mutating execute/build.
+        (re.compile(r"\b(merge|merge request)\b", re.I), "merge"),
+        (re.compile(r"\b(push|git push|deploy)\b", re.I), "push"),
+        (re.compile(r"\b(commit|check in)\b", re.I), "commit"),
+        (re.compile(r"\b(build|implement|scaffold|fix|execute|run)\b", re.I), "execute"),
         (re.compile(r"\b(list runs|history|recent runs)\b", re.I), "list_runs"),
     ],
     "scholar": [
         (re.compile(r"\b(plan|study plan|schedule study)\b", re.I), "plan_week"),
+        # add/create assignment must precede ``list_assignments`` so that
+        # "add CS401 homework" registers as a create rather than a list read.
+        (re.compile(r"\b(add|create|new)\b.*\b(assignment|homework)\b", re.I), "add_assignment"),
         (re.compile(r"\b(assignments?|homework|due)\b", re.I), "list_assignments"),
         (re.compile(r"\b(summari[sz]e)\b", re.I), "summarize"),
     ],
@@ -188,6 +222,16 @@ def _classify_regex(request: str) -> IntentClassification:
         if m:
             matches.append((agent, m))
 
+    # Negative-context filter: tempo's ``todo|task`` keyword overlaps with
+    # ``TODO`` markers in source code. If the request also hints at code
+    # context (codebase, repo, .py, comment, etc.), drop tempo matches that
+    # only fired on the todo/task signal so forge wins primary.
+    if _CODE_CONTEXT_RE.search(request):
+        matches = [
+            (agent, m) for agent, m in matches
+            if not (agent == "tempo" and _TODO_ONLY_RE.fullmatch(m.group(0).lower()))
+        ]
+
     if not matches and not multi_agents:
         return IntentClassification(
             primary="jarvis",
@@ -219,8 +263,22 @@ def _classify_regex(request: str) -> IntentClassification:
             action=infer_action(request, agent),
         )
 
-    rule_agents = [a for a, _ in matches]
-    unioned = _dedupe_preserve(rule_agents + multi_agents)
+    # Primary by earliest mention: the agent whose match has the lowest
+    # ``start()`` in the request text leads. Ties broken by original rule
+    # order (i.e. first-match wins). This makes "check inbox and tell me
+    # about my BTC position" route tempo→primary, atlas→parallel even
+    # though atlas appears earlier in _RULES.
+    ordered_agents: list[str] = []
+    seen_agents: set[str] = set()
+    for _, agent in sorted(
+        ((m.start(), a) for a, m in matches),
+        key=lambda pair: pair[0],
+    ):
+        if agent not in seen_agents:
+            seen_agents.add(agent)
+            ordered_agents.append(agent)
+
+    unioned = _dedupe_preserve(ordered_agents + multi_agents)
     primary = unioned[0]
     parallel = unioned[1:]
     rationale_parts = []

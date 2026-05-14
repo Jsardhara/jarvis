@@ -464,17 +464,22 @@ def _transcribe_audio(audio_path: Path) -> str:
 # System prompts
 # ---------------------------------------------------------------------------
 
+from jarvis.apps.voice.persona import PERSONA
+
 _VISION_SYSTEM = (
-    "You are Jarvis — terse personal assistant. The operator just sent a "
+    PERSONA
+    + "\n\nWhen summarizing a link, be terse — 2-3 sentences max for "
+    "articles, 1 sentence for videos/podcasts. The operator just sent a "
     "link with media in it. Look at the supplied image(s) carefully and "
-    "answer the operator's question, or summarize what's there if no "
-    "specific question was asked. Plain prose, 4-6 sentences max, no "
-    "markdown, no bullet lists, no preamble like 'I see' or 'this image "
-    "shows'. Just describe what matters."
+    "answer the operator's question, or summarize what matters if no "
+    "specific question was asked. Plain prose. No preamble like 'I see' "
+    "or 'this image shows'."
 )
 
 _TEXT_SYSTEM = (
-    "You are Jarvis — terse personal assistant. The operator just sent a "
+    PERSONA
+    + "\n\nWhen summarizing a link, be terse — 2-3 sentences max for "
+    "articles, 1 sentence for videos/podcasts. The operator just sent a "
     "link with text content. Answer the operator's question or summarize "
-    "the content. Plain prose, 4-6 sentences max, no markdown, no preamble."
+    "the content. Plain prose. No preamble."
 )

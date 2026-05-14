@@ -417,6 +417,16 @@ def build_guardian_violation_event(
 
 
 # ---------------------------------------------------------------------------
+# Proactivity scanners (R6/R7/R8) — re-exported from proactive_scanners
+# ---------------------------------------------------------------------------
+
+from jarvis.core.proactive_scanners import (  # noqa: E402 — late import to avoid cycle
+    scan_assignments_due_soon,
+    scan_meeting_imminent,
+    scan_stale_tasks,
+)
+
+# ---------------------------------------------------------------------------
 # Periodic scanner — sentinel calls this on every tick
 # ---------------------------------------------------------------------------
 
@@ -443,10 +453,10 @@ def _push_for_event(
 
 
 def scan_periodic(
-    reg: dict[str, Any],  # noqa: ARG001
+    reg: dict[str, Any],
     notifier: _NotifierProto | None = None,
 ) -> list[FiredTrigger]:
-    """Run all polling-style rules (R2, R3, R4).
+    """Run all polling-style rules (R2, R3, R4, R6, R7, R8, R9).
 
     Appends generated InboxEvents to ``state/inbox.jsonl`` and pushes a
     notification through ``notifier`` for any warn/crit event. The notifier
@@ -507,6 +517,75 @@ def scan_periodic(
             _push_for_event(n, event, "Forge — run failed")
         except Exception as exc:
             log.warning("scan_periodic R4 append failed: %s", exc)
+
+    # R6 — meeting imminent (5/10/15-min windows)
+    for event in scan_meeting_imminent(reg, notifier=n):
+        try:
+            append_inbox(event)
+            fired.append(
+                FiredTrigger(
+                    rule_name="meeting_imminent",
+                    source_key=event.ref.get("event_id", ""),
+                    action_summary=event.summary,
+                    outcome="ok",
+                )
+            )
+            _push_for_event(n, event, "Tempo — meeting imminent")
+        except Exception as exc:
+            log.warning("scan_periodic R6 append failed: %s", exc)
+
+    # R7 — assignments due within 24h
+    for event in scan_assignments_due_soon(reg):
+        try:
+            append_inbox(event)
+            fired.append(
+                FiredTrigger(
+                    rule_name="assignment_due_soon",
+                    source_key=event.ref.get("assignment_id", ""),
+                    action_summary=event.summary,
+                    outcome="ok",
+                )
+            )
+            _push_for_event(n, event, "Scholar — assignment due")
+        except Exception as exc:
+            log.warning("scan_periodic R7 append failed: %s", exc)
+
+    # R8 — stale open tasks (>7 days)
+    for event in scan_stale_tasks():
+        try:
+            append_inbox(event)
+            fired.append(
+                FiredTrigger(
+                    rule_name="stale_task",
+                    source_key=event.ref.get("task_id", ""),
+                    action_summary=event.summary,
+                    outcome="ok",
+                )
+            )
+            _push_for_event(n, event, "Tempo — stale task")
+        except Exception as exc:
+            log.warning("scan_periodic R8 append failed: %s", exc)
+
+    # R9 — operator presence stale
+    try:
+        from jarvis.state.operator_presence import scan_presence_stale
+
+        for event in scan_presence_stale():
+            try:
+                append_inbox(event)
+                fired.append(
+                    FiredTrigger(
+                        rule_name="operator_presence_stale",
+                        source_key="presence",
+                        action_summary=event.summary,
+                        outcome="ok",
+                    )
+                )
+                _push_for_event(n, event, "Jarvis — checking in")
+            except Exception as exc:
+                log.warning("scan_periodic R9 append failed: %s", exc)
+    except Exception as exc:
+        log.warning("scan_periodic R9 import failed: %s", exc)
 
     return fired
 

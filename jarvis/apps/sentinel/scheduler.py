@@ -27,6 +27,7 @@ from jarvis.agents.tempo.agent import Tempo
 from jarvis.contract import InboxEvent
 from jarvis.core.triggers import scan_periodic
 from jarvis.state import append_inbox
+from jarvis.state.briefing import evening_digest
 
 from .mission_control_bridge import sync_tick as mission_control_sync_tick
 from .notifier import default_notifier
@@ -113,8 +114,17 @@ def _triggers_tick(reg: dict, notifier=None) -> None:
 _atlas_health_last: dict = {"healthy": None}
 
 
-def atlas_health_tick(atlas_api_url: str) -> dict:
-    """Check Atlas /system/health every 60s; push notification on 200↔503 transitions."""
+def atlas_health_tick(
+    atlas_api_url: str,
+    notifier: Notifier | None = None,  # noqa: F821 — forward ref to .notifier.Notifier
+) -> dict:
+    """Check Atlas /system/health every 60s; push notification on 200↔503 transitions.
+
+    Atlas going down (or recovering) must NOTIFY the operator, not just be logged
+    to the dashboard inbox — the dashboard isn't always open. The notifier is
+    optional so existing callers/tests that don't supply one still work; in that
+    case we lazily resolve the default notifier.
+    """
     import httpx
 
     from jarvis.contract import InboxEvent
@@ -136,6 +146,15 @@ def atlas_health_tick(atlas_api_url: str) -> dict:
             summary = "Atlas recovered"
             severity = "info"
         append_inbox(InboxEvent(agent="sentinel", severity=severity, summary=summary))
+        notif = notifier if notifier is not None else default_notifier()
+        try:
+            notif.push(
+                summary,
+                "Atlas health changed",
+                priority=2 if severity == "alert" else 1,
+            )
+        except Exception:
+            log.warning("atlas_health_tick: notifier push failed", exc_info=True)
         log.warning("atlas_health_tick: %s", summary)
 
     _atlas_health_last["healthy"] = is_healthy
@@ -163,13 +182,29 @@ def _mc_sync_throttled() -> dict:
         return {"skipped": True, "reason": "error"}
 
 
+def _resolve_scheduler_tz() -> str:
+    """Pick the timezone for cron jobs.
+
+    Precedence:
+      1. ``JARVIS_TZ`` env var (e.g. ``America/New_York``) — operator's local TZ.
+      2. ``TZ`` env var (POSIX standard, set on most desktops).
+      3. ``UTC`` (backward-compatible default).
+
+    The chosen TZ is only applied to cron firing times — digest content and
+    inbox timestamps remain UTC to keep downstream consumers deterministic.
+    """
+    return os.environ.get("JARVIS_TZ") or os.environ.get("TZ") or "UTC"
+
+
 def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingScheduler:
     reg = build_default_registry()
     tempo, atlas, lens, scholar = _build_subsystems(reg)
     notifier = default_notifier()
     watchlist = [t.strip() for t in os.environ.get("JARVIS_WATCHLIST", "BTC,ETH").split(",") if t.strip()]
 
-    sched = scheduler or BlockingScheduler(timezone="UTC")
+    scheduler_tz = _resolve_scheduler_tz()
+    sched = scheduler or BlockingScheduler(timezone=scheduler_tz)
+    log.info("sentinel scheduler tz=%s (morning/evening cron honor this)", scheduler_tz)
 
     # Each tick is wrapped via _safe_tick so an offline Atlas (or any
     # transient subsystem error) emits a degraded inbox event instead of
@@ -194,9 +229,13 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
         lambda: _safe_tick(scholar_tick, "scholar_tick", scholar, notifier),
         "interval", hours=2, id="scholar",
     )
+    # Morning/evening crons fire at 08:00 / 18:00 in ``scheduler_tz``. Set
+    # ``JARVIS_TZ=America/New_York`` (or any IANA zone) in ``.env`` to make
+    # "morning digest" actually fire at local 8am. Default is UTC for
+    # backward compatibility with the test suite.
     sched.add_job(morning_digest, "cron", hour=8, minute=0,
                   args=[reg, notifier], id="morning")
-    sched.add_job(morning_digest, "cron", hour=18, minute=0,
+    sched.add_job(evening_digest, "cron", hour=18, minute=0,
                   args=[reg, notifier], id="evening")
     sched.add_job(atlas_daily_rollup, "cron", hour=22, minute=0,
                   args=[atlas, notifier], id="atlas_rollup")
@@ -225,7 +264,11 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(voice_context_tick, "interval", minutes=5, id="voice_context")
     atlas_api_url = os.environ.get("JARVIS_ATLAS_API", "http://localhost:8000")
     sched.add_job(
-        atlas_health_tick, "interval", seconds=60, args=[atlas_api_url], id="atlas_health"
+        atlas_health_tick,
+        "interval",
+        seconds=60,
+        args=[atlas_api_url, notifier],
+        id="atlas_health",
     )
     # Daily autonomous Forge — picks news story, builds MVP, pushes to GitHub
     sched.add_job(

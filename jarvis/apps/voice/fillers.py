@@ -20,12 +20,12 @@ DEFAULT_CACHE_DIR = Path("state/voice_samples/fillers")
 
 # (id, phrase). MP3s named ``<id>.mp3``.
 FILLERS: tuple[tuple[str, str], ...] = (
-    ("01-one-moment", "One moment."),
-    ("02-let-me-check", "Let me check."),
-    ("03-looking", "Looking into it."),
-    ("04-working", "Working on it."),
-    ("05-just-a-sec", "Just a second."),
-    ("06-checking", "Checking now."),
+    ("01-one-moment", "One moment, Jyot."),
+    ("02-pulling-up", "Pulling that up."),
+    ("03-working", "Working on it."),
+    ("04-looking", "Looking."),
+    ("05-checking", "Checking now."),
+    ("06-stand-by", "Stand by."),
 )
 
 
@@ -42,15 +42,23 @@ def _gen_one(phrase: str, voice: str, rate: str, out_path: Path) -> None:
 
 def ensure_fillers(
     cache_dir: Path = DEFAULT_CACHE_DIR,
-    voice: str = "en-US-AndrewMultilingualNeural",
-    rate: str = "+15%",
+    voice: str | None = None,
+    rate: str | None = None,
 ) -> list[Path]:
     """Generate every filler once and cache. Returns the list of MP3 paths.
 
-    ``voice`` and ``rate`` should match the operator's selected production
-    voice (default Andrew at +15%) so fillers don't sound like a different
-    speaker than the rest of the reply.
+    ``voice`` and ``rate`` default to the operator's production settings
+    (``VOICE_NAME`` / ``VOICE_RATE``) so fillers don't sound like a
+    different speaker than the rest of the reply.
     """
+    if voice is None or rate is None:
+        from jarvis.config import get_settings
+
+        settings = get_settings()
+        if voice is None:
+            voice = settings.voice_name
+        if rate is None:
+            rate = settings.voice_rate or "+0%"
     cache_dir.mkdir(parents=True, exist_ok=True)
     paths: list[Path] = []
     for filler_id, phrase in FILLERS:

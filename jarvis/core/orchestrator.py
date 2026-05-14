@@ -26,7 +26,7 @@ from jarvis.contract import (
 from jarvis.state import append_agent_log, append_inbox, load_tasks, read_inbox
 from jarvis.state.memory import record_dispatch
 
-from .authority import AuthorityError, check_authority
+from .authority import AuthorityError, check_authority, check_response_authority
 from .classify import classify_tier
 from .router import classify
 from .verify import verify_response
@@ -82,6 +82,23 @@ class Orchestrator:
         await self._emit("router.classified", request_id,
                          intent=intent.model_dump(), tier=tier)
 
+        # Low-confidence guard: when the classifier could not place the
+        # request against any specific agent (primary="jarvis", confidence
+        # below 0.5), don't silently self-handle — surface a clarification
+        # prompt to the operator. The LLM fallback for this branch is
+        # deferred to J5.2; for now, ask explicitly which agent to use.
+        if intent.confidence < 0.5 and intent.primary == "jarvis":
+            return {
+                "request_id": request_id,
+                "intent": intent.model_dump(),
+                "needs_clarification": True,
+                "clarification_prompt": (
+                    "I'm not sure how to handle that. Did you mean one of: "
+                    "tempo, scholar, lens, forge, atlas?"
+                ),
+                "responses": {},
+            }
+
         try:
             check_authority(agent=intent.primary, action=action,
                             tier=tier, confirmed=confirmed)
@@ -91,6 +108,7 @@ class Orchestrator:
         ordered = self._resolve_targets(intent)
         responses = await self._run_fanout(
             ordered, request, request_id, tier, action=action,
+            confirmed=confirmed,
         )
         self._record_responses(responses, tier)
         self._persist_agent_log(request_id, responses, tier)
@@ -146,12 +164,13 @@ class Orchestrator:
         request_id: str,
         tier: int,
         action: str = "dispatch",
+        confirmed: bool = False,
     ) -> dict[str, AgentResponse]:
         # ``return_exceptions=True`` so one misbehaving agent cannot kill the
         # entire fan-out — partial results still bubble back to the caller.
         results = await asyncio.gather(
             *(
-                self._run_one(name, request, request_id, tier, action=action)
+                self._run_one(name, request, request_id, tier, action=action, confirmed=confirmed)
                 for name in ordered
             ),
             return_exceptions=True,
@@ -185,6 +204,7 @@ class Orchestrator:
         request_id: str,
         tier: int,
         action: str = "dispatch",
+        confirmed: bool = False,
     ) -> AgentResponse | None:
         handler = self._handlers.get(agent_name)
         if handler is None:
@@ -206,6 +226,24 @@ class Orchestrator:
                              duration_ms=int((time.perf_counter() - started) * 1000))
             raise
         resp = verify_response(resp.model_copy(update={"tier": tier}))
+        # Post-dispatch authority check: the pre-dispatch gate only sees the
+        # action inferred from the request text. Agents can also surface
+        # response-side actions (e.g. ``paused``, ``merged``) once they've
+        # actually performed the mutation; gate those too so an unauthorised
+        # mutation gets transformed into a needs_confirm proposal rather
+        # than slipping through.
+        try:
+            check_response_authority(
+                agent=agent_name,
+                response_action=resp.action,
+                confirmed=confirmed,
+            )
+        except AuthorityError:
+            resp = resp.model_copy(update={
+                "needs_confirm": True,
+                "action": resp.action,
+                "result": {**resp.result, "authority_gate": "post_dispatch_block"},
+            })
         await self._emit(
             "agent.done", request_id, agent=agent_name,
             duration_ms=int((time.perf_counter() - started) * 1000),

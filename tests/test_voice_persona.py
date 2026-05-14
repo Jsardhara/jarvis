@@ -17,7 +17,7 @@ from jarvis.apps.voice import persona
     [
         "chief of staff",          # back-compat with existing cheap_handler tests
         "1-2 sentences",           # cadence cap
-        "composed",                # butler half
+        "jyot",                    # operator name - direct address
         "dry",                     # observational tone
         "contractions",            # spoken cadence cue
         "no markdown",             # strip-for-voice cue
@@ -41,11 +41,8 @@ def test_persona_contains_character_marker(marker: str) -> None:
     ],
 )
 def test_persona_does_not_invite_sycophancy(banned: str) -> None:
-    # Persona explicitly forbids these phrases — they should appear only
-    # inside a forbid-list construct, never as part of the persona itself.
     text = persona.PERSONA.lower()
     if banned in text:
-        # allowed only when wrapped in a "no X" / "never X" instruction
         idx = text.index(banned)
         window = text[max(0, idx - 30):idx]
         assert any(
@@ -56,3 +53,8 @@ def test_persona_does_not_invite_sycophancy(banned: str) -> None:
 def test_persona_is_nonempty_string() -> None:
     assert isinstance(persona.PERSONA, str)
     assert len(persona.PERSONA) > 200
+
+
+def test_voice_word_cap_is_int() -> None:
+    assert isinstance(persona.VOICE_WORD_CAP, int)
+    assert 10 <= persona.VOICE_WORD_CAP <= 50

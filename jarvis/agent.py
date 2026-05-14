@@ -66,8 +66,9 @@ SOUL_FULL = "jarvis_soul.md"
 SOUL_LITE = "jarvis_soul_lite.md"
 
 _RECAP_TURN_PAIRS = 3
+_RECAP_SAME_LANE_PAIRS = 2  # briefer recap when staying on the same lane
 _RECAP_MAX_CHARS = 800
-_TURN_LOG_MAX = 12  # 6 user + 6 assistant
+_TURN_LOG_MAX = 100  # bumped from 12 so hydration from chat_turns.jsonl fits
 # Anchor at the project root so the file resolves the same whether the
 # importer is uvicorn (started from the repo root), the voice daemon
 # (started from any cwd), or a test runner from `tests/`.
@@ -229,19 +230,39 @@ def _build_live_state_block() -> str:
     The SDK client caches its system prompt at connect time, so this
     block has to ride along with each user message instead. Empty
     return when there's nothing fresh to share so the prompt stays terse.
+
+    Known declarative facts (state/facts.jsonl) are appended below the
+    live state so the model has a stable picture of operator preferences
+    on every turn.
     """
+    body = ""
     try:
         from jarvis.apps.voice.context_cache import load_voice_context, render_for_prompt
 
         body = render_for_prompt(load_voice_context())
-        if not body or body in ("(context empty)", "(context unavailable; respond conservatively)"):
-            return ""
-        return (
+        if body in ("(context empty)", "(context unavailable; respond conservatively)"):
+            body = ""
+    except Exception:  # noqa: BLE001 — never block chat on context-read failure
+        body = ""
+
+    facts_block = ""
+    try:
+        from jarvis.state.facts import read_facts, render_facts_for_prompt
+
+        facts_block = render_facts_for_prompt(read_facts(limit=30))
+    except Exception as exc:  # noqa: BLE001 — facts must never break chat
+        logger.debug("facts block render skipped: %s", exc)
+        facts_block = ""
+
+    parts: list[str] = []
+    if body:
+        parts.append(
             "[LIVE OPERATOR STATE — refreshed this turn; trust this over older context]\n"
             f"{body}"
         )
-    except Exception:  # noqa: BLE001 — never block chat on context-read failure
-        return ""
+    if facts_block:
+        parts.append(facts_block)
+    return "\n\n".join(parts)
 
 
 # ---------- Streaming chat ----------
@@ -281,6 +302,49 @@ class JarvisChat:
         self._connected: set[str] = set()
         self._last_lane: str | None = None
         self._turn_log: list[dict[str, str]] = _load_turn_log()
+        # Pull cross-surface history (voice + chat) from the unified store so
+        # the FIRST turn of every session already has continuity.  Best-effort:
+        # any failure leaves _turn_log as-is.
+        self._hydrate_from_unified_store()
+
+    # ----- init helpers -----
+
+    def _hydrate_from_unified_store(self, limit: int = 50) -> None:
+        """Merge recent ChatTurnRecord entries into ``_turn_log``.
+
+        Dedupes against existing entries by ``(role, text)`` so a record
+        already on disk in ``jarvis_turn_log.json`` isn't double-counted.
+        Ordered oldest-first to match the rolling-log convention.
+        """
+        try:
+            from jarvis.state.chat_turns import read_recent
+
+            records = read_recent(user_id="default", limit=limit)
+        except Exception as exc:  # noqa: BLE001 — never block init on memory read
+            logger.debug("unified-store hydrate skipped: %s", exc)
+            return
+        if not records:
+            return
+        existing: set[tuple[str, str]] = {
+            (e.get("role", ""), e.get("text", "")) for e in self._turn_log
+        }
+        hydrated: list[dict[str, str]] = []
+        # ``read_recent`` returns chronological order (oldest-first).
+        for rec in records:
+            user_text = (rec.user_text or "").strip()
+            asst_text = (rec.assistant_text or "").strip()
+            if user_text and ("user", user_text) not in existing:
+                hydrated.append({"role": "user", "text": user_text})
+                existing.add(("user", user_text))
+            if asst_text and ("assistant", asst_text) not in existing:
+                hydrated.append({"role": "assistant", "text": asst_text})
+                existing.add(("assistant", asst_text))
+        if not hydrated:
+            return
+        merged = hydrated + self._turn_log
+        if len(merged) > _TURN_LOG_MAX:
+            merged = merged[-_TURN_LOG_MAX:]
+        self._turn_log = merged
 
     # ----- routing -----
 
@@ -392,14 +456,23 @@ class JarvisChat:
 
     # ----- recap -----
 
-    def _recap(self, upcoming_message: str | None = None) -> str | None:
+    def _recap(
+        self,
+        upcoming_message: str | None = None,
+        *,
+        lane_switch: bool = True,
+    ) -> str | None:
         """Return a short context recap of the last few turn pairs, or None.
 
-        If *upcoming_message* is provided, up to ``_SEMANTIC_RECAP_TOP_K``
-        semantically relevant past turns (score > _SEMANTIC_MIN_SCORE) are
-        appended after the recent-pairs block.  Each hit is capped at
-        ``_SEMANTIC_MAX_CHARS`` characters and the total recap stays within
-        ``_RECAP_MAX_CHARS``.
+        ``lane_switch=True`` → full recap (last 3 pairs + top-3 semantic).
+        ``lane_switch=False`` → brief recap (last 2 pairs + top-1 semantic),
+        used when the same model lane carries forward so the model still
+        sees rolling context on the first turn of a new session.
+
+        If *upcoming_message* is provided, semantically relevant past turns
+        (score > ``_SEMANTIC_MIN_SCORE``) are appended after the recent-pairs
+        block. Each hit is capped at ``_SEMANTIC_MAX_CHARS`` characters and
+        the total recap stays within ``_RECAP_MAX_CHARS``.
         """
         if not self._turn_log:
             return None
@@ -414,8 +487,14 @@ class JarvisChat:
                 user_buf = None
         if not pairs:
             return None
-        recent = pairs[-_RECAP_TURN_PAIRS:]
-        lines = ["[Earlier in this thread, on a different model:]"]
+        pair_cap = _RECAP_TURN_PAIRS if lane_switch else _RECAP_SAME_LANE_PAIRS
+        recent = pairs[-pair_cap:]
+        header = (
+            "[Earlier in this thread, on a different model:]"
+            if lane_switch
+            else "[Rolling thread context:]"
+        )
+        lines = [header]
         for u, a in recent:
             lines.append(f"- You said: {u.strip()[:200]}")
             lines.append(f"- I responded: {a.strip()[:200]}")
@@ -424,7 +503,10 @@ class JarvisChat:
 
         # Augment with semantic hits when an upcoming message is known.
         if upcoming_message:
-            semantic_lines = self._semantic_recap_lines(upcoming_message)
+            top_k = _SEMANTIC_RECAP_TOP_K if lane_switch else 1
+            semantic_lines = self._semantic_recap_lines(
+                upcoming_message, top_k=top_k
+            )
             if semantic_lines:
                 budget = _RECAP_MAX_CHARS - len(recap)
                 if budget > 40:
@@ -432,12 +514,14 @@ class JarvisChat:
                     recap += "\n" + block[:budget]
         return recap
 
-    def _semantic_recap_lines(self, query: str) -> list[str]:
+    def _semantic_recap_lines(
+        self, query: str, *, top_k: int = _SEMANTIC_RECAP_TOP_K
+    ) -> list[str]:
         """Return formatted lines for semantic recall to embed in recap."""
         try:
             from jarvis.state.memory_index import search as _search
 
-            hits = _search(query, top_k=_SEMANTIC_RECAP_TOP_K)
+            hits = _search(query, top_k=top_k)
         except Exception as exc:
             logger.debug("semantic recap search failed: %s", exc)
             return []
@@ -459,6 +543,40 @@ class JarvisChat:
             self._turn_log = self._turn_log[-_TURN_LOG_MAX:]
         _save_turn_log(self._turn_log)
         self._index_turn(role=role, text=text, lane=lane)
+        if role == "user":
+            self._extract_and_persist_facts(text)
+            self._mark_operator_present("chat")
+
+    @staticmethod
+    def _mark_operator_present(surface: str) -> None:
+        """Record an operator-presence mark so sentinel can detect inactivity.
+
+        Best-effort: failures are logged at debug and swallowed. Never let the
+        presence hook break the chat hot path.
+        """
+        try:
+            from jarvis.state.operator_presence import mark_present
+
+            mark_present(surface)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("operator_presence mark skipped: %s", exc)
+
+    @staticmethod
+    def _extract_and_persist_facts(text: str) -> None:
+        """Regex-extract declarative facts from a user turn; append to disk.
+
+        Best-effort: any failure is logged at debug level and swallowed.
+        Never lets fact capture break the chat hot path.
+        """
+        try:
+            from jarvis.state.facts import append_fact, extract_facts
+            from jarvis.state.memory_index import turn_id_from_dict
+
+            tid = turn_id_from_dict({"role": "user", "text": text})
+            for fact in extract_facts(text, turn_id=tid):
+                append_fact(fact)
+        except Exception as exc:  # noqa: BLE001 — facts must never break chat
+            logger.debug("facts extract skipped: %s", exc)
 
     @staticmethod
     def _record_unified_turn(
@@ -636,12 +754,14 @@ class JarvisChat:
             self._connected.add(decision.model)
 
         prompt = cleaned
-        if (
-            self._last_lane is not None
-            and self._last_lane != decision.model
-            and not self._forced_model
-        ):
-            recap = self._recap(upcoming_message=cleaned)
+        if not self._forced_model:
+            # Recap runs on EVERY turn so the first message of a session
+            # still pulls history off disk.  Lane-switch promotes to the
+            # full recap; same-lane turns get the brief variant.
+            lane_switch = (
+                self._last_lane is not None and self._last_lane != decision.model
+            )
+            recap = self._recap(upcoming_message=cleaned, lane_switch=lane_switch)
             if recap:
                 prompt = f"{recap}\n\n[Now Jyot says:]\n{cleaned}"
 

@@ -62,3 +62,28 @@ def test_register_adds_handler():
     o.register("tempo", _stub_handler("tempo"))
     out = asyncio.run(o.dispatch("inbox"))
     assert "tempo" in out["responses"]
+
+
+def test_low_confidence_returns_clarification():
+    """Unmatched gibberish should yield needs_clarification, no handler call."""
+    calls: list[str] = []
+
+    def _tracker(name: str):
+        async def _h(req: str | dict) -> AgentResponse:
+            calls.append(name)
+            text = req["text"] if isinstance(req, dict) else req
+            return AgentResponse(agent=name, intent="stub", action="done", result={"echo": text})
+        return _h
+
+    o = Orchestrator({
+        "tempo": _tracker("tempo"),
+        "scholar": _tracker("scholar"),
+        "lens": _tracker("lens"),
+        "forge": _tracker("forge"),
+        "atlas": _tracker("atlas"),
+    })
+    out = asyncio.run(o.dispatch("blarp the quux"))
+    assert out["needs_clarification"] is True
+    assert "tempo" in out["clarification_prompt"]
+    assert out["responses"] == {}
+    assert calls == []

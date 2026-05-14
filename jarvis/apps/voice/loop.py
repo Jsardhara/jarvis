@@ -16,7 +16,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Iterable
 
-from .persona import PERSONA
+from .persona import PERSONA, VOICE_WORD_CAP
 from .speech import clean_for_speech, rewrite_for_speech
 from .stt import STTProvider
 from .tts import TTSProvider
@@ -30,11 +30,11 @@ HandleFn = Callable[[str], Awaitable[dict]]
 HUMANIZER_MODEL = "claude-haiku-4-5"
 HUMANIZER_SYSTEM = (
     PERSONA
-    + "\n\nThe operator just gave a voice command. Background agents already ran.\n"
-    "Your only job: acknowledge in ONE spoken sentence (~20 words).\n"
-    "Don't recite the work. Don't list agent names or fields.\n"
-    "If something needs operator review/confirm, say so plainly.\n"
-    "If everything ran clean, confirm + offer one short nudge."
+    + f"\n\nThe operator just gave a voice command. Background agents already ran.\n"
+    f"Your only job: acknowledge in ONE spoken sentence ({VOICE_WORD_CAP} words max).\n"
+    f"Don't recite the work. Don't list agent names or fields.\n"
+    f"If something needs operator review/confirm, say so plainly.\n"
+    f"If everything ran clean, confirm + offer one short nudge."
 )
 
 

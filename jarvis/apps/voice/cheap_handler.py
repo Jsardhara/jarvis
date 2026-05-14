@@ -47,7 +47,12 @@ _VOICE_SESSION_ID = os.environ.get("JARVIS_VOICE_SESSION_ID") or uuid4().hex
 VOICE_SYSTEM_PROMPT = (
     PERSONA
     + "\n\nCONTEXT\n{context_block}\n\nRECENT EXCHANGES\n{memory_block}\n"
+    + "\n{cross_surface_block}{semantic_block}"
 )
+
+_VOICE_CHAT_TURN_LIMIT = 20
+_VOICE_CHAT_TURN_TRUNC = 200
+_VOICE_SEMANTIC_TOP_K = 3
 
 DEFAULT_HAIKU_MODEL = "claude-haiku-4-5"
 DEFAULT_SONNET_MODEL = "claude-sonnet-4-6"
@@ -114,15 +119,85 @@ def _local_response(text: str) -> dict[str, Any] | None:
     return _wrap(local, source="local")
 
 
+def _render_recent_chat_turns(records: list[Any]) -> str:
+    """Render unified chat_turns records as a compact prompt block.
+
+    Truncates each user/assistant payload to ``_VOICE_CHAT_TURN_TRUNC``
+    chars so even a long history doesn't blow the prompt budget. Returns
+    an empty string when *records* is empty so the caller can drop the
+    section cleanly.
+    """
+    if not records:
+        return ""
+    lines = [
+        f"Recent conversation (last {_VOICE_CHAT_TURN_LIMIT} turns, mixed voice + chat):"
+    ]
+    for rec in records:
+        surface = getattr(rec, "surface", "chat") or "chat"
+        user_text = (getattr(rec, "user_text", "") or "")[:_VOICE_CHAT_TURN_TRUNC]
+        asst_text = (getattr(rec, "assistant_text", "") or "")[:_VOICE_CHAT_TURN_TRUNC]
+        if user_text:
+            lines.append(f"[{surface}] user: {user_text}")
+        if asst_text:
+            lines.append(f"[{surface}] you: {asst_text}")
+    return "\n".join(lines)
+
+
+def _render_semantic_hits(text: str) -> str:
+    """Return top-K semantic hits as a prompt block, or empty string.
+
+    Wrapped in try/except so a missing ``sentence-transformers`` or any
+    other failure inside ``memory_index.search`` doesn't crash the voice
+    path. Short-circuits when the index file is absent so we don't pay
+    the embedding cost on an empty store.
+    """
+    try:
+        from jarvis.state.memory_index import (  # type: ignore[import-not-found]
+            _get_index_path,
+            search,
+        )
+
+        if not _get_index_path().exists():
+            return ""
+        hits = search(text, top_k=_VOICE_SEMANTIC_TOP_K)
+    except Exception as exc:  # noqa: BLE001 — voice never crashes on memory fail
+        logger.debug("[voice] semantic search skipped: %s", exc)
+        return ""
+    if not hits:
+        return ""
+    lines = ["Possibly relevant past turns:"]
+    for score, turn in hits:
+        snippet = (turn.text or "").strip().replace("\n", " ")[:_VOICE_CHAT_TURN_TRUNC]
+        lines.append(f"- [{turn.role} @ {score:.2f}] {snippet}")
+    return "\n".join(lines)
+
+
+def _load_cross_surface_records() -> list[Any]:
+    """Read recent chat_turns; return empty list on any failure."""
+    try:
+        from jarvis.state.chat_turns import read_recent  # type: ignore[import-not-found]
+
+        return read_recent(user_id="default", limit=_VOICE_CHAT_TURN_LIMIT)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("[voice] chat_turns read skipped: %s", exc)
+        return []
+
+
 async def _ask_claude(text: str, model: str) -> dict[str, Any]:
     """Single Claude call routed through claude_queue.submit."""
     from jarvis.llm.queue import submit  # type: ignore[import-not-found]
 
     context = load_voice_context()
     memory_block = conversation_memory.render_for_prompt() or "(none)"
+    cross_surface = _render_recent_chat_turns(_load_cross_surface_records())
+    semantic = _render_semantic_hits(text)
+    cross_surface_block = f"\n{cross_surface}\n" if cross_surface else ""
+    semantic_block = f"\n{semantic}\n" if semantic else ""
     system = VOICE_SYSTEM_PROMPT.format(
         context_block=render_for_prompt(context),
         memory_block=memory_block,
+        cross_surface_block=cross_surface_block,
+        semantic_block=semantic_block,
     )
     try:
         reply = submit(system=system, user=text, model=model)
@@ -243,6 +318,15 @@ async def handle(text: str) -> dict[str, Any]:
     text = (text or "").strip()
     if not text:
         return _wrap("", source="empty")
+
+    # Operator-presence mark: every non-empty voice turn counts as activity.
+    # Best-effort; never lets the presence hook break voice routing.
+    try:
+        from jarvis.state.operator_presence import mark_present
+
+        mark_present("voice")
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("operator_presence mark skipped: %s", exc)
 
     # URL detected → multimodal link_handler runs before any tier routing.
     from jarvis.agents.lens import link_handler
