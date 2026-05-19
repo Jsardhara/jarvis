@@ -1,0 +1,21 @@
+[Unit]
+Description=Jarvis voice loop (wake-word + hot-mic)
+Documentation=file://@JARVIS_ROOT@/docs/JARVIS_2026_ROADMAP.md
+After=jarvis-api.service sound.target
+Wants=jarvis-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=@JARVIS_ROOT@
+EnvironmentFile=-@JARVIS_ROOT@/.env
+EnvironmentFile=-%h/.config/jarvis/env
+# Gated on VOICE_ENABLED=true in the env file. The voice app exits early if
+# VOICE_ENABLED is false, so this unit can safely be enabled by default.
+ExecStart=@PYTHON@ -m jarvis.apps.voice
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.local/share/jarvis/logs/voice.log
+StandardError=append:%h/.local/share/jarvis/logs/voice.err
+
+[Install]
+WantedBy=default.target

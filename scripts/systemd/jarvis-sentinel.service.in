@@ -1,0 +1,19 @@
+[Unit]
+Description=Jarvis sentinel daemon (scanners + cron + proactive intelligence)
+Documentation=file://@JARVIS_ROOT@/docs/JARVIS_2026_ROADMAP.md
+After=network-online.target jarvis-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@JARVIS_ROOT@
+EnvironmentFile=-@JARVIS_ROOT@/.env
+EnvironmentFile=-%h/.config/jarvis/env
+ExecStart=@PYTHON@ -m jarvis.apps.sentinel
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.local/share/jarvis/logs/sentinel.log
+StandardError=append:%h/.local/share/jarvis/logs/sentinel.err
+
+[Install]
+WantedBy=default.target

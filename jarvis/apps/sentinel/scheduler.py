@@ -32,6 +32,7 @@ from jarvis.state.briefing import evening_digest
 from .mission_control_bridge import sync_tick as mission_control_sync_tick
 from .notifier import default_notifier
 from .routines import (
+    agency_tick,
     atlas_daily_rollup,
     atlas_tick,
     calendar_tick,
@@ -248,6 +249,8 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
     sched.add_job(heartbeat_tick, "interval", seconds=60, args=[sched, notifier], id="heartbeat")
     sched.add_job(_mc_sync_throttled, "interval", seconds=30, id="mc_sync")
     sched.add_job(_triggers_tick, "interval", minutes=30, args=[reg, notifier], id="triggers")
+    sched.add_job(agency_tick, "interval", minutes=5,
+                  args=[reg, notifier], id="agency")
 
     # Wire fire_for_event as an in-process inbox listener so events written from
     # this sentinel process (atlas_tick, scan_periodic, atlas_health_tick) trigger

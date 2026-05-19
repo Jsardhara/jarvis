@@ -1,0 +1,21 @@
+[Unit]
+Description=Jarvis web dashboard (Next.js)
+Documentation=file://@JARVIS_ROOT@/docs/JARVIS_2026_ROADMAP.md
+After=jarvis-api.service
+Wants=jarvis-api.service
+
+[Service]
+Type=simple
+WorkingDirectory=@JARVIS_ROOT@/web
+EnvironmentFile=-@JARVIS_ROOT@/.env
+EnvironmentFile=-%h/.config/jarvis/env
+Environment=PORT=@WEB_PORT@
+# Dev mode by default; switch ExecStart to `pnpm start` after `pnpm build`.
+ExecStart=@PNPM@ dev
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:%h/.local/share/jarvis/logs/dashboard.log
+StandardError=append:%h/.local/share/jarvis/logs/dashboard.err
+
+[Install]
+WantedBy=default.target

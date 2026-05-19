@@ -20,6 +20,7 @@ from uuid import uuid4
 from jarvis.config import get_settings
 from jarvis.contract import AgentResponse, Task
 from jarvis.state import add_task, load_tasks, update_task
+from jarvis.state import contacts as contacts_mod
 from jarvis.state.drafted_replies import (
     STATUS_DRAFTED,
     DraftedReply,
@@ -486,6 +487,24 @@ class Tempo:
             needs_confirm=False,
         )
 
+    def resolve_recipient(self, to: str) -> str:
+        """Resolve a recipient string to an email address.
+
+        - Strings containing "@" are assumed to already be an email and
+          are returned as-is.
+        - Otherwise we look the name up against the contact graph
+          (display_name OR alias, case-insensitive). On a hit with a
+          non-empty email we return it; everything else raises
+          ``ValueError`` so the caller surfaces the gap rather than
+          silently emailing the wrong person.
+        """
+        if to and "@" in to:
+            return to
+        contact = contacts_mod.resolve_name(to)
+        if contact is not None and contact.email:
+            return contact.email
+        raise ValueError(f"contact not found for {to!r}")
+
     def send_mail(self, to: str, subject: str, body: str) -> AgentResponse:
         """Stage an outbound message; orchestrator gates the actual send.
 
@@ -493,12 +512,18 @@ class Tempo:
         operator-confirmed. We surface the proposed message back to the
         orchestrator with ``needs_confirm=True`` and do not touch the
         provider here; the gated re-invocation performs the real send.
+
+        The ``to`` argument may be a contact name ("Pepper") rather than
+        an email address; we resolve it through the contact graph here
+        before staging so the proposed result already shows the real
+        recipient. The authority gate is unchanged.
         """
+        resolved_to = self.resolve_recipient(to)
         return AgentResponse(
             agent="tempo",
             intent="send_mail",
             action="proposed",
-            result={"to": to, "subject": subject, "body": body},
+            result={"to": resolved_to, "subject": subject, "body": body},
             follow_ups=["confirm to send"],
             needs_confirm=True,
             confidence=0.9,

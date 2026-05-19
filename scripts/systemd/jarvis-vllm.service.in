@@ -1,0 +1,24 @@
+[Unit]
+Description=vLLM serving the primary brain across both GPUs
+Documentation=file://@JARVIS_ROOT@/docs/JARVIS_2026_ROADMAP.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h
+EnvironmentFile=-%h/.config/jarvis/env
+# Defaults assume Qwen 2.5 72B AWQ tensor-parallel across two GPUs.
+# Override JARVIS_VLLM_MODEL / JARVIS_VLLM_ARGS in %h/.config/jarvis/env.
+Environment=JARVIS_VLLM_MODEL=Qwen/Qwen2.5-72B-Instruct-AWQ
+Environment=JARVIS_VLLM_ARGS=--tensor-parallel-size 2 --max-model-len 32768 --gpu-memory-utilization 0.85
+ExecStart=/bin/sh -c '@VLLM@ serve "$JARVIS_VLLM_MODEL" --host 127.0.0.1 --port 8000 $JARVIS_VLLM_ARGS'
+Restart=on-failure
+RestartSec=30
+# vLLM can take 60-120s to load a 70B model.
+TimeoutStartSec=300
+StandardOutput=append:%h/.local/share/jarvis/logs/vllm.log
+StandardError=append:%h/.local/share/jarvis/logs/vllm.err
+
+[Install]
+WantedBy=default.target

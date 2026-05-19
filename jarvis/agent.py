@@ -27,9 +27,7 @@ layer turns into SSE frames:
 """
 from __future__ import annotations
 
-import json
 import logging
-import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from dataclasses import dataclass
@@ -58,66 +56,29 @@ from jarvis.llm.model_router import (
     RouteDecision,
     decide_model,
 )
+# Re-export turn-log persistence helpers so tests can monkeypatch them
+# at the ``jarvis.agent`` namespace (e.g. ``jarvis.agent._save_turn_log``).
+from jarvis.state.recap import (
+    hydrate_from_unified_store as _hydrate_from_unified_store,
+)
+from jarvis.state.recap import (
+    load_turn_log as _load_turn_log,
+)
+from jarvis.state.recap import (
+    record_turn as _record_turn,
+)
+from jarvis.state.recap import (
+    record_unified_turn as _record_unified_turn,
+)
+from jarvis.state.recap import (
+    save_turn_log as _save_turn_log,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = DEFAULT_OPUS_ID  # back-compat alias
 SOUL_FULL = "jarvis_soul.md"
 SOUL_LITE = "jarvis_soul_lite.md"
-
-_RECAP_TURN_PAIRS = 3
-_RECAP_SAME_LANE_PAIRS = 2  # briefer recap when staying on the same lane
-_RECAP_MAX_CHARS = 800
-_TURN_LOG_MAX = 100  # bumped from 12 so hydration from chat_turns.jsonl fits
-# Anchor at the project root so the file resolves the same whether the
-# importer is uvicorn (started from the repo root), the voice daemon
-# (started from any cwd), or a test runner from `tests/`.
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_TURN_LOG_PATH = _PROJECT_ROOT / "state" / "jarvis_turn_log.json"
-_SEMANTIC_RECAP_TOP_K = 3
-_SEMANTIC_MIN_SCORE = 0.4
-_SEMANTIC_MAX_CHARS = 120  # per hit in recap
-
-
-# ---------- Turn-log persistence ----------
-
-
-def _load_turn_log() -> list[dict[str, str]]:
-    """Restore prior conversation turns from disk so memory survives restarts."""
-    if not _TURN_LOG_PATH.exists():
-        return []
-    try:
-        raw = json.loads(_TURN_LOG_PATH.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("turn-log read failed (%s); starting empty", exc)
-        return []
-    if not isinstance(raw, list):
-        return []
-    out: list[dict[str, str]] = []
-    for entry in raw[-_TURN_LOG_MAX:]:
-        if isinstance(entry, dict) and isinstance(entry.get("role"), str) and isinstance(entry.get("text"), str):
-            out.append({"role": entry["role"], "text": entry["text"]})
-    return out
-
-
-def _save_turn_log(turns: list[dict[str, str]]) -> None:
-    """Persist the rolling turn log to disk (atomic write).
-
-    Runs the disk write on a background thread so the chat hot path
-    doesn't block on fsync.
-    """
-    snapshot = list(turns)
-
-    def _write() -> None:
-        try:
-            _TURN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            tmp = _TURN_LOG_PATH.with_suffix(".tmp")
-            tmp.write_text(json.dumps(snapshot, ensure_ascii=False), encoding="utf-8")
-            tmp.replace(_TURN_LOG_PATH)
-        except OSError as exc:
-            logger.warning("turn-log write failed: %s", exc)
-
-    threading.Thread(target=_write, daemon=True).start()
 
 
 # ---------- Soul loader ----------
@@ -316,46 +277,7 @@ class JarvisChat:
         # Pull cross-surface history (voice + chat) from the unified store so
         # the FIRST turn of every session already has continuity.  Best-effort:
         # any failure leaves _turn_log as-is.
-        self._hydrate_from_unified_store()
-
-    # ----- init helpers -----
-
-    def _hydrate_from_unified_store(self, limit: int = 50) -> None:
-        """Merge recent ChatTurnRecord entries into ``_turn_log``.
-
-        Dedupes against existing entries by ``(role, text)`` so a record
-        already on disk in ``jarvis_turn_log.json`` isn't double-counted.
-        Ordered oldest-first to match the rolling-log convention.
-        """
-        try:
-            from jarvis.state.chat_turns import read_recent
-
-            records = read_recent(user_id="default", limit=limit)
-        except Exception as exc:  # noqa: BLE001 — never block init on memory read
-            logger.debug("unified-store hydrate skipped: %s", exc)
-            return
-        if not records:
-            return
-        existing: set[tuple[str, str]] = {
-            (e.get("role", ""), e.get("text", "")) for e in self._turn_log
-        }
-        hydrated: list[dict[str, str]] = []
-        # ``read_recent`` returns chronological order (oldest-first).
-        for rec in records:
-            user_text = (rec.user_text or "").strip()
-            asst_text = (rec.assistant_text or "").strip()
-            if user_text and ("user", user_text) not in existing:
-                hydrated.append({"role": "user", "text": user_text})
-                existing.add(("user", user_text))
-            if asst_text and ("assistant", asst_text) not in existing:
-                hydrated.append({"role": "assistant", "text": asst_text})
-                existing.add(("assistant", asst_text))
-        if not hydrated:
-            return
-        merged = hydrated + self._turn_log
-        if len(merged) > _TURN_LOG_MAX:
-            merged = merged[-_TURN_LOG_MAX:]
-        self._turn_log = merged
+        _hydrate_from_unified_store(self)
 
     # ----- routing -----
 
@@ -465,206 +387,6 @@ class JarvisChat:
         self._clients[model] = client
         return client
 
-    # ----- recap -----
-
-    def _recap(
-        self,
-        upcoming_message: str | None = None,
-        *,
-        lane_switch: bool = True,
-    ) -> str | None:
-        """Return a short context recap of the last few turn pairs, or None.
-
-        ``lane_switch=True`` → full recap (last 3 pairs + top-3 semantic).
-        ``lane_switch=False`` → brief recap (last 2 pairs + top-1 semantic),
-        used when the same model lane carries forward so the model still
-        sees rolling context on the first turn of a new session.
-
-        If *upcoming_message* is provided, semantically relevant past turns
-        (score > ``_SEMANTIC_MIN_SCORE``) are appended after the recent-pairs
-        block. Each hit is capped at ``_SEMANTIC_MAX_CHARS`` characters and
-        the total recap stays within ``_RECAP_MAX_CHARS``.
-        """
-        if not self._turn_log:
-            return None
-        # Take the last N user/assistant pairs
-        pairs: list[tuple[str, str]] = []
-        user_buf: str | None = None
-        for entry in self._turn_log:
-            if entry["role"] == "user":
-                user_buf = entry["text"]
-            elif entry["role"] == "assistant" and user_buf is not None:
-                pairs.append((user_buf, entry["text"]))
-                user_buf = None
-        if not pairs:
-            return None
-        pair_cap = _RECAP_TURN_PAIRS if lane_switch else _RECAP_SAME_LANE_PAIRS
-        recent = pairs[-pair_cap:]
-        header = (
-            "[Earlier in this thread, on a different model:]"
-            if lane_switch
-            else "[Rolling thread context:]"
-        )
-        lines = [header]
-        for u, a in recent:
-            lines.append(f"- You said: {u.strip()[:200]}")
-            lines.append(f"- I responded: {a.strip()[:200]}")
-        recap = "\n".join(lines)
-        recap = recap[:_RECAP_MAX_CHARS]
-
-        # Augment with semantic hits when an upcoming message is known.
-        if upcoming_message:
-            top_k = _SEMANTIC_RECAP_TOP_K if lane_switch else 1
-            semantic_lines = self._semantic_recap_lines(
-                upcoming_message, top_k=top_k
-            )
-            if semantic_lines:
-                budget = _RECAP_MAX_CHARS - len(recap)
-                if budget > 40:
-                    block = "\n".join(semantic_lines)
-                    recap += "\n" + block[:budget]
-        return recap
-
-    def _semantic_recap_lines(
-        self, query: str, *, top_k: int = _SEMANTIC_RECAP_TOP_K
-    ) -> list[str]:
-        """Return formatted lines for semantic recall to embed in recap."""
-        try:
-            from jarvis.state.memory_index import search as _search
-
-            hits = _search(query, top_k=top_k)
-        except Exception as exc:
-            logger.debug("semantic recap search failed: %s", exc)
-            return []
-        if not hits:
-            return []
-        lines = ["[Possibly relevant from earlier:]"]
-        for score, turn in hits:
-            if score < _SEMANTIC_MIN_SCORE:
-                continue
-            snippet = turn.text.strip().replace("\n", " ")[:_SEMANTIC_MAX_CHARS]
-            lines.append(f"- [{turn.role}] {snippet}")
-        return lines if len(lines) > 1 else []
-
-    def _record_turn(self, role: str, text: str, lane: str | None = None) -> None:
-        if not text:
-            return
-        self._turn_log.append({"role": role, "text": text})
-        if len(self._turn_log) > _TURN_LOG_MAX:
-            self._turn_log = self._turn_log[-_TURN_LOG_MAX:]
-        _save_turn_log(self._turn_log)
-        self._index_turn(role=role, text=text, lane=lane)
-        if role == "user":
-            self._extract_and_persist_facts(text)
-            self._mark_operator_present("chat")
-
-    @staticmethod
-    def _mark_operator_present(surface: str) -> None:
-        """Record an operator-presence mark so sentinel can detect inactivity.
-
-        Best-effort: failures are logged at debug and swallowed. Never let the
-        presence hook break the chat hot path.
-        """
-        try:
-            from jarvis.state.operator_presence import mark_present
-
-            mark_present(surface)
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("operator_presence mark skipped: %s", exc)
-
-    @staticmethod
-    def _extract_and_persist_facts(text: str) -> None:
-        """Regex-extract declarative facts from a user turn; append to disk.
-
-        Best-effort: any failure is logged at debug level and swallowed.
-        Never lets fact capture break the chat hot path.
-        """
-        try:
-            from jarvis.state.facts import append_fact, extract_facts
-            from jarvis.state.memory_index import turn_id_from_dict
-
-            tid = turn_id_from_dict({"role": "user", "text": text})
-            for fact in extract_facts(text, turn_id=tid):
-                append_fact(fact)
-        except Exception as exc:  # noqa: BLE001 — facts must never break chat
-            logger.debug("facts extract skipped: %s", exc)
-
-    @staticmethod
-    def _record_unified_turn(
-        *,
-        user_text: str,
-        assistant_text: str,
-        lane: str | None,
-        surface: Literal["voice", "chat", "api"],
-        session_id: str = "default",
-        user_id: str = "default",
-        turn_id: str | None = None,
-        cost_usd: float = 0.0,
-    ) -> None:
-        """Append a turn pair to the unified ``chat_turns.jsonl`` store.
-
-        Called from voice paths (cheap_handler) AND from JarvisChat itself
-        when invoked outside the HTTP layer, so the dashboard sees every
-        turn regardless of surface. Best-effort: failures are warnings.
-        """
-        if not user_text and not assistant_text:
-            return
-        try:
-            from datetime import UTC, datetime
-            from uuid import uuid4
-
-            from jarvis.state.chat_turns import ChatTurnRecord, append_turn
-
-            rec = ChatTurnRecord(
-                user_id=user_id,
-                turn_id=turn_id or uuid4().hex,
-                user_text=user_text,
-                assistant_text=assistant_text,
-                model=lane or "",
-                cost_usd=cost_usd,
-                ts=datetime.now(UTC).isoformat(),
-                session_id=session_id,
-                surface=surface,
-            )
-            append_turn(rec)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("unified turn write failed: %s", exc)
-
-    def _index_turn(self, role: str, text: str, lane: str | None) -> None:
-        """Persist turn to semantic index. Never raises — failures are warnings.
-
-        Embedding is dispatched to a background thread so the chat hot path
-        is never blocked on the model call or disk write.
-        """
-        def _run() -> None:
-            try:
-                from datetime import UTC, datetime
-
-                from jarvis.state.memory_index import (
-                    IndexedTurn,
-                    append_turn,
-                    embed,
-                    turn_id_from_dict,
-                )
-
-                ts = datetime.now(UTC).isoformat()
-                raw = {"role": role, "text": text, "ts": ts}
-                tid = turn_id_from_dict(raw)
-                vec = embed(text)
-                turn = IndexedTurn(
-                    turn_id=tid,
-                    ts=ts,
-                    role=role,
-                    text=text,
-                    lane=lane,
-                    embedding=vec,
-                )
-                append_turn(turn)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("memory index write failed: %s", exc)
-
-        threading.Thread(target=_run, daemon=True).start()
-
     # ----- public API -----
 
     async def connect(self, model: str | None = None) -> None:
@@ -720,11 +442,16 @@ class JarvisChat:
         # Short-circuit: message contains a URL → run multimodal link_handler
         # and synthesize stream events from its summary. Skips the normal
         # routing + Claude SDK call entirely.
+        from jarvis.agent_streams import (
+            stream_via_link_handler,
+            stream_via_screen_vision,
+            stream_via_skill,
+        )
         from jarvis.agents.lens import link_handler
 
         if link_handler.extract_urls(message or ""):
-            async for ev in self._stream_via_link_handler(
-                message or "", surface=surface, session_id=session_id
+            async for ev in stream_via_link_handler(
+                self, message or "", surface=surface, session_id=session_id
             ):
                 yield ev
             return
@@ -741,8 +468,8 @@ class JarvisChat:
             # Strip the slash so the question forwarded to vision is clean.
             if stripped.lower().startswith("/screen"):
                 stripped = stripped[len("/screen"):].strip() or "What's on my screen right now?"
-            async for ev in self._stream_via_screen_vision(
-                stripped, surface=surface, session_id=session_id
+            async for ev in stream_via_screen_vision(
+                self, stripped, surface=surface, session_id=session_id
             ):
                 yield ev
             return
@@ -759,7 +486,8 @@ class JarvisChat:
             slug = slash[0][1:]  # strip leading "/"
             skill = get_skill(slug)
             if skill is not None:
-                async for ev in self._stream_via_skill(
+                async for ev in stream_via_skill(
+                    self,
                     skill,
                     slash[1] if len(slash) > 1 else "",
                     surface=surface,
@@ -808,10 +536,12 @@ class JarvisChat:
             # Recap runs on EVERY turn so the first message of a session
             # still pulls history off disk.  Lane-switch promotes to the
             # full recap; same-lane turns get the brief variant.
+            from jarvis.state.recap import build_recap
+
             lane_switch = (
                 self._last_lane is not None and self._last_lane != decision.model
             )
-            recap = self._recap(upcoming_message=cleaned, lane_switch=lane_switch)
+            recap = build_recap(self, upcoming_message=cleaned, lane_switch=lane_switch)
             if recap:
                 prompt = f"{recap}\n\n[Now Jyot says:]\n{cleaned}"
 
@@ -842,161 +572,19 @@ class JarvisChat:
 
         # Update lane + log AFTER the response completes successfully.
         self._last_lane = decision.model
-        self._record_turn("user", cleaned, lane=decision.model)
+        _record_turn(self, "user", cleaned, lane=decision.model)
         assistant_text = "".join(assistant_text_buf)
-        self._record_turn("assistant", assistant_text, lane=decision.model)
+        _record_turn(self, "assistant", assistant_text, lane=decision.model)
 
         # Unified chat_turns.jsonl write — skip when surface=="chat" because
         # the HTTP endpoint already persists with full tool-call metadata.
         # Voice/terminal paths land here and need the durable record so the
         # dashboard sees their turns.
         if surface != "chat":
-            self._record_unified_turn(
+            _record_unified_turn(
                 user_text=cleaned,
                 assistant_text=assistant_text,
                 lane=decision.model,
-                surface=surface,
-                session_id=session_id,
-            )
-
-    async def _stream_via_link_handler(
-        self,
-        message: str,
-        *,
-        surface: Literal["voice", "chat", "api"] = "api",
-        session_id: str = "default",
-    ) -> AsyncIterator[StreamEvent]:
-        """Run link_handler in a thread, synthesize stream events from result."""
-        import asyncio
-
-        from jarvis.agents.lens import link_handler
-
-        cleaned = message.strip()
-        # Sonnet handles link summaries — emit decision badge first.
-        decision_model = self._sonnet_model
-        yield StreamEvent(
-            "model",
-            {
-                "model": decision_model,
-                "reason": "link_handler — multimodal URL ingestion",
-                "tier": 2,
-                "manual": False,
-                "length_chars": len(cleaned),
-            },
-        )
-
-        try:
-            loop = asyncio.get_running_loop()
-            resp = await loop.run_in_executor(None, link_handler.handle, cleaned)
-        except Exception as exc:  # pragma: no cover — already caught inside handle
-            yield StreamEvent("error", {"message": f"link_handler failed: {exc}"})
-            return
-
-        if resp.action == "no_url":
-            yield StreamEvent("text", {"delta": "No URL found in your message."})
-            yield StreamEvent("done", {"total_cost_usd": 0.0})
-            return
-
-        if resp.action == "failed":
-            err = resp.result.get("error", "unknown")
-            yield StreamEvent(
-                "text",
-                {
-                    "delta": (
-                        f"Couldn't process that link — {err}. "
-                        "Try a different URL or a public one."
-                    )
-                },
-            )
-            yield StreamEvent("done", {"total_cost_usd": 0.0})
-            return
-
-        summary = str(resp.result.get("summary", "")).strip() or "Nothing useful."
-        # Surface the summary in one text event so the UI streams it as a
-        # single delta — consistent with the rest of the pipeline.
-        yield StreamEvent("text", {"delta": summary})
-        yield StreamEvent("done", {"total_cost_usd": 0.0})
-
-        self._last_lane = decision_model
-        self._record_turn("user", cleaned, lane=decision_model)
-        self._record_turn("assistant", summary, lane=decision_model)
-        if surface != "chat":
-            self._record_unified_turn(
-                user_text=cleaned,
-                assistant_text=summary,
-                lane=decision_model,
-                surface=surface,
-                session_id=session_id,
-            )
-
-    async def _stream_via_skill(
-        self,
-        skill: "Any",
-        user_text: str,
-        *,
-        surface: Literal["voice", "chat", "api"] = "api",
-        session_id: str = "default",
-    ) -> AsyncIterator[StreamEvent]:
-        """Run a named skill — one-shot Claude call using skill.prompt as system.
-
-        Mirrors ``_stream_via_link_handler``: emits a model badge, runs the
-        skill via the global claude queue in a thread, then synthesizes
-        text + done events. Records the turn through the standard pathways
-        so it lands in turn-log + unified store like any other reply.
-        """
-        import asyncio
-
-        cleaned = (user_text or "").strip()
-        decision_model = skill.model or self._sonnet_model
-
-        yield StreamEvent(
-            "model",
-            {
-                "model": decision_model,
-                "reason": f"skill — {skill.slug}",
-                "tier": 2,
-                "manual": True,
-                "length_chars": len(cleaned),
-            },
-        )
-
-        def _run_skill() -> str:
-            from jarvis.llm.queue import submit
-
-            try:
-                return submit(
-                    system=skill.prompt,
-                    user=cleaned or f"(no input — run the {skill.slug} skill with whatever defaults make sense.)",
-                    model=decision_model,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("[chat] skill %s failed: %s", skill.slug, exc)
-                return f"Sorry, the {skill.slug} skill hit an error."
-
-        try:
-            loop = asyncio.get_running_loop()
-            reply = await loop.run_in_executor(None, _run_skill)
-        except Exception as exc:  # pragma: no cover — inner already caught
-            yield StreamEvent("error", {"message": f"skill failed: {exc}"})
-            return
-
-        reply = (reply or "").strip() or "Nothing useful."
-        yield StreamEvent("text", {"delta": reply})
-        yield StreamEvent("done", {"total_cost_usd": 0.0})
-
-        self._last_lane = decision_model
-        # Log with the slash prefix so the turn-log reflects what the
-        # operator actually typed.
-        logged_user = f"/{skill.slug}"
-        if cleaned:
-            logged_user = f"{logged_user} {cleaned}"
-        self._record_turn("user", logged_user, lane=decision_model)
-        self._record_turn("assistant", reply, lane=decision_model)
-        if surface != "chat":
-            self._record_unified_turn(
-                user_text=logged_user,
-                assistant_text=reply,
-                lane=decision_model,
                 surface=surface,
                 session_id=session_id,
             )
@@ -1010,167 +598,18 @@ class JarvisChat:
         surface: Literal["voice", "chat", "api"] = "api",
         session_id: str = "default",
     ) -> AsyncIterator[StreamEvent]:
-        """Run a multimodal turn with an operator-supplied image.
+        """Run a multimodal turn with an operator-supplied image."""
+        from jarvis.agent_streams import stream_with_image as _stream_with_image
 
-        Used by the dashboard image-upload path: the user drags or pastes
-        an image into the chat panel; the API endpoint receives base64 and
-        forwards here. Distinct from ``_stream_via_screen_vision`` which
-        captures the operator's own screen.
-        """
-        import asyncio
-
-        cleaned = (message or "").strip() or "What's in this image?"
-        decision_model = self._sonnet_model
-
-        yield StreamEvent(
-            "model",
-            {
-                "model": decision_model,
-                "reason": "image-attached — multimodal vision",
-                "tier": 2,
-                "manual": False,
-                "length_chars": len(cleaned),
-            },
-        )
-
-        def _do_vision() -> str:
-            from jarvis.llm.queue import submit_multimodal
-
-            block = {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": image_b64,
-                },
-            }
-            system = (
-                "You are Jarvis. Look at this image Jyot shared and answer "
-                "the question grounded in what's visible. Stay terse — "
-                "2-3 sentences. Markdown is fine for code or lists."
-            )
-            try:
-                return submit_multimodal(
-                    system=system,
-                    content=[
-                        block,
-                        {"type": "text", "text": cleaned},
-                    ],
-                    model=decision_model,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("[chat] image-attached vision call failed: %s", exc)
-                return "Sorry, I had trouble reading that image."
-
-        try:
-            loop = asyncio.get_running_loop()
-            reply = await loop.run_in_executor(None, _do_vision)
-        except Exception as exc:  # pragma: no cover
-            yield StreamEvent("error", {"message": f"image vision failed: {exc}"})
-            return
-
-        reply = (reply or "").strip() or "Nothing useful."
-        yield StreamEvent("text", {"delta": reply})
-        yield StreamEvent("done", {"total_cost_usd": 0.0})
-
-        self._last_lane = decision_model
-        self._record_turn("user", cleaned, lane=decision_model)
-        self._record_turn("assistant", reply, lane=decision_model)
-        if surface != "chat":
-            self._record_unified_turn(
-                user_text=cleaned,
-                assistant_text=reply,
-                lane=decision_model,
-                surface=surface,
-                session_id=session_id,
-            )
-
-    async def _stream_via_screen_vision(
-        self,
-        message: str,
-        *,
-        surface: Literal["voice", "chat", "api"] = "api",
-        session_id: str = "default",
-    ) -> AsyncIterator[StreamEvent]:
-        """Capture the operator's screen and run a multimodal Sonnet call.
-
-        Synthesizes stream events from the single-shot multimodal reply so the
-        dashboard UI receives the same model→text→done sequence it expects
-        from a normal SDK turn. Mirrors ``_stream_via_link_handler``.
-        """
-        import asyncio
-
-        cleaned = (message or "").strip() or "What's on my screen right now?"
-        decision_model = self._sonnet_model
-
-        yield StreamEvent(
-            "model",
-            {
-                "model": decision_model,
-                "reason": "screen-vision — desktop capture + multimodal",
-                "tier": 2,
-                "manual": False,
-                "length_chars": len(cleaned),
-            },
-        )
-
-        # Run the blocking screenshot + LLM call in a thread so we don't
-        # stall the event loop. Both are inherently synchronous.
-        def _do_vision() -> str:
-            from jarvis.llm.queue import submit_multimodal
-            from jarvis.tools.screen import (
-                ScreenCaptureError,
-                capture_and_block,
-            )
-
-            try:
-                block = capture_and_block()
-            except ScreenCaptureError as exc:
-                logger.warning("[chat] screen capture failed: %s", exc)
-                return (
-                    "I can't see your screen right now — screen capture isn't available."
-                )
-
-            system = (
-                "You are Jarvis. Look at this screenshot of Jyot's screen and "
-                "answer the question grounded in what's actually visible. Stay "
-                "terse — 2-3 sentences. Markdown is fine for code or lists."
-            )
-            try:
-                return submit_multimodal(
-                    system=system,
-                    content=[
-                        block,
-                        {"type": "text", "text": cleaned},
-                    ],
-                    model=decision_model,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("[chat] screen vision call failed: %s", exc)
-                return "Sorry, I had trouble reading your screen."
-
-        try:
-            loop = asyncio.get_running_loop()
-            reply = await loop.run_in_executor(None, _do_vision)
-        except Exception as exc:  # pragma: no cover — inner already caught
-            yield StreamEvent("error", {"message": f"screen vision failed: {exc}"})
-            return
-
-        reply = (reply or "").strip() or "Nothing useful."
-        yield StreamEvent("text", {"delta": reply})
-        yield StreamEvent("done", {"total_cost_usd": 0.0})
-
-        self._last_lane = decision_model
-        self._record_turn("user", cleaned, lane=decision_model)
-        self._record_turn("assistant", reply, lane=decision_model)
-        if surface != "chat":
-            self._record_unified_turn(
-                user_text=cleaned,
-                assistant_text=reply,
-                lane=decision_model,
-                surface=surface,
-                session_id=session_id,
-            )
+        async for ev in _stream_with_image(
+            self,
+            message,
+            image_b64,
+            media_type,
+            surface=surface,
+            session_id=session_id,
+        ):
+            yield ev
 
     async def respond_single(
         self,

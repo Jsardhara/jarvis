@@ -33,7 +33,14 @@ logger = logging.getLogger(__name__)
 
 class TTSProvider(Protocol):
     def synthesize(self, text: str) -> bytes: ...
-    def interrupt(self) -> bool: ...
+    def interrupt(self) -> bool:
+        """Cancel any in-flight synthesis/playback.
+
+        Idempotent. Safe to call from any thread. Must never raise —
+        backend errors are logged and swallowed. Returns ``True`` if
+        something was actually running, ``False`` otherwise.
+        """
+        ...
 
 
 class _BaseInterruptible:

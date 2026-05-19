@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +38,13 @@ _CACHE_FINGERPRINT: tuple[tuple[str, float], ...] | None = None
 
 @dataclass(frozen=True)
 class Skill:
-    """A single named workflow template."""
+    """A single named workflow template.
+
+    ``chains_to`` lists slugs the operator commonly runs next after this
+    skill. The chat layer surfaces these as a "Try /next-slug" suggestion
+    footer when the skill completes — no auto-run yet, just a nudge. Set
+    via frontmatter, e.g. ``chains_to: [meeting-prep]``.
+    """
 
     slug: str
     title: str
@@ -46,6 +52,7 @@ class Skill:
     prompt: str
     agents: list[str]
     model: str
+    chains_to: list[str] = field(default_factory=list)
 
 
 # ---------- frontmatter parsing ----------
@@ -132,6 +139,11 @@ def _build_skill(path: Path) -> Skill | None:
         agents = [a.strip() for a in agents_raw.split(",") if a.strip()]
     else:
         agents = [str(a).strip() for a in agents_raw if str(a).strip()]
+    chains_raw = meta.get("chains_to") or []
+    if isinstance(chains_raw, str):
+        chains_to = [c.strip() for c in chains_raw.split(",") if c.strip()]
+    else:
+        chains_to = [str(c).strip() for c in chains_raw if str(c).strip()]
     model = str(meta.get("model") or "claude-sonnet-4-6").strip()
     return Skill(
         slug=slug,
@@ -140,6 +152,7 @@ def _build_skill(path: Path) -> Skill | None:
         prompt=body.strip(),
         agents=agents,
         model=model,
+        chains_to=chains_to,
     )
 
 
@@ -173,4 +186,32 @@ def list_skills() -> list[Skill]:
     return sorted(load_skills().values(), key=lambda s: s.slug)
 
 
-__all__ = ["Skill", "load_skills", "get_skill", "list_skills"]
+def render_chain_suggestion(skill: Skill) -> str:
+    """Return a human-readable "try /X next" footer, or empty string.
+
+    Resolves each chain target by slug (silently dropping unknown ones so
+    a stale frontmatter doesn't surface broken commands). Single-target
+    chains render as one inline suggestion; multi-target as a comma list.
+    """
+    if not skill.chains_to:
+        return ""
+    catalog = load_skills()
+    resolved: list[Skill] = [
+        catalog[slug] for slug in skill.chains_to if slug in catalog
+    ]
+    if not resolved:
+        return ""
+    if len(resolved) == 1:
+        nxt = resolved[0]
+        return f"\n\nNext: try `/{nxt.slug}` — {nxt.description}".rstrip()
+    pieces = ", ".join(f"`/{s.slug}`" for s in resolved)
+    return f"\n\nNext: try {pieces}".rstrip()
+
+
+__all__ = [
+    "Skill",
+    "get_skill",
+    "list_skills",
+    "load_skills",
+    "render_chain_suggestion",
+]

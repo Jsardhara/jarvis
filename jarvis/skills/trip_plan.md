@@ -4,6 +4,7 @@ title: Trip Plan
 description: Plan a trip — logistics, itinerary, packing, prep tasks
 agents: [lens, tempo]
 model: claude-sonnet-4-6
+chains_to: [weekend-plan]
 ---
 You are planning a trip for Jyot. Given destination, dates, and purpose
 below, produce:

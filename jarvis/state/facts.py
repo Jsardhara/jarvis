@@ -97,10 +97,65 @@ _PAT_AVOID = re.compile(
     re.IGNORECASE,
 )
 
+# Contact learning — "Dr. Patel is my advisor", "Pepper is my colleague".
+# Capture starts with an uppercase letter so we don't fire on common
+# false positives like "this is my idea" or "today is my birthday".
+_CONTACT_RELATIONS = (
+    "advisor",
+    "professor",
+    "colleague",
+    "friend",
+    "family",
+    "teammate",
+    "boss",
+    "mentor",
+    "doctor",
+    "partner",
+    "wife",
+    "husband",
+    "brother",
+    "sister",
+    "mom",
+    "dad",
+)
+_PAT_CONTACT = re.compile(
+    r"(?P<name>[A-Z][a-zA-Z. ]+?)\s+is\s+my\s+"
+    r"(?P<relation>" + "|".join(_CONTACT_RELATIONS) + r")\b"
+)
+
 
 def _clean(value: str) -> str:
     """Trim trailing punctuation and whitespace from an extracted slot."""
     return value.strip().rstrip(".!?,;:").strip()
+
+
+def _extract_contacts(text: str, turn_id: str) -> list[tuple[str, str]]:
+    """Find "X is my <relation>" patterns and create Contact records.
+
+    Returns a list of (display_name, relation) tuples for the contacts
+    that were created. Contact-side failures are swallowed so they
+    never block fact extraction.
+    """
+    out: list[tuple[str, str]] = []
+    for m in _PAT_CONTACT.finditer(text):
+        name = _clean(m.group("name"))
+        relation = _clean(m.group("relation")).lower()
+        if not name or not relation:
+            continue
+        try:
+            from jarvis.state import contacts as contacts_mod
+
+            existing = contacts_mod.resolve_name(name)
+            if existing is None:
+                contacts_mod.create_contact(
+                    display_name=name, relation=relation
+                )
+            out.append((name, relation))
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "facts: contact-side learn failed for %r", name, exc_info=True
+            )
+    return out
 
 
 def extract_facts(user_text: str, turn_id: str) -> list[KeyValueFact]:
@@ -217,6 +272,18 @@ def extract_facts(user_text: str, turn_id: str) -> list[KeyValueFact]:
                     ts=ts,
                 )
             )
+
+    # Contact graph pass — "Dr. Patel is my advisor" → create a Contact AND
+    # record a fact so the existing facts.jsonl powers prompt injection too.
+    for name, relation in _extract_contacts(text, turn_id):
+        out.append(
+            KeyValueFact(
+                key=relation,
+                value=name,
+                extracted_from_turn_id=turn_id,
+                ts=ts,
+            )
+        )
 
     return out
 

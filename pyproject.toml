@@ -20,6 +20,7 @@ dependencies = [
     "anthropic>=0.25",
     "sentence-transformers>=2.7,<3",
     "feedparser>=6.0",
+    "platformdirs>=4.0",
 ]
 
 [project.optional-dependencies]

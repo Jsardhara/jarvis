@@ -25,6 +25,11 @@ from jarvis.agents.tempo.agent import TIER_ACTION, Tempo
 from jarvis.config import get_settings
 from jarvis.contract import InboxEvent, SentinelHealthEvent
 from jarvis.state import append_inbox, append_sentinel_health, read_agent_log, read_inbox
+from jarvis.state.agency import (
+    Goal,
+    list_goals,
+    update_goal_check,
+)
 from jarvis.state.memory import append_daily, remember_session
 
 from .atlas_decision import AtlasSnapshot, DecisionAction, Policy, decide
@@ -579,3 +584,268 @@ def _verification_health(hours: int = 24) -> dict[str, float]:
     if total == 0:
         return {"verified": 0.0, "inference": 0.0, "unknown": 0.0}
     return {k: v / total for k, v in counts.items()}
+
+
+# ---------------------------------------------------------------------------
+# W4.1 — Persistent agency: long-running goals advanced by sentinel each tick
+# ---------------------------------------------------------------------------
+
+
+def _parse_iso(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _agency_watch_price(
+    goal: Goal,
+    reg: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Read latest atlas snapshot; complete when delta crosses threshold.
+
+    Returns ``(observation, result_or_None, status_or_None)``. The handler is
+    intentionally tolerant: a missing ticker quote yields a "no quote" obs
+    rather than a hard error. The baseline is anchored on first observation
+    and stored on the goal's ``result`` field; subsequent ticks compare the
+    fresh price against that anchor.
+    """
+    ticker = str(goal.params.get("ticker", "")).upper()
+    delta_pct = float(goal.params.get("delta_pct", 0.05) or 0.05)
+    prior = goal.result or {}
+    baseline = prior.get("baseline") if isinstance(prior, dict) else None
+    if not ticker:
+        return ("watch_price: missing ticker param", None, "failed")
+    if reg is None:
+        return (f"watch_price: no registry; ticker={ticker}", None, None)
+    atlas_desc = reg.get("atlas")
+    if atlas_desc is None:
+        return (f"watch_price: atlas unavailable; ticker={ticker}", None, None)
+
+    try:
+        atlas = getattr(atlas_desc, "instance", atlas_desc)
+        price: float | None = None
+        try:
+            pos_resp = atlas.positions()
+            for row in pos_resp.result.get("positions", []) or []:
+                sym = str(row.get("symbol") or row.get("ticker") or "").upper()
+                if sym == ticker:
+                    raw_price = row.get("price") or row.get("mark") or row.get("last")
+                    if raw_price is not None:
+                        price = float(raw_price)
+                        break
+        except Exception as exc:  # noqa: BLE001 — degrade
+            log.debug("watch_price positions read failed: %s", exc)
+        if price is None:
+            return (f"watch_price: no quote for {ticker}", None, None)
+    except Exception as exc:  # noqa: BLE001 — degrade
+        return (f"watch_price: error {type(exc).__name__}", None, None)
+
+    if baseline is None:
+        return (
+            f"watch_price: baseline set @ {price:.4f} for {ticker}",
+            {"baseline": price, "ticker": ticker, "last_price": price},
+            None,
+        )
+
+    try:
+        base = float(baseline)
+    except (TypeError, ValueError):
+        return (f"watch_price: bad baseline {baseline!r}", None, "failed")
+    if base == 0:
+        return ("watch_price: baseline zero", None, "failed")
+    change = (price - base) / base
+    obs = f"watch_price: {ticker} {price:.4f} ({change:+.2%}) vs {base:.4f}"
+    if abs(change) >= delta_pct:
+        result = {
+            "ticker": ticker,
+            "baseline": base,
+            "price": price,
+            "delta_pct": change,
+            "threshold": delta_pct,
+        }
+        return (obs + " — threshold crossed", result, "completed")
+    # Track last price without changing baseline.
+    return (
+        obs,
+        {"baseline": base, "ticker": ticker, "last_price": price},
+        None,
+    )
+
+
+def _agency_watch_mail(
+    goal: Goal,
+    reg: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    """Scan recent inbox events for a sender; complete on first match."""
+    sender = str(goal.params.get("sender", "")).lower()
+    if not sender:
+        return ("watch_mail: missing sender param", None, "failed")
+
+    # Look at recent inbox events for a tempo triage with a hit on sender.
+    # We avoid hitting the live mail API every tick — the tempo email_tick
+    # already pulls action items and writes them to the inbox feed.
+    try:
+        events = read_inbox(limit=200)
+    except Exception as exc:  # noqa: BLE001 — degrade
+        return (f"watch_mail: inbox read failed {exc}", None, None)
+    for ev in events:
+        if ev.agent != "tempo":
+            continue
+        ref = ev.ref or {}
+        # action items list of dicts with 'from' or 'sender' keys
+        for key in ("action_items", "messages", "items", "hits"):
+            for msg in ref.get(key, []) or []:
+                from_field = str(
+                    msg.get("from") or msg.get("sender") or ""
+                ).lower()
+                if sender in from_field:
+                    result = {
+                        "sender": sender,
+                        "matched_from": from_field,
+                        "subject": msg.get("subject", ""),
+                        "msg_id": msg.get("id"),
+                    }
+                    return (
+                        f"watch_mail: matched sender '{sender}'",
+                        result,
+                        "completed",
+                    )
+    return (f"watch_mail: no match yet for '{sender}'", None, None)
+
+
+def _agency_periodic_check(
+    goal: Goal,
+    reg: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    return (f"periodic: still watching '{goal.title}'", None, None)
+
+
+def _agency_freeform(
+    goal: Goal,
+    reg: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any] | None, str | None]:
+    return (f"freeform: noted '{goal.title}'", None, None)
+
+
+_AGENCY_HANDLERS = {
+    "watch_price": _agency_watch_price,
+    "watch_mail": _agency_watch_mail,
+    "periodic_check": _agency_periodic_check,
+    "freeform": _agency_freeform,
+}
+
+
+def agency_tick(
+    reg: dict[str, Any] | None,
+    notifier: Notifier,
+) -> dict[str, Any]:
+    """Advance each active goal one step.
+
+    For every goal returned by ``list_goals(status="active")``:
+      * Deadline reached → mark "completed" with a deadline result.
+      * check_count >= max_checks → mark "failed" with overflow result.
+      * Otherwise dispatch to the handler matching ``goal.kind``. The
+        handler returns (observation, optional_result, optional_new_status).
+    Each handler is wrapped in try/except so one bad goal cannot crash the
+    tick. A priority-1 push is emitted for every goal that transitions to
+    "completed" or "failed" on this tick.
+    """
+    active = list_goals(status="active")
+    now = datetime.now(UTC)
+    completed: list[str] = []
+    failed: list[str] = []
+
+    for goal in active:
+        try:
+            deadline = _parse_iso(goal.deadline)
+            if deadline is not None and now >= deadline:
+                updated = update_goal_check(
+                    goal.id,
+                    "deadline reached",
+                    result={"reason": "deadline_reached", "deadline": goal.deadline},
+                    status="completed",
+                )
+                if updated is not None:
+                    completed.append(updated.id)
+                    notifier.push(
+                        f"Jarvis — goal complete: {goal.title}",
+                        "Deadline reached",
+                        priority=1,
+                    )
+                continue
+
+            if goal.check_count >= goal.max_checks:
+                updated = update_goal_check(
+                    goal.id,
+                    "max checks reached",
+                    result={"reason": "max_checks_reached", "max_checks": goal.max_checks},
+                    status="failed",
+                )
+                if updated is not None:
+                    failed.append(updated.id)
+                    notifier.push(
+                        f"Jarvis — goal failed: {goal.title}",
+                        f"Hit max_checks ({goal.max_checks})",
+                        priority=1,
+                    )
+                continue
+
+            handler = _AGENCY_HANDLERS.get(goal.kind)
+            if handler is None:
+                update_goal_check(
+                    goal.id,
+                    f"unknown kind '{goal.kind}'",
+                    status="failed",
+                )
+                failed.append(goal.id)
+                notifier.push(
+                    f"Jarvis — goal failed: {goal.title}",
+                    f"Unknown goal kind: {goal.kind}",
+                    priority=1,
+                )
+                continue
+
+            try:
+                observation, result, new_status = handler(goal, reg)
+            except Exception as exc:  # noqa: BLE001 — never crash the tick
+                log.warning(
+                    "agency_tick handler %s raised on goal %s",
+                    goal.kind, goal.id, exc_info=True,
+                )
+                observation = f"handler error: {type(exc).__name__}: {exc}"
+                result = None
+                new_status = None
+
+            updated = update_goal_check(
+                goal.id,
+                observation,
+                result=result,
+                status=new_status,
+            )
+            if updated is None:
+                continue
+            if new_status == "completed":
+                completed.append(updated.id)
+                notifier.push(
+                    f"Jarvis — goal complete: {goal.title}",
+                    observation,
+                    priority=1,
+                )
+            elif new_status == "failed":
+                failed.append(updated.id)
+                notifier.push(
+                    f"Jarvis — goal failed: {goal.title}",
+                    observation,
+                    priority=1,
+                )
+        except Exception:  # noqa: BLE001 — outer guard, never crash tick
+            log.warning("agency_tick: goal %s crashed loop", goal.id, exc_info=True)
+
+    return {
+        "active_count": len(active),
+        "completed": completed,
+        "failed": failed,
+    }

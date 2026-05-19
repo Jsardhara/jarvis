@@ -65,12 +65,18 @@ def submit(
     *,
     model: str = "claude-sonnet-4-6",
     backoff_sec: tuple[float, ...] = _DEFAULT_BACKOFF_SEC,
+    agent: str = "jarvis",
 ) -> str:
-    """Run a single Claude turn through the global queue.
+    """Run a single LLM turn through the global queue.
 
-    Serialises all callers via ``_LOCK`` so only one ``claude`` invocation
+    Serialises all callers via ``_LOCK`` so only one upstream invocation
     runs at a time. Retries on rate-limit/overload signals using
     ``backoff_sec`` delays between attempts.
+
+    Default backend is Claude (Pro/Max OAuth via claude-agent-sdk); the
+    backend router (``JARVIS_LLM_BACKEND`` / ``JARVIS_LLM_BACKEND_<agent>``)
+    can re-route per-agent without changes here. ``agent`` attributes the
+    spend in ``state/cost_log.jsonl`` and selects the backend for routing.
 
     Raises the final exception if every attempt fails.
     """
@@ -82,7 +88,9 @@ def submit(
     with _LOCK:
         for i in range(attempts):
             try:
-                return query_claude_sync(system=system, user=user, model=model)
+                return query_claude_sync(
+                    system=system, user=user, model=model, agent=agent
+                )
             except BaseException as exc:  # noqa: BLE001 — surface after retries
                 last_exc = exc
                 if i >= attempts - 1 or not _is_retryable(exc):
@@ -103,70 +111,8 @@ def submit(
 
 
 # ---------------------------------------------------------------------------
-# Multimodal — claude-agent-sdk stream-input path (Pro/Max OAuth)
+# Multimodal — routed through the backend abstraction (P1).
 # ---------------------------------------------------------------------------
-
-
-def _multimodal_once(
-    system: str,
-    content: list[dict],
-    model: str,
-) -> str:
-    """One multimodal turn via claude-agent-sdk. Sync wrapper around async query.
-
-    Uses the SDK's stream-input form — ``prompt=AsyncIterable[dict]`` — which
-    forwards Anthropic-format content blocks (text/image/document) straight
-    through the Claude Code CLI session. Authenticates with the Pro/Max
-    OAuth token, never the API key.
-    """
-    import asyncio
-    import threading
-    from typing import Any as _Any
-
-    from claude_agent_sdk import (
-        AssistantMessage,
-        ClaudeAgentOptions,
-        TextBlock,
-        query,
-    )
-
-    async def _stream_in():
-        yield {
-            "type": "user",
-            "message": {"role": "user", "content": content},
-        }
-
-    async def _run() -> str:
-        opts = ClaudeAgentOptions(
-            model=model,
-            system_prompt=system,
-            permission_mode="bypassPermissions",
-        )
-        chunks: list[str] = []
-        async for msg in query(prompt=_stream_in(), options=opts):
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock) and block.text:
-                        chunks.append(block.text)
-        return "".join(chunks)
-
-    box: dict[str, _Any] = {}
-
-    def runner() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            box["result"] = loop.run_until_complete(_run())
-        except BaseException as exc:  # noqa: BLE001
-            box["error"] = exc
-        finally:
-            loop.close()
-
-    t = threading.Thread(target=runner, daemon=True)
-    t.start()
-    t.join(timeout=180)
-    if "error" in box:
-        raise box["error"]
-    return str(box.get("result", "")).strip()
 
 
 def submit_multimodal(
@@ -174,10 +120,11 @@ def submit_multimodal(
     content: list[dict],
     *,
     model: str = "claude-sonnet-4-6",
-    max_tokens: int = 1024,  # kept for API compat; SDK manages tokens
+    max_tokens: int = 1024,  # kept for API compat; backends manage tokens
     backoff_sec: tuple[float, ...] = _DEFAULT_BACKOFF_SEC,
+    agent: str = "jarvis",
 ) -> str:
-    """Run a multimodal Claude turn through the global queue.
+    """Run a multimodal turn through the global queue + backend router.
 
     ``content`` is a list of Anthropic content blocks — typical shapes:
 
@@ -189,17 +136,22 @@ def submit_multimodal(
                                           "media_type": "application/pdf",
                                           "data": "<b64>"}}
 
-    Authenticates through the local Claude Code session (Pro/Max plan),
-    not via ANTHROPIC_API_KEY. Same global lock + retry as ``submit``.
+    Default backend is Claude (Pro/Max OAuth via claude-agent-sdk); flip via
+    ``JARVIS_LLM_BACKEND`` to re-route. Same global lock + retry as
+    :func:`submit`.
     """
-    del max_tokens  # SDK path manages output tokens internally
+    del max_tokens  # backends manage output tokens internally
+    from jarvis.llm.client import query_multimodal_sync
+
     attempts = len(backoff_sec) + 1
     last_exc: BaseException | None = None
 
     with _LOCK:
         for i in range(attempts):
             try:
-                return _multimodal_once(system, content, model)
+                return query_multimodal_sync(
+                    system=system, content=content, model=model, agent=agent
+                )
             except BaseException as exc:  # noqa: BLE001
                 last_exc = exc
                 if i >= attempts - 1 or not _is_retryable(exc):

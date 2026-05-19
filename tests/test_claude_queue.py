@@ -12,13 +12,15 @@ def test_submit_returns_query_result():
     with patch("jarvis.llm.client.query_claude_sync", return_value="hello") as mock_q:
         out = claude_queue.submit("sys", "user", model="claude-sonnet-4-6")
     assert out == "hello"
-    mock_q.assert_called_once_with(system="sys", user="user", model="claude-sonnet-4-6")
+    mock_q.assert_called_once_with(
+        system="sys", user="user", model="claude-sonnet-4-6", agent="jarvis"
+    )
 
 
 def test_submit_retries_on_rate_limit():
     calls: list[int] = []
 
-    def fake_query(*, system: str, user: str, model: str) -> str:
+    def fake_query(*, system: str, user: str, model: str, agent: str = "jarvis") -> str:
         calls.append(1)
         if len(calls) < 3:
             raise RuntimeError("Error code: 429 - rate_limit_error")
@@ -33,11 +35,11 @@ def test_submit_retries_on_rate_limit():
             )
     assert out == "ok"
     assert len(calls) == 3
-    assert mock_sleep.call_count == 2  # slept between failed attempts
+    assert mock_sleep.call_count == 2
 
 
 def test_submit_does_not_retry_on_unknown_error():
-    def fake_query(*, system: str, user: str, model: str) -> str:
+    def fake_query(*, system: str, user: str, model: str, agent: str = "jarvis") -> str:
         raise ValueError("bad json")
 
     with patch("jarvis.llm.client.query_claude_sync", side_effect=fake_query):
@@ -46,7 +48,7 @@ def test_submit_does_not_retry_on_unknown_error():
 
 
 def test_submit_raises_after_exhausting_retries():
-    def fake_query(*, system: str, user: str, model: str) -> str:
+    def fake_query(*, system: str, user: str, model: str, agent: str = "jarvis") -> str:
         raise RuntimeError("overloaded — try again")
 
     with patch("jarvis.llm.client.query_claude_sync", side_effect=fake_query):
@@ -62,3 +64,11 @@ def test_is_retryable_matches_known_signals():
     assert claude_queue._is_retryable(RuntimeError("got 529 from upstream"))
     assert not claude_queue._is_retryable(ValueError("bad json"))
     assert not claude_queue._is_retryable(KeyError("missing"))
+
+
+def test_submit_passes_agent_to_query():
+    with patch("jarvis.llm.client.query_claude_sync", return_value="ok") as mock_q:
+        claude_queue.submit("s", "u", agent="tempo")
+    mock_q.assert_called_once_with(
+        system="s", user="u", model="claude-sonnet-4-6", agent="tempo"
+    )
