@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jarvis"
 version = "0.1.0"
-description = "Personal-assistant multi-agent system on Claude Code"
+description = "Personal-assistant multi-agent system migrating to Hermes Agent orchestration"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.6",

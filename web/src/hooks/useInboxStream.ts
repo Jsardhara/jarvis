@@ -113,18 +113,47 @@ export function useInboxStream(): InboxStreamState {
       if (!mounted.current) return;
       try {
         const frame = JSON.parse(evt.data) as WsFrame;
-        if (frame.type !== "inbox.event") return;
 
-        const raw = frame.event ?? {};
-        const inboxEvent: InboxEvent = {
-          id: typeof raw["id"] === "string" ? raw["id"] : undefined,
-          ts: typeof raw["ts"] === "string" ? raw["ts"] : undefined,
-          agent: typeof raw["agent"] === "string" ? raw["agent"] : undefined,
-          summary:
-            typeof raw["summary"] === "string" ? raw["summary"] : undefined,
-          payload: raw,
-        };
-        dispatch({ type: "event", event: inboxEvent });
+        // Handle inbox events
+        if (frame.type === "inbox.event") {
+          const raw = frame.event ?? {};
+          const inboxEvent: InboxEvent = {
+            id: typeof raw["id"] === "string" ? raw["id"] : undefined,
+            ts: typeof raw["ts"] === "string" ? raw["ts"] : undefined,
+            agent: typeof raw["agent"] === "string" ? raw["agent"] : undefined,
+            summary:
+              typeof raw["summary"] === "string" ? raw["summary"] : undefined,
+            payload: raw,
+          };
+          dispatch({ type: "event", event: inboxEvent });
+          return;
+        }
+
+        // Handle agent lifecycle + confirmation events (broadcast as synthetic inbox events)
+        const agentEventTypes = [
+          "agent.start",
+          "agent.done",
+          "agent.error",
+          "confirmation.created",
+          "confirmation.resolved",
+        ];
+        if (agentEventTypes.includes(frame.type)) {
+          const payload: Record<string, unknown> = { ...(frame.event ?? frame) };
+          const summary =
+            typeof payload["summary"] === "string"
+              ? payload["summary"]
+              : typeof payload["error"] === "string"
+                ? payload["error"]
+                : frame.type;
+          const inboxEvent: InboxEvent = {
+            id: typeof payload["id"] === "string" ? payload["id"] : undefined,
+            ts: typeof payload["ts"] === "string" ? payload["ts"] : undefined,
+            agent: typeof payload["agent"] === "string" ? payload["agent"] : undefined,
+            summary,
+            payload,
+          };
+          dispatch({ type: "event", event: inboxEvent });
+        }
       } catch {
         // Malformed frame — ignore
       }

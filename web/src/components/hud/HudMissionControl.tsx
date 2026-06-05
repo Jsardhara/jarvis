@@ -16,21 +16,29 @@ const JARVIS_API =
     ? process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765"
     : "http://localhost:8765";
 
-const AGENT_ORDER = ["tempo", "scholar", "lens", "forge", "atlas"] as const;
+const AGENT_ORDER = ["jarvis", "tempo", "scholar", "lens", "forge", "atlas", "sentinel", "me"] as const;
 
 const AGENT_ACCENTS: Record<string, string> = {
+  jarvis: "var(--hud-cyan)",
   tempo: "var(--ops-agent-tempo)",
   scholar: "var(--ops-agent-scholar)",
   lens: "var(--ops-agent-lens)",
   forge: "var(--ops-agent-forge)",
   atlas: "var(--ops-agent-atlas)",
+  sentinel: "var(--ops-agent-sentinel)",
+  me: "var(--ops-fg)",
 };
 
 interface AgentApi {
   id: string;
   name: string;
   status: string;
+  role?: string;
+  personality?: string;
   capabilities?: string[];
+  dashboard?: {
+    primary_widgets?: string[];
+  };
 }
 
 /**
@@ -53,42 +61,58 @@ export function HudMissionControl() {
   const [agentRows, setAgentRows] = useState<AgentCard[]>([]);
   const [activeAgent, setActiveAgent] = useState<string | undefined>(undefined);
 
-  // Fetch agent registry once.
+  // Fetch Hermes crew manifest first; fall back to the legacy registry if the
+  // backend has not been migrated yet.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const toCard = (a: AgentApi): AgentCard => {
+        const widgets = a.dashboard?.primary_widgets ?? [];
+        const tasks = [a.role, ...widgets, ...(a.capabilities ?? [])]
+          .filter((task): task is string => Boolean(task))
+          .slice(0, 4)
+          .map((task) => task.replaceAll("_", " "));
+        return {
+          id: a.id,
+          name: a.name,
+          status: (a.status as AgentCard["status"]) ?? "online",
+          tasks: tasks.length ? tasks : [a.personality ?? "awaiting assignment"],
+          progress: a.status === "offline" ? 0 : 100,
+          accent: AGENT_ACCENTS[a.id] ?? "var(--hud-cyan)",
+        };
+      };
+
+      const offlineCards = (): AgentCard[] =>
+        AGENT_ORDER.map((id) => ({
+          id,
+          name: id,
+          status: "offline" as const,
+          tasks: ["awaiting Hermes manifest…"],
+          progress: 0,
+          accent: AGENT_ACCENTS[id],
+        }));
+
       try {
-        const r = await apiFetch(`${JARVIS_API}/api/agents`);
-        if (!r.ok) return;
-        const j = (await r.json()) as { data?: AgentApi[]; agents?: AgentApi[] };
-        const list = j.data ?? j.agents ?? [];
+        let r = await apiFetch(`${JARVIS_API}/api/hermes/agents`);
+        let j = (r.ok ? await r.json() : {}) as { data?: AgentApi[]; agents?: AgentApi[] };
+        let list = j.data ?? j.agents ?? [];
+
+        if (!list.length) {
+          r = await apiFetch(`${JARVIS_API}/api/agents`);
+          j = (r.ok ? await r.json() : {}) as { data?: AgentApi[]; agents?: AgentApi[] };
+          list = j.data ?? j.agents ?? [];
+        }
+
         if (cancelled) return;
         const ordered = AGENT_ORDER
           .map((id) => list.find((a) => a.id === id))
           .filter(Boolean) as AgentApi[];
-        setAgentRows(
-          ordered.map((a) => ({
-            id: a.id,
-            name: a.name,
-            status: (a.status as AgentCard["status"]) ?? "online",
-            tasks: (a.capabilities ?? []).slice(0, 4),
-            progress: 100,
-            accent: AGENT_ACCENTS[a.id],
-          })),
-        );
+        const cards = ordered.length ? ordered : list;
+        setAgentRows(cards.length ? cards.map(toCard) : offlineCards());
       } catch {
         // offline — show stub cards
         if (cancelled) return;
-        setAgentRows(
-          AGENT_ORDER.map((id) => ({
-            id,
-            name: id,
-            status: "offline" as const,
-            tasks: ["awaiting registry…"],
-            progress: 0,
-            accent: AGENT_ACCENTS[id],
-          })),
-        );
+        setAgentRows(offlineCards());
       }
     })();
     return () => {

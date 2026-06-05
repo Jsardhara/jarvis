@@ -849,3 +849,39 @@ def agency_tick(
         "completed": completed,
         "failed": failed,
     }
+
+
+
+def training_extract_tick(notifier: Notifier) -> dict[str, Any]:
+    """Nightly: refresh training datasets under ``state/training/``.
+
+    Calls :func:`jarvis.training.extract.extract_all` which appends new
+    ShareGPT-format examples from ``chat_turns.jsonl`` (orchestrator
+    persona) and approved/sent ``drafted_replies.jsonl`` (email voice).
+    Idempotent -- re-running over the same source produces no duplicates.
+
+    Pushes a notification only when fresh examples land, so quiet days
+    don't spam the inbox. By the time the local PC arrives, months of
+    personalised data are ready for Unsloth / Axolotl LoRA fine-tunes.
+    """
+    from jarvis.training import extract
+
+    results = extract.extract_all()
+    written_by_source = {r.source: r.written for r in results}
+    total_written = sum(written_by_source.values())
+
+    if total_written > 0:
+        summary = ", ".join(
+            f"{src}: {count}" for src, count in written_by_source.items() if count
+        )
+        notifier.push(
+            "Training data refreshed",
+            f"{total_written} new examples ({summary})",
+            priority=0,
+        )
+
+    return {
+        "total_written": total_written,
+        "by_source": written_by_source,
+        "targets": [str(r.target) for r in results],
+    }

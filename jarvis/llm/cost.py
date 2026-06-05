@@ -1,7 +1,12 @@
 """Cost telemetry — log per-call token usage, roll up daily totals.
 
-MODEL_RATES maps model-id substrings → (in_usd_per_mtok, out_usd_per_mtok).
+MODEL_RATES maps model-id substrings -> (in_usd_per_mtok, out_usd_per_mtok).
 Rates are defaults; override by editing MODEL_RATES before calling log_cost.
+
+Each entry also records the ``backend`` that served the request ("claude",
+"vllm", "ollama", ...). Local backends ship at zero rate today; the field
+exists so the dashboard can break costs out per engine once the operator
+flips a subsystem off Claude.
 """
 from __future__ import annotations
 
@@ -26,13 +31,24 @@ MODEL_RATES: dict[str, tuple[float, float]] = {
 
 _DEFAULT_RATE: tuple[float, float] = (3.0, 15.0)  # fallback to sonnet pricing
 
+# Per-backend rate overrides. Local backends are free; the entry exists so
+# operators can plug in an electricity-cost estimate later if they want a
+# real number. (in_usd_per_mtok, out_usd_per_mtok).
+_BACKEND_OVERRIDES: dict[str, tuple[float, float]] = {
+    "vllm": (0.0, 0.0),
+    "ollama": (0.0, 0.0),
+}
 
-def _rate_for(model: str) -> tuple[float, float]:
-    """Return (in_rate, out_rate) for a model id.
 
-    Checks MODEL_RATES in iteration order; first key that is a substring of
-    ``model`` wins, so more-specific keys should appear first.
+def _rate_for(model: str, backend: str = "claude") -> tuple[float, float]:
+    """Return (in_rate, out_rate) for a model id on a given backend.
+
+    Local backends override to $0 regardless of model id — the model name is
+    still recorded so cost-log filters by model continue to work, but the
+    arithmetic resolves to zero spend.
     """
+    if backend in _BACKEND_OVERRIDES:
+        return _BACKEND_OVERRIDES[backend]
     for key, rate in MODEL_RATES.items():
         if key in model:
             return rate
@@ -48,14 +64,21 @@ def log_cost(
     model: str,
     in_tokens: int,
     out_tokens: int,
+    *,
+    backend: str = "claude",
 ) -> None:
-    """Append one cost entry to state/cost_log.jsonl."""
-    in_rate, out_rate = _rate_for(model)
+    """Append one cost entry to state/cost_log.jsonl.
+
+    ``backend`` is keyword-only so existing positional callers keep working.
+    Defaults to "claude" because every pre-P2 entry was a Claude call.
+    """
+    in_rate, out_rate = _rate_for(model, backend=backend)
     cost_usd = (in_tokens / 1_000_000) * in_rate + (out_tokens / 1_000_000) * out_rate
     entry = {
         "ts": datetime.now(UTC).isoformat(),
         "agent": agent,
         "model": model,
+        "backend": backend,
         "in_tokens": in_tokens,
         "out_tokens": out_tokens,
         "cost_usd": round(cost_usd, 8),
@@ -67,7 +90,7 @@ def log_cost(
 
 
 def daily_rollup(target_date: date | None = None) -> dict:
-    """Sum today's (or ``target_date``'s) costs grouped by agent and model.
+    """Sum today's (or ``target_date``'s) costs grouped by agent, model, and backend.
 
     Returns::
 
@@ -76,8 +99,12 @@ def daily_rollup(target_date: date | None = None) -> dict:
             "total_usd": 1.23,
             "by_agent": {"tempo": 0.4, ...},
             "by_model": {"claude-sonnet-4-6": 0.4, ...},
+            "by_backend": {"claude": 1.20, "vllm": 0.03, ...},
             "call_count": 5,
         }
+
+    Entries written before the backend column shipped are bucketed under
+    "claude" so historical aggregates stay accurate.
     """
     target = target_date or date.today()
     target_str = target.isoformat()
@@ -89,6 +116,7 @@ def daily_rollup(target_date: date | None = None) -> dict:
     total_usd = 0.0
     by_agent: dict[str, float] = {}
     by_model: dict[str, float] = {}
+    by_backend: dict[str, float] = {}
     call_count = 0
 
     for raw in p.read_text(encoding="utf-8").splitlines():
@@ -106,10 +134,12 @@ def daily_rollup(target_date: date | None = None) -> dict:
         cost = float(entry.get("cost_usd", 0.0))
         agent = str(entry.get("agent", "unknown"))
         model = str(entry.get("model", "unknown"))
+        backend = str(entry.get("backend", "claude"))  # default for pre-P2 rows
 
         total_usd += cost
         by_agent[agent] = round(by_agent.get(agent, 0.0) + cost, 8)
         by_model[model] = round(by_model.get(model, 0.0) + cost, 8)
+        by_backend[backend] = round(by_backend.get(backend, 0.0) + cost, 8)
         call_count += 1
 
     return {
@@ -117,6 +147,7 @@ def daily_rollup(target_date: date | None = None) -> dict:
         "total_usd": round(total_usd, 6),
         "by_agent": by_agent,
         "by_model": by_model,
+        "by_backend": by_backend,
         "call_count": call_count,
     }
 
@@ -127,5 +158,6 @@ def _empty_rollup(date_str: str) -> dict:
         "total_usd": 0.0,
         "by_agent": {},
         "by_model": {},
+        "by_backend": {},
         "call_count": 0,
     }

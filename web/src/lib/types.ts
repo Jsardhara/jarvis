@@ -432,6 +432,36 @@ export interface AtlasSnapshot {
   ts: string;
 }
 
+// ─── FastAPI Confirmation (from /api/confirmations) ───────────────────────────
+
+export interface Confirmation {
+  id: string;
+  created_at: string;
+  agent: string;
+  intent: string;
+  request: string;
+  args: Record<string, unknown>;
+  summary: string;
+  status: "pending" | "approved" | "rejected" | "expired";
+  resolved_result?: Record<string, unknown>;
+  risk?: string;
+}
+
+// ─── FastAPI Activity Entry (from /api/activity) ──────────────────────────────
+
+export interface ActivityEntry {
+  ts: string;
+  request_id: string;
+  agent: string;
+  action: string;
+  status: string;
+  duration_ms: number;
+  confidence?: number;
+  needs_confirm?: boolean;
+  error?: string;
+  summary?: string;
+}
+
 // ─── Eisenhower quadrant helpers ──────────────────────────────────────────────
 
 export type EisenhowerQuadrant =

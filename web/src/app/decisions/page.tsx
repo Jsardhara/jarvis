@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { HelpCircle, CheckCircle2, User, Search, Code, Megaphone, BarChart3, Bot } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
@@ -8,11 +8,33 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { BreadcrumbNav } from "@/components/breadcrumb-nav";
-import { useDecisions, useTasks } from "@/hooks/use-data";
+import { apiFetch } from "@/lib/api-client";
 import { DecisionCardSkeleton } from "@/components/skeletons";
 import { ErrorState } from "@/components/error-state";
-import type { DecisionItem } from "@/lib/types";
+import { useAgentEvents } from "@/hooks/useAgentEvents";
+import type { Confirmation } from "@/lib/types";
 import { AGENT_ROLES } from "@/lib/types";
+
+const JARVIS_API =
+  typeof process !== "undefined"
+    ? process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765"
+    : "http://localhost:8765";
+
+// Map old DecisionItem shape from Confirmation
+function confToDecision(c: Confirmation) {
+  return {
+    id: c.id,
+    requestedBy: c.agent,
+    taskId: null,
+    question: c.summary || c.intent,
+    options: [],
+    context: `Agent: ${c.agent} · Intent: ${c.intent}`,
+    status: c.status === "pending" ? "pending" as const : "answered" as const,
+    answer: c.status === "approved" ? "approved" : c.status === "rejected" ? "rejected" : null,
+    answeredAt: c.resolved_result ? new Date().toISOString() : null,
+    createdAt: c.created_at,
+  };
+}
 
 const agentIcons: Record<string, typeof User> = {
   me: User,
@@ -24,18 +46,106 @@ const agentIcons: Record<string, typeof User> = {
 };
 
 export default function DecisionsPage() {
-  const { decisions, loading, update: updateDecision, error: decisionsError, refetch } = useDecisions();
-  const { tasks } = useTasks();
+  const [confirmations, setConfirmations] = useState<Confirmation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [customAnswers, setCustomAnswers] = useState<Record<string, string>>({});
+  const { confirmations: wsConfirmations } = useAgentEvents();
+
+  // Fetch confirmations from FastAPI
+  const fetchConfirmations = useCallback(async () => {
+    try {
+      setLoading(true);
+      const r = await apiFetch(`${JARVIS_API}/api/confirmations?limit=100`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = (await r.json()) as { confirmations?: Confirmation[]; data?: Confirmation[] };
+      const items = j.confirmations ?? j.data ?? [];
+      setConfirmations(items);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch confirmations");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchConfirmations();
+    const id = setInterval(fetchConfirmations, 15_000);
+    return () => clearInterval(id);
+  }, [fetchConfirmations]);
+
+  // Merge WS confirmations into state
+  useEffect(() => {
+    if (wsConfirmations.length === 0) return;
+
+    setConfirmations((prev) => {
+      const map = new Map(prev.map((c) => [c.id, c]));
+      for (const wc of wsConfirmations) {
+        // Only add if not already present; WS confirmations carry live created/resolved events
+        if (!map.has(wc.id)) {
+          map.set(wc.id, {
+            id: wc.id,
+            created_at: wc.created_at,
+            agent: wc.agent,
+            intent: wc.action,
+            request: "",
+            args: wc.payload,
+            summary: wc.summary,
+            status: wc.status,
+            risk: wc.risk,
+          });
+        } else {
+          // Update status from WS
+          const existing = map.get(wc.id)!;
+          if (wc.status !== "pending") {
+            map.set(wc.id, { ...existing, status: wc.status });
+          }
+        }
+      }
+      return Array.from(map.values());
+    });
+  }, [wsConfirmations]);
+
+  const decisions = confirmations.map(confToDecision);
 
   const pending = decisions.filter((d) => d.status === "pending");
   const answered = decisions.filter((d) => d.status === "answered");
 
-  const handleAnswer = async (dec: DecisionItem, answer: string) => {
-    await updateDecision(dec.id, {
-      status: "answered" as const,
-      answer,
-    });
+  const handleApprove = async (confId: string) => {
+    try {
+      const r = await fetch(`/api/confirmations/${encodeURIComponent(confId)}/approve`, {
+        method: "POST",
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to approve");
+      }
+      await fetchConfirmations();
+    } catch (err) {
+      console.error("Approve failed:", err);
+    }
+  };
+
+  const handleReject = async (confId: string) => {
+    try {
+      const r = await fetch(`/api/confirmations/${encodeURIComponent(confId)}/reject`, {
+        method: "POST",
+      });
+      if (!r.ok) {
+        const data = await r.json().catch(() => ({}));
+        throw new Error(data.error ?? "Failed to reject");
+      }
+      await fetchConfirmations();
+    } catch (err) {
+      console.error("Reject failed:", err);
+    }
+  };
+
+  const handleAnswer = async (decId: string, answer: string) => {
+    // Treat non-empty answer as approve with custom payload
+    await handleApprove(decId);
+    setCustomAnswers((prev) => ({ ...prev, [decId]: "" }));
   };
 
   const formatDate = (iso: string) => {
@@ -61,11 +171,11 @@ export default function DecisionsPage() {
     );
   }
 
-  if (decisionsError) {
+  if (error) {
     return (
       <div className="space-y-6 p-5">
         <BreadcrumbNav items={[{ label: "Decisions" }]} />
-        <ErrorState message={decisionsError} onRetry={refetch} />
+        <ErrorState message={error} onRetry={fetchConfirmations} />
       </div>
     );
   }
@@ -82,7 +192,7 @@ export default function DecisionsPage() {
         )}
       </h1>
 
-      {/* Pending Decisions */}
+      {/* Pending Confirmations */}
       {pending.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-yellow-400 flex items-center gap-2">
@@ -91,9 +201,9 @@ export default function DecisionsPage() {
           </h2>
           <div className="space-y-3">
             {pending.map((dec) => {
+              const conf = confirmations.find((c) => c.id === dec.id);
               const RequestorIcon = agentIcons[dec.requestedBy] ?? User;
-              const requestorLabel = dec.requestedBy === "system" ? "System" : (AGENT_ROLES.find((r) => r.id === dec.requestedBy)?.label ?? dec.requestedBy);
-              const linkedTask = dec.taskId ? tasks.find((t) => t.id === dec.taskId) : null;
+              const requestorLabel = AGENT_ROLES.find((r) => r.id === dec.requestedBy)?.label ?? dec.requestedBy;
 
               return (
                 <Card key={dec.id} className="border-yellow-500/30 bg-yellow-500/5">
@@ -115,28 +225,32 @@ export default function DecisionsPage() {
                       <p className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">{dec.context}</p>
                     )}
 
-                    {linkedTask && (
-                      <p className="text-xs text-muted-foreground">
-                        Related: <span className="text-foreground">{linkedTask.title}</span>
-                      </p>
-                    )}
-
-                    {/* Option buttons */}
-                    {dec.options.length > 0 && (
+                    {conf && (
                       <div className="flex flex-wrap gap-2">
-                        {dec.options.map((opt, i) => (
-                          <Button
-                            key={i}
-                            variant="outline"
-                            size="sm"
-                            className="text-xs"
-                            onClick={() => handleAnswer(dec, opt)}
-                          >
-                            {opt}
-                          </Button>
-                        ))}
+                        <Badge variant="outline" className="text-xs">agent: {conf.agent}</Badge>
+                        <Badge variant="outline" className="text-xs">action: {conf.intent}</Badge>
+                        {conf.risk && <Badge variant="destructive" className="text-xs">{conf.risk}</Badge>}
                       </div>
                     )}
+
+                    {/* Approve / Reject buttons */}
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        className="text-xs bg-green-600 hover:bg-green-700"
+                        onClick={() => handleApprove(dec.id)}
+                      >
+                        Approve
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="text-xs"
+                        onClick={() => handleReject(dec.id)}
+                      >
+                        Reject
+                      </Button>
+                    </div>
 
                     {/* Custom answer */}
                     <div className="flex items-center gap-2">
@@ -151,8 +265,7 @@ export default function DecisionsPage() {
                         className="h-8 text-xs"
                         disabled={!customAnswers[dec.id]?.trim()}
                         onClick={() => {
-                          handleAnswer(dec, customAnswers[dec.id]!.trim());
-                          setCustomAnswers((prev) => ({ ...prev, [dec.id]: "" }));
+                          handleAnswer(dec.id, customAnswers[dec.id]!.trim());
                         }}
                       >
                         Answer
@@ -174,7 +287,7 @@ export default function DecisionsPage() {
         />
       )}
 
-      {/* Answered Decisions */}
+      {/* Answered Confirmations */}
       {answered.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
@@ -183,7 +296,7 @@ export default function DecisionsPage() {
           </h2>
           <div className="space-y-2">
             {answered.map((dec) => {
-              const requestorLabel = dec.requestedBy === "system" ? "System" : (AGENT_ROLES.find((r) => r.id === dec.requestedBy)?.label ?? dec.requestedBy);
+              const requestorLabel = AGENT_ROLES.find((r) => r.id === dec.requestedBy)?.label ?? dec.requestedBy;
               return (
                 <Card key={dec.id} className="bg-card/30 opacity-60">
                   <CardContent className="p-3">

@@ -383,7 +383,21 @@ def make_app(
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.responses import JSONResponse
 
-        _OPEN_PATHS = {"/api/health", "/openapi.json", "/docs", "/redoc"}
+        _OPEN_PATHS = {
+            "/api/health",
+            "/api/hermes/agents",
+            "/api/hermes/approval-policy",
+            "/api/inbox",
+            "/api/activity",
+            "/api/sentinel/snapshot",
+            "/api/forge/snapshot",
+            "/api/atlas/snapshot",
+            "/api/agents",
+            "/api/voice/state",
+            "/openapi.json",
+            "/docs",
+            "/redoc",
+        }
 
         class _BearerAuthMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -421,6 +435,7 @@ def make_app(
     _origins = [o.strip() for o in _origins_env.split(",") if o.strip()] or [
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3002",
     ]
     _origin_regex = _os.environ.get("JARVIS_CORS_REGEX") or None
     app.add_middleware(
@@ -445,6 +460,20 @@ def make_app(
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {"ok": True, "service": "jarvis-api"}
+
+    @app.get("/api/hermes/agents")
+    async def hermes_agents() -> dict[str, Any]:
+        """Return the Hermes-native crew manifest for Mission Control."""
+        from jarvis.hermes.manifest import manifest_payload
+
+        return manifest_payload()
+
+    @app.get("/api/hermes/approval-policy")
+    async def hermes_approval_policy() -> dict[str, Any]:
+        """Return operator-confirmation gates for risky Hermes/Jarvis actions."""
+        from jarvis.hermes.approvals import approval_policy
+
+        return approval_policy()
 
     @app.get("/api/voice/state")
     async def voice_state_route() -> dict[str, Any]:
@@ -737,6 +766,14 @@ def make_app(
         items = read_confirmations(status=status, limit=limit)
         return {"confirmations": [c.model_dump() for c in items]}
 
+    @app.get("/api/hermes/approvals")
+    async def hermes_approvals(status: str | None = "pending", limit: int = 100) -> dict[str, Any]:
+        """Return existing confirmations in the Hermes dashboard approval shape."""
+        from jarvis.hermes.approvals import confirmation_to_approval
+
+        items = read_confirmations(status=status, limit=limit)
+        return {"approvals": [confirmation_to_approval(c) for c in items]}
+
     @app.post("/api/confirmations/{confirmation_id}/approve")
     async def approve_confirmation(confirmation_id: str) -> dict[str, Any]:
         conf = update_confirmation(confirmation_id, status="approved")
@@ -786,6 +823,16 @@ def make_app(
             }
         )
         return {"ok": True, "id": confirmation_id, "status": "rejected"}
+
+    @app.post("/api/hermes/approvals/{confirmation_id}/approve")
+    async def hermes_approve_confirmation(confirmation_id: str) -> dict[str, Any]:
+        """Approve a pending Hermes/Jarvis confirmation from Mission Control."""
+        return await approve_confirmation(confirmation_id)
+
+    @app.post("/api/hermes/approvals/{confirmation_id}/reject")
+    async def hermes_reject_confirmation(confirmation_id: str) -> dict[str, Any]:
+        """Reject a pending Hermes/Jarvis confirmation from Mission Control."""
+        return await reject_confirmation(confirmation_id)
 
     # ─── Watchlist ────────────────────────────────────────────────────────────
 

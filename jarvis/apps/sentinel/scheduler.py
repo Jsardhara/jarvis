@@ -44,6 +44,7 @@ from .routines import (
     news_tick,
     proactive_intelligence_tick,
     scholar_tick,
+    training_extract_tick,
 )
 from .voice_context_tick import voice_context_tick
 
@@ -240,6 +241,8 @@ def build_scheduler(scheduler: BlockingScheduler | None = None) -> BlockingSched
                   args=[tempo, notifier], id="draft_replies")
     sched.add_job(proactive_intelligence_tick, "cron", hour=7, minute=30,
                   args=[notifier], id="proactive_intelligence")
+    sched.add_job(training_extract_tick, "cron", hour=3, minute=30,
+                  args=[notifier], id="training_extract")
     sched.add_job(morning_digest, "cron", hour=8, minute=0,
                   args=[reg, notifier], id="morning")
     sched.add_job(evening_digest, "cron", hour=18, minute=0,

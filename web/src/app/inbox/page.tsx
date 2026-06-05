@@ -14,6 +14,7 @@ import { MessageRowSkeleton } from "@/components/skeletons";
 import { ErrorState } from "@/components/error-state";
 import { Tip } from "@/components/ui/tip";
 import { showInfo, showError as showErrorToast } from "@/lib/toast";
+import { apiFetch } from "@/lib/api-client";
 import type { AgentRole, InboxMessage, MessageType } from "@/lib/types";
 import { AGENT_ROLES } from "@/lib/types";
 import {
@@ -124,23 +125,69 @@ function groupIntoThreads(messages: InboxMessage[]): Thread[] {
 
 // ─── Page Component ─────────────────────────────────────────────────────────
 
+const JARVIS_API =
+  typeof process !== "undefined"
+    ? process.env.NEXT_PUBLIC_JARVIS_API ?? "http://localhost:8765"
+    : "http://localhost:8765";
+
 export default function InboxPage() {
-  const { messages: httpMessages, loading, create: createMessage, update: updateMessage, error: inboxError, refetch } = useInbox();
+  const { messages: localMessages, loading: localLoading, create: createMessage, update: updateMessage, error: localError, refetch: refetchLocal } = useInbox();
   const { events: wsEvents } = useInboxStream();
   const { tasks } = useTasks();
 
-  // Merge HTTP backfill + live WS events, deduplicating by id.
+  // Fetch historical inbox from FastAPI backend
+  const [apiMessages, setApiMessages] = useState<InboxMessage[]>([]);
+  const [apiLoading, setApiLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  const fetchApiInbox = useCallback(async () => {
+    try {
+      const r = await apiFetch(`${JARVIS_API}/api/inbox?limit=50`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = (await r.json()) as { events?: InboxMessage[]; data?: InboxMessage[] };
+      const events = j.events ?? j.data ?? [];
+      setApiMessages(events);
+      setApiError(null);
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : "Failed to fetch inbox");
+    } finally {
+      setApiLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchApiInbox();
+    const id = setInterval(fetchApiInbox, 30_000);
+    return () => clearInterval(id);
+  }, [fetchApiInbox]);
+
+  const refetch = useCallback(async () => {
+    await Promise.all([refetchLocal(), fetchApiInbox()]);
+  }, [refetchLocal, fetchApiInbox]);
+
+  // Merge API backfill + local data + live WS events, deduplicating by id.
   const messages: InboxMessage[] = useMemo(() => {
     const seen = new Set<string>();
     const merged: InboxMessage[] = [];
 
-    for (const m of httpMessages) {
-      seen.add(m.id);
-      merged.push(m);
+    // API messages first (authoritative source)
+    for (const m of apiMessages) {
+      if (typeof m.id === "string") {
+        seen.add(m.id);
+        merged.push(m);
+      }
     }
 
+    // Local messages (may have newer local-only messages)
+    for (const m of localMessages) {
+      if (!seen.has(m.id)) {
+        seen.add(m.id);
+        merged.push(m);
+      }
+    }
+
+    // WS live events (real-time additions)
     for (const ev of wsEvents) {
-      // WS inbox.events carry an InboxMessage in ev.payload
       const candidate = ev.payload as Partial<InboxMessage>;
       if (
         typeof candidate.id === "string" &&
@@ -153,7 +200,10 @@ export default function InboxPage() {
     }
 
     return merged;
-  }, [httpMessages, wsEvents]);
+  }, [apiMessages, localMessages, wsEvents]);
+
+  const loading = localLoading || apiLoading;
+  const inboxError = apiError ?? localError;
   const [filterAgent, setFilterAgent] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [expandedThread, setExpandedThread] = useState<string | null>(null);

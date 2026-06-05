@@ -21,6 +21,7 @@ interface AgentCardRowProps {
 const STATUS_PILL: Record<string, { color: string; label: string }> = {
   online:  { color: "var(--ops-ok)",       label: "ONLINE"  },
   active:  { color: "var(--ops-ok)",       label: "ACTIVE"  },
+  paper:   { color: "var(--ops-warn)",     label: "PAPER"   },
   pending: { color: "var(--ops-crit)",     label: "PENDING" },
   offline: { color: "var(--ops-fg-faint)", label: "OFFLINE" },
   error:   { color: "var(--ops-crit)",     label: "ERROR"   },

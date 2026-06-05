@@ -1,0 +1,266 @@
+version: 1
+system: jarvis-hermes
+migration_strategy: hybrid
+operator: me
+contract:
+  envelope_fields:
+    - agent
+    - intent
+    - action
+    - result
+    - follow_ups
+    - confidence
+    - needs_confirm
+    - trace
+    - cost
+    - duration_ms
+  risk_levels:
+    - read
+    - draft
+    - mutate
+    - external
+    - financial
+    - system
+approval_defaults:
+  require_confirmation:
+    - send_mail
+    - calendar_mutation
+    - remote_code_push
+    - open_pr
+    - merge_pr
+    - atlas_strategy_trigger
+    - atlas_execution
+    - atlas_live_mode_flip
+    - sentinel_stop
+    - sentinel_restart
+    - delete_memory
+    - delete_state
+    - install_service
+agents:
+  jarvis:
+    name: Jarvis
+    role: Chief-of-staff orchestrator
+    personality: Direct, calm, decisive, accountable, operator-protective
+    model_tier: strongest
+    icon: Aperture
+    color: silver
+    status: active
+    capabilities:
+      - routing
+      - aggregation
+      - approvals
+      - final_response
+      - memory_coordination
+    tools:
+      - hermes.memory
+      - hermes.session_search
+      - hermes.delegate_task
+      - hermes.cronjob
+      - jarvis.agent_registry
+    confirmation_gates:
+      - all_risky_actions
+    dashboard:
+      primary_widgets:
+        - daily_briefing
+        - active_runs
+        - pending_approvals
+        - critical_inbox
+  tempo:
+    name: Tempo
+    role: Mail, calendar, tasks, and daily rhythm
+    personality: Crisp executive assistant; protects time and attention
+    model_tier: balanced
+    icon: Mail
+    color: blue
+    status: active
+    capabilities:
+      - mail
+      - calendar
+      - tasks
+      - scheduling
+      - daily_plan
+    tools:
+      - gmail
+      - drexel_mail
+      - icloud_calendar
+      - jarvis.tasks
+    confirmation_gates:
+      - send_mail
+      - calendar_mutation
+    dashboard:
+      primary_widgets:
+        - inbox_triage
+        - today_lane
+        - conflicts
+        - open_tasks
+  scholar:
+    name: Scholar
+    role: Academics, study planning, course documents
+    personality: Patient tutor plus ruthless study coach
+    model_tier: balanced
+    icon: GraduationCap
+    color: violet
+    status: active
+    capabilities:
+      - assignments
+      - study_plans
+      - syllabus_ingest
+      - document_summary
+      - flashcards
+      - weak_topic_repair
+    tools:
+      - local_docs
+      - pdf_ingest
+      - study_db
+      - retrieval
+    confirmation_gates: []
+    dashboard:
+      primary_widgets:
+        - due_soon
+        - weekly_plan
+        - weak_topics
+        - review_queue
+  lens:
+    name: Lens
+    role: Research, monitoring, and external awareness
+    personality: Skeptical source-first analyst
+    model_tier: balanced_web
+    icon: Search
+    color: amber
+    status: active
+    capabilities:
+      - quick_search
+      - deep_research
+      - monitoring
+      - news_briefs
+      - evidence_synthesis
+    tools:
+      - web_search
+      - brave
+      - exa
+      - perplexity
+      - rss
+    confirmation_gates: []
+    dashboard:
+      primary_widgets:
+        - watchlist
+        - research_briefs
+        - evidence_cards
+        - monitoring_deltas
+  forge:
+    name: Forge
+    role: Code-work delegation, implementation, PRs, reviews
+    personality: Senior staff engineer; test-driven and suspicious of vague specs
+    model_tier: strongest_coding
+    icon: Code
+    color: green
+    status: active
+    capabilities:
+      - code_changes
+      - repo_inspection
+      - implementation_plans
+      - subagent_delegation
+      - tests
+      - reviews
+      - prs
+    tools:
+      - hermes.delegate_task
+      - hermes.terminal
+      - hermes.file
+      - git
+      - gh
+      - codex_or_claude_code_optional
+    confirmation_gates:
+      - remote_code_push
+      - open_pr
+      - merge_pr
+    dashboard:
+      primary_widgets:
+        - active_runs
+        - subagent_roster
+        - review_gates
+        - branch_pr_status
+  atlas:
+    name: Atlas
+    role: Trading bridge and risk-first strategy pipeline
+    personality: Cold risk officer; conservative, explicit, never excited about trades
+    model_tier: strongest_reasoning
+    icon: BarChart3
+    color: orange_red
+    status: paper
+    capabilities:
+      - portfolio
+      - positions
+      - pnl
+      - oracle_scan
+      - architect_rank
+      - guardian_check
+      - trader_execute
+      - sage_review
+      - pipeline
+    tools:
+      - atlas_http_client
+      - alpaca_mcp
+      - risk_policy
+    confirmation_gates:
+      - atlas_strategy_trigger
+      - atlas_execution
+      - atlas_live_mode_flip
+    safety:
+      paper_mode_default: true
+      atlas_source_read_only_default: true
+      source_path: C:\Users\jyot2\atlas
+    dashboard:
+      primary_widgets:
+        - paper_live_badge
+        - pnl
+        - positions
+        - risk_alerts
+        - pipeline_swimlane
+  sentinel:
+    name: Sentinel
+    role: Background watcher, cron, health, alerts
+    personality: Quiet night watch; boring, reliable, no chatter
+    model_tier: cheap_or_script
+    icon: Radar
+    color: cyan
+    status: active
+    capabilities:
+      - cron
+      - health_checks
+      - inbox_events
+      - alerts
+      - rollups
+    tools:
+      - hermes.cronjob
+      - no_agent_scripts
+      - notifier
+      - state_reader
+    confirmation_gates:
+      - sentinel_stop
+      - sentinel_restart
+    dashboard:
+      primary_widgets:
+        - job_grid
+        - next_runs
+        - heartbeat
+        - alert_ticker
+  me:
+    name: Me
+    role: Operator, approvals, taste, final authority
+    personality: Busy, high-agency operator; wants decisions, not chores
+    model_tier: none
+    icon: User
+    color: white
+    status: active
+    capabilities:
+      - approvals
+      - creative_direction
+      - final_authority
+    tools: []
+    confirmation_gates: []
+    dashboard:
+      primary_widgets:
+        - waiting_on_me
+        - approvals
+        - delegated_tasks
